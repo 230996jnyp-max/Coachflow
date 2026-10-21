@@ -1,0 +1,136 @@
+"use client";
+
+import { format } from "date-fns";
+import { CalendarPlus } from "lucide-react";
+import { useState } from "react";
+import { GymSelect } from "@/components/GymSelect";
+import { Button, Field, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
+import { gymToBooking, isGymComplete } from "@/lib/gyms";
+import { useViewer } from "@/lib/hooks";
+import { atTime, availableCredits, ymd } from "@/lib/scheduling";
+import { createBooking } from "@/lib/store";
+import type { Booking, SessionFocus } from "@/lib/types";
+import { AddToCalendar } from "./CalendarActions";
+import { FOCUS_OPTIONS } from "./BookModal";
+
+export interface TrainerBookInit {
+  start?: Date;
+  clientId?: string;
+}
+
+/** Trainer books a client into any slot — inside or outside published availability. */
+export function TrainerBookModal({ init, onClose }: { init: TrainerBookInit | null; onClose: () => void }) {
+  return init ? <Form key={init.start?.getTime() ?? "new"} init={init} onClose={onClose} /> : null;
+}
+
+function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void }) {
+  const { db, clients } = useViewer();
+  const active = clients.filter((c) => !c.profile.archived);
+  const [clientId, setClientId] = useState(init.clientId ?? active[0]?.user.id ?? "");
+  const [date, setDate] = useState(() => ymd(init.start ?? new Date()));
+  const [time, setTime] = useState(() => (init.start ? format(init.start, "HH:mm") : "09:00"));
+  const profile = db.clients.find((c) => c.id === clientId);
+  const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
+  const [focus, setFocus] = useState<SessionFocus>("Full Body");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [booked, setBooked] = useState<Booking | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const avail = profile ? availableCredits(profile, db.bookings) : 0;
+
+  if (booked) {
+    return (
+      <Modal open onClose={onClose} title="Session booked" footer={<Button onClick={onClose}>Done</Button>}>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-success/30 bg-success/10 p-3 text-center text-sm">
+            <div className="font-bold">{db.users.find((u) => u.id === booked.clientId)?.name ?? "Client"}</div>
+            <div className="text-muted">{format(new Date(booked.start), "EEEE d MMMM · h:mm a")}</div>
+          </div>
+          <AddToCalendar booking={booked} />
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Book a client"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!clientId || busy}
+            onClick={async () => {
+              setError(null);
+              if (!gym) return setError("Please choose a gym or place.");
+              if (!isGymComplete(gym)) return setError("Please type the place name.");
+              const loc = gymToBooking(gym, db.gyms);
+              setBusy(true);
+              const res = await createBooking({
+                clientId,
+                start: atTime(date, time),
+                gymId: loc.gymId,
+                customGym: loc.customGym,
+                focus,
+                notes: notes.trim(),
+                createdBy: "TRAINER",
+              });
+              setBusy(false);
+              if (!res.ok) setError(res.error);
+              else setBooked(res.booking);
+            }}
+          >
+            <CalendarPlus size={16} /> {busy ? "Booking…" : "Book session"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Client">
+          <Select
+            value={clientId}
+            onChange={(e) => {
+              setClientId(e.target.value);
+              const p = db.clients.find((c) => c.id === e.target.value);
+              if (p?.defaultGymId) setGym(p.defaultGymId);
+            }}
+          >
+            {active.map((c) => (
+              <option key={c.user.id} value={c.user.id}>
+                {c.user.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {profile && avail <= 0 && <Notice tone="warn">{`This client has no unreserved credits left (${profile.credits} remaining, all reserved). You can still book — top up their package afterwards.`}</Notice>}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Date">
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label="Start time">
+            <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Gym location">
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" />
+        </Field>
+        <Field label="Session focus">
+          <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
+            {FOCUS_OPTIONS.map((f) => (
+              <option key={f}>{f}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Notes">
+          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+        {error && <Notice tone="error">{error}</Notice>}
+      </div>
+    </Modal>
+  );
+}
