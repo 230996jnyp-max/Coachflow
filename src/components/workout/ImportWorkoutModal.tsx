@@ -13,7 +13,7 @@ import { buildDrafts, draftsToTemplates, draftsToWorkouts, guessFor, isResolved,
 import { addExercise, logCompletedWorkouts, saveTemplate } from "@/lib/store";
 import type { Equipment, Exercise, MeasureType, MuscleGroup } from "@/lib/types";
 import { cn, weightUnit } from "@/lib/utils";
-import { parseWorkoutText } from "@/lib/workoutText";
+import { parseWorkoutText, type ParsedWorkout } from "@/lib/workoutText";
 
 const EXAMPLE = `# Push Day A - 12 Oct 2026
 Barbell Bench Press - 4 x 8 @ 80kg
@@ -45,6 +45,8 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
   const [result, setResult] = useState<{ dest: Dest; count: number; created: number } | null>(null);
   const [pickFor, setPickFor] = useState<{ w: string; e: string } | null>(null);
   const [reading, setReading] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [readInfo, setReadInfo] = useState<{ via: "ai" | "basic"; why?: string } | null>(null);
   const [fileNote, setFileNote] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -54,13 +56,39 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
   const unresolved = all.filter((d) => !isResolved(d));
   const unit_ = weightUnit(unit);
 
-  const preview = () => {
-    const parsed = parseWorkoutText(text, { unit, today: new Date(), isKnown: (n) => isKnownName(n, index) });
+  const preview = async () => {
+    setError(null);
+    setAiBusy(true);
+    const today = format(new Date(), "yyyy-MM-dd");
+    let parsed: ParsedWorkout[] | null = null;
+    let why = "";
+    // 1) AI reader: understands shorthand, supersets, warm-up/drop sets, rest times and maps to the exercise library.
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 58_000);
+      const res = await fetch("/api/import/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, unit, today }),
+        credentials: "same-origin",
+        signal: ctl.signal,
+      });
+      clearTimeout(timer);
+      const data = (await res.json().catch(() => null)) as { workouts?: ParsedWorkout[]; error?: string } | null;
+      if (res.ok && Array.isArray(data?.workouts) && data.workouts.length) parsed = data.workouts;
+      else why = data?.error ?? "The AI couldn't read that.";
+    } catch {
+      why = "Couldn't reach the AI (offline or too slow).";
+    }
+    // 2) Fallback: the built-in reader works instantly and offline.
+    const via: "ai" | "basic" = parsed ? "ai" : "basic";
+    if (!parsed) parsed = parseWorkoutText(text, { unit, today: new Date(), isKnown: (n) => isKnownName(n, index) });
+    setAiBusy(false);
     if (parsed.length === 0) {
       setError("I couldn't find any exercises in that text. Try one exercise per line, like “Lat Pulldown 3x12”.");
       return;
     }
-    setError(null);
+    setReadInfo({ via, why: why || undefined });
     setDrafts(buildDrafts(parsed, index, unit));
     setStep("preview");
   };
@@ -69,8 +97,9 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
     if (!f) return;
     setError(null);
     setFileNote(null);
-    if (f.size > 4 * 1024 * 1024) {
-      setError("That file is too large (4 MB max).");
+    const isImage = f.type.startsWith("image/") || /\.(png|jpe?g|webp|heic|heif)$/i.test(f.name);
+    if (f.size > (isImage ? 25 : 4) * 1024 * 1024) {
+      setError(isImage ? "That photo is too large." : "That file is too large (4 MB max).");
       return;
     }
     // Plain text is read right here; everything else (PDF, Word, Excel, CSV, RTF, HTML…) is read by the server.
@@ -81,10 +110,23 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
     }
     setReading(f.name);
     try {
+      // Photos are shrunk in the browser first (smaller upload, and it converts iPhone formats to JPEG).
+      let body: Blob = f;
+      let sendName = f.name;
+      if (isImage) {
+        try {
+          body = await shrinkImage(f);
+          sendName = f.name.replace(/\.[^.]+$/, "") + ".jpg";
+        } catch {
+          setError("I couldn't open that picture. Try a JPG or PNG screenshot.");
+          setReading(null);
+          return;
+        }
+      }
       const res = await fetch(`/api/import/extract?brand=${encodeURIComponent(db.settings.brandName || "CoachFlow")}`, {
         method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(f.name) },
-        body: f,
+        headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(sendName) },
+        body,
         credentials: "same-origin",
       });
       const data = (await res.json().catch(() => null)) as { text?: string; kind?: string; pages?: number; error?: string } | null;
@@ -150,8 +192,8 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
               <Button variant="secondary" onClick={onClose}>
                 Cancel
               </Button>
-              <Button disabled={!text.trim()} onClick={preview}>
-                <Sparkles size={16} /> Read my plan
+              <Button disabled={!text.trim() || aiBusy || !!reading} onClick={() => void preview()}>
+                {aiBusy ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />} {aiBusy ? "Reading with AI…" : "Read my plan"}
               </Button>
             </>
           ) : step === "preview" ? (
@@ -171,7 +213,7 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
         {step === "input" && (
           <div className="space-y-4">
             <p className="text-sm text-muted">
-              Paste a plan from Notepad, Notes or WhatsApp, or upload a file (PDF, Word, Excel, CSV or text). Separate several workouts with headings like <span className="font-mono text-xs">#&nbsp;Push Day A</span>. If you write a date (e.g. <span className="font-mono text-xs">12 Oct 2026</span> or <span className="font-mono text-xs">12/10/2026</span>) it is used as the workout date.
+              Paste a plan from Notepad, Notes or WhatsApp, or upload a file or photo. AI reads even messy shorthand like “DB Incline 4x8-10 @ 30kg”. Separate several workouts with headings like <span className="font-mono text-xs">#&nbsp;Push Day A</span>. If you write a date (e.g. <span className="font-mono text-xs">12 Oct 2026</span> or <span className="font-mono text-xs">12/10/2026</span>) it is used as the workout date.
             </p>
             <Textarea
               value={text}
@@ -218,7 +260,7 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
                 <li>Treadmill Incline Walk - 20 mins &nbsp;·&nbsp; Plank 3 x 45s</li>
               </ul>
             </div>
-            <p className="text-xs text-muted">Files: PDF, Word (.docx), Excel (.xlsx), CSV, text, Markdown, RTF and HTML — or drop one onto the box above.</p>
+            <p className="text-xs text-muted">Files: PDF (including scans), photos and screenshots, Word (.docx), Excel (.xlsx), CSV, text, Markdown, RTF and HTML — or drop one onto the box above.</p>
             {fileNote && <Notice tone="success">{fileNote}</Notice>}
             {error && <Notice tone="error">{error}</Notice>}
           </div>
@@ -226,6 +268,11 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
 
         {step === "preview" && (
           <div className="space-y-5">
+            {readInfo?.via === "ai" ? (
+              <Notice tone="success">Read with AI. Please check the details below before saving.</Notice>
+            ) : (
+              readInfo && <Notice tone="info">The basic reader was used{readInfo.why ? ` (${readInfo.why.replace(/[.]$/, "")})` : ""}. Please check the details below.</Notice>
+            )}
             <div>
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Save to</div>
               <div className="grid grid-cols-2 gap-2">
@@ -346,6 +393,22 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
   );
 }
 
+/** Scales a photo down to at most 1800px and re-encodes it as JPEG. */
+async function shrinkImage(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no canvas");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode failed"))), "image/jpeg", 0.85));
+}
+
 /* ---------------- One exercise in the preview ---------------- */
 function ExerciseDraft({
   d,
@@ -394,6 +457,9 @@ function ExerciseDraft({
   };
 
   const field = "h-10 px-2 text-center text-sm";
+  const NEXT_TYPE = { N: "W", W: "D", D: "F", F: "N" } as const;
+  const TYPE_NAME = { N: "Working set", W: "Warm-up set", D: "Drop set", F: "Set to failure" } as const;
+  const TYPE_STYLE = { N: "text-muted", W: "bg-pr/15 text-pr", D: "bg-accent/15 text-accent", F: "bg-danger/15 text-danger" } as const;
 
   return (
     <div className="rounded-xl border border-line bg-field/50 p-3">
@@ -490,8 +556,16 @@ function ExerciseDraft({
       ) : (
         <div className="mt-2 space-y-1.5">
           {d.perSet.map((s, i) => (
-            <div key={i} className="grid grid-cols-[1.5rem_1fr_1fr_auto] items-center gap-2">
-              <span className="text-center text-xs font-semibold text-muted">{i + 1}</span>
+            <div key={i} className="grid grid-cols-[1.75rem_1fr_1fr_auto] items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRow(i, { type: NEXT_TYPE[s.type ?? "N"] })}
+                aria-label={`Set ${i + 1} type: ${TYPE_NAME[s.type ?? "N"]}. Tap to change.`}
+                title={TYPE_NAME[s.type ?? "N"]}
+                className={cn("flex h-8 w-7 items-center justify-center rounded-md text-xs font-bold", TYPE_STYLE[s.type ?? "N"])}
+              >
+                {s.type && s.type !== "N" ? s.type : i + 1}
+              </button>
               {timed ? (
                 <>
                   <Input inputMode="decimal" value={s.duration} onChange={(e) => setRow(i, { duration: e.target.value })} placeholder="min" aria-label={`Set ${i + 1} minutes`} className={field} />

@@ -2,11 +2,12 @@
 
 import { Dumbbell, Eye, EyeOff, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { InstallButton } from "@/components/InstallButton";
 import { Splash } from "@/components/Providers";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Button, Card, Field, Input, Notice } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
+import { IDLE_NOTICE, savedUsername, takeIdleNotice } from "@/lib/idle";
 import { login } from "@/lib/store";
 
 export default function LoginPage() {
@@ -17,10 +18,26 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [idleNotice, setIdleNotice] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (ready && user) router.replace(isTrainer ? "/trainer" : "/home");
   }, [ready, user, isTrainer, router]);
+
+  // When the form first appears: fill in this device's last username (never a password), keep the password empty and focused,
+  // and explain an inactivity sign-out. Storage is browser-only, so this runs after mount.
+  useEffect(() => {
+    if (!ready || user) return;
+    Promise.resolve().then(() => {
+      const saved = savedUsername();
+      if (saved) {
+        setUsername(saved);
+        passwordRef.current?.focus();
+      }
+      if (takeIdleNotice()) setIdleNotice(true);
+    });
+  }, [ready, user]);
 
   if (!ready || user) return <Splash />;
 
@@ -41,6 +58,12 @@ export default function LoginPage() {
           <h1 className="text-3xl font-bold tracking-tight">{db.settings.brandName}</h1>
           <p className="mt-1 text-sm text-muted">Train. Track. Book. Your coaching, in your pocket.</p>
         </div>
+
+        {idleNotice && (
+          <div className="mb-4">
+            <Notice tone="warn">{IDLE_NOTICE}</Notice>
+          </div>
+        )}
 
         <Card className="p-5">
           <form
@@ -65,6 +88,7 @@ export default function LoginPage() {
             <Field label="Password">
               <div className="relative">
                 <Input
+                  ref={passwordRef}
                   type={show ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

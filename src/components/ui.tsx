@@ -153,7 +153,7 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
   );
 }
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }) {
   return <input {...props} className={cn(fieldBase, "h-11", className)} />;
 }
 

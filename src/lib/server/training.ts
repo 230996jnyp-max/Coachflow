@@ -197,6 +197,14 @@ function openExercise(row: CustomExerciseRow): Exercise | null {
 }
 const present = <T>(v: T | null): v is T => v !== null;
 
+/** Custom exercises `me` can see (their own, their coach's, or their clients'), without loading any workouts. */
+export async function customExercisesFor(me: UserRow): Promise<Exercise[]> {
+  const d = await db();
+  const owners = me.role === "CLIENT" ? [me.id, ...(me.coachId ? [me.coachId] : [])] : await writableClientIds(me);
+  const rows = await d.select().from(customExercises).where(inArray(customExercises.ownerId, owners));
+  return rows.map(openExercise).filter(present);
+}
+
 /* ---------------- Reads ---------------- */
 export interface TrainingPayload {
   workouts: Workout[];

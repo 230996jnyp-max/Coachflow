@@ -1,0 +1,281 @@
+import "server-only";
+import { buildIndex, matchExercise } from "../exerciseMatch";
+import type { ParsedExercise, ParsedSet, ParsedWorkout } from "../workoutText";
+import { HttpError } from "./http";
+
+/*
+ * AI workout reading via Groq's OpenAI-compatible API (key: GROQ_API_KEY, server only).
+ *  - gpt-oss-120b turns messy notes into structured workouts mapped onto the exercise library.
+ *  - qwen3.8-27b (vision) transcribes photos / scanned pages into text first.
+ * Everything the model returns is re-validated field by field; if anything fails the caller falls back to the local parser.
+ */
+
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+export const TEXT_MODEL = "openai/gpt-oss-120b";
+export const VISION_MODEL = "qwen/qwen3.8-27b";
+const KG_PER_LB = 0.45359237;
+
+export const aiConfigured = () => !!process.env.GROQ_API_KEY;
+
+interface ChatBody {
+  model: string;
+  messages: unknown[];
+  [k: string]: unknown;
+}
+
+async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new HttpError(503, "AI reading isn't set up.");
+  const send = () =>
+    fetch(GROQ_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  let res: Response;
+  try {
+    res = await send();
+    // A short rate-limit pause is worth waiting out once.
+    const wait = res.status === 429 ? Number(res.headers.get("retry-after")) : 0;
+    if (res.status === 429 && wait > 0 && wait <= 12) {
+      await new Promise((r) => setTimeout(r, wait * 1000 + 250));
+      res = await send();
+    }
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    throw new HttpError(timedOut ? 504 : 503, timedOut ? "The AI took too long to answer." : "Couldn't reach the AI service.");
+  }
+  if (!res.ok) {
+    // Never forward provider details (they can include account information).
+    console.error("Groq error", res.status, (await res.text().catch(() => "")).slice(0, 300));
+    throw new HttpError(503, res.status === 429 ? "The AI is busy right now. Try again in a minute." : "The AI service is unavailable right now.");
+  }
+  const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string } }[] } | null;
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new HttpError(503, "The AI returned an empty answer.");
+  return content;
+}
+
+/* ---------------- Photos and scans -> text ---------------- */
+const DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/;
+export const MAX_IMAGE_DATA_URL = 3_800_000;
+
+export async function transcribeImages(images: string[]): Promise<string> {
+  const pages: string[] = [];
+  for (const url of images.slice(0, 4)) {
+    if (!DATA_URL.test(url) || url.length > MAX_IMAGE_DATA_URL) throw new HttpError(415, "That image is too large or in an unsupported format. Use a JPG or PNG under about 3 MB.");
+    const text = await groq(
+      {
+        model: VISION_MODEL,
+        temperature: 0,
+        max_completion_tokens: 4000,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "This is a photo or scan of a workout plan or training log. Transcribe ALL the text exactly as written, line by line, keeping the original order, numbers, units, abbreviations and any dates. " +
+                  "If it is a table, write each row on one line with columns separated by ' | ' and keep the header row. " +
+                  "Do not summarise, correct or add anything. Output only the transcription.",
+              },
+              { type: "image_url", image_url: { url } },
+            ],
+          },
+        ],
+      },
+      60_000,
+    );
+    pages.push(text.trim());
+  }
+  return pages.filter(Boolean).join("\n\n");
+}
+
+/* ---------------- Text -> structured workouts ---------------- */
+export interface LibraryEntry {
+  id: string;
+  name: string;
+}
+
+export interface AiReadInput {
+  text: string;
+  unit: "metric" | "imperial";
+  today: string;
+  library: LibraryEntry[];
+}
+
+const SYSTEM = `You are an expert strength & conditioning coach's assistant. You read a personal trainer's raw workout notes (typed, pasted from WhatsApp/Notes, or transcribed from a photo) and convert them into structured JSON. The notes are often messy, use shorthand, and mix several days.
+
+Return ONLY one JSON object, no commentary, with this shape:
+{"workouts":[{
+  "title": string,                      // e.g. "Push Day A"; "" if none is written
+  "date": "YYYY-MM-DD" | null,          // ONLY if a date is actually written for this workout
+  "notes": string,                      // workout-level notes, "" if none
+  "exercises":[{
+    "name": string,                     // the exercise exactly as the coach wrote it
+    "libraryIndex": integer | null,     // index of the closest exercise in the LIBRARY list, or null if nothing fits
+    "confidence": "high" | "medium" | "low",
+    "superset": string | null,          // same label (e.g. "A") on exercises performed as a superset / giant set / circuit
+    "notes": string,                    // rest times, tempo, cues, "each side", "slow negatives"... "" if none
+    "repMin": integer | null, "repMax": integer | null,   // when a rep RANGE is written (8-10 -> 8 and 10)
+    "sets":[{
+      "type": "N" | "W" | "D" | "F",    // N working, W warm-up, D drop set, F set taken to failure
+      "reps": integer | null,           // for a rep range use the UPPER number; null for AMRAP / unknown
+      "weight": number | null, "unit": "kg" | "lb" | null,   // load as written; unit null if not written
+      "durationSec": integer | null, "distanceKm": number | null,
+      "rpe": number | null
+    }]
+  }]
+}]}
+
+Rules:
+- Expand sets individually: "4x8-10 @ 30kg" = four set objects, each reps 10, weight 30, unit "kg", with repMin 8 and repMax 10 on the exercise. "3x10" = three sets of 10 with weight null.
+- Pyramids / different loads per set ("60x10, 70x8, 80x6", "10@60, 8@70") = one set object per entry. Weight written before "x" is the load; "x" followed by a number is reps.
+- Warm-up sets ("2 warm up sets", "WU 40x10") are type "W" and come before the working sets. "Drop set" -> "D". "to failure" / "AMRAP" -> type "F" (reps null if unknown). Do not invent sets that are not implied.
+- Cardio and timed work ("Treadmill 20 mins", "5km run in 28:30", "plank 3x45s", "bike 10 x 30s on / 30s off"): put time in durationSec and distance in distanceKm (convert miles to km); a repeated hold is one set object per round.
+- Rest times ("rest 90s", "2 min rest"), tempo ("3-1-1"), RIR, cues and side notes go in the exercise "notes" as short text, e.g. "Rest 90s; tempo 3-1-1".
+- NOTHING written on an exercise line may be lost: anything the fields above cannot hold (incline / speed / resistance level, "per leg" / "each side", grip, interval structure such as "30s on / 30s off", "slow negatives", brand/machine names) MUST be kept in "notes".
+- Supersets / circuits ("SS:", "A1/A2", "superset", "+" between exercises): give the grouped exercises the same "superset" label and keep their written order.
+- Several days or workouts ("Day 1/Day 2", "Push / Pull", headings, dates) = separate workouts. If nothing separates them, return one workout.
+- Abbreviations: DB = dumbbell, BB = barbell, KB = kettlebell, BW = bodyweight, OHP = overhead press, RDL = Romanian deadlift, SLDL = stiff-leg deadlift, BP = bench press, DL = deadlift, SQ = squat, CGBP = close-grip bench press, GHR = glute-ham raise, T-bar, "pulldown", "pull-ups/chin-ups" etc. If no equipment is written, prefer the barbell version for compound barbell lifts and the most common version otherwise.
+- Ambiguous names mean the most common gym movement: "curls" = biceps curls (NOT leg curls unless "leg", "hamstring" or "lying/seated leg" is written), "extensions" = triceps extensions unless "leg" or "back" is written, "raises" = the deltoid raise unless "calf", "leg" or "hip" is written, "rows" = back rows, "press" with no other word = barbell bench press only if the day is push/chest, otherwise overhead press. When a name is still ambiguous, lower the confidence to "medium".
+- libraryIndex must come from the LIBRARY list below. Pick the closest real movement; use null (never guess) when nothing fits. "high" = exact movement and equipment, "medium" = same movement but equipment/variation uncertain, "low" = a guess.
+- Dates: only when written. Read day-first (12/10 = 12 October). With no year use the nearest one to TODAY.
+- Weights with no unit: leave "unit" null. Never convert units yourself.
+- Do not output anything that is not in the notes. If a line is not an exercise (greeting, chatter), ignore it.`;
+
+const num = (v: unknown, min: number, max: number): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
+const int = (v: unknown, min: number, max: number): number | undefined => {
+  const n = num(v, min, max);
+  return n === undefined ? undefined : Math.round(n);
+};
+const txt = (v: unknown, max: number): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+
+function isRealDate(s: unknown): s is string {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d && y >= 2000 && y <= 2100;
+}
+
+function jsonFrom(raw: string): unknown {
+  const t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  return JSON.parse(start >= 0 && end > start ? t.slice(start, end + 1) : t);
+}
+
+const SET_TYPES = new Set(["N", "W", "D", "F"]);
+
+export function sanitizeAiWorkouts(raw: unknown, library: LibraryEntry[], unit: "metric" | "imperial"): ParsedWorkout[] {
+  const root = raw as { workouts?: unknown };
+  if (!root || !Array.isArray(root.workouts)) throw new HttpError(502, "The AI answer wasn't in the expected format.");
+  const out: ParsedWorkout[] = [];
+  for (const w of root.workouts.slice(0, 14)) {
+    const wk = w as Record<string, unknown>;
+    if (!wk || !Array.isArray(wk.exercises)) continue;
+    const exercises: ParsedExercise[] = [];
+    for (const e of wk.exercises.slice(0, 60)) {
+      const ex = e as Record<string, unknown>;
+      const name = txt(ex?.name, 120);
+      if (!name) continue;
+      const sets: ParsedSet[] = [];
+      for (const s of (Array.isArray(ex.sets) ? ex.sets : []).slice(0, 40)) {
+        const st = s as Record<string, unknown>;
+        const set: ParsedSet = {};
+        const type = typeof st.type === "string" && SET_TYPES.has(st.type) ? (st.type as ParsedSet["type"]) : "N";
+        if (type !== "N") set.type = type;
+        const reps = int(st.reps, 1, 1000);
+        const weight = num(st.weight, 0.01, 2000);
+        const dur = int(st.durationSec, 1, 172800);
+        const dist = num(st.distanceKm, 0.001, 5000);
+        const rpe = num(st.rpe, 1, 10);
+        if (reps !== undefined) set.reps = reps;
+        if (weight !== undefined) {
+          const lb = st.unit === "lb" || (st.unit !== "kg" && unit === "imperial");
+          set.weightKg = Math.round((lb ? weight * KG_PER_LB : weight) * 100) / 100;
+        }
+        if (dur !== undefined) set.durationSec = dur;
+        if (dist !== undefined) set.distanceKm = Math.round(dist * 1000) / 1000;
+        if (rpe !== undefined) set.rpe = rpe;
+        sets.push(set);
+      }
+      const repMin = int(ex.repMin, 1, 1000);
+      const repMax = int(ex.repMax, 1, 1000);
+      const idx = int(ex.libraryIndex, 0, library.length - 1);
+      const conf = ex.confidence === "high" || ex.confidence === "medium" ? ex.confidence : "low";
+      const superset = txt(ex.superset, 12);
+      const notes = [txt(ex.notes, 300), superset ? `Superset ${superset}` : ""].filter(Boolean).join("; ");
+      const reps = sets.map((s) => s.reps).filter((n): n is number => n !== undefined);
+      const parsed: ParsedExercise = {
+        raw: name,
+        sets: sets.length ? sets : [{ reps: 10 }, { reps: 10 }, { reps: 10 }],
+        repMin: repMin ?? (reps.length ? Math.min(...reps) : sets.length ? undefined : 8),
+        repMax: repMax ?? (reps.length ? Math.max(...reps) : sets.length ? undefined : 12),
+        notes,
+        timed: sets.some((s) => s.durationSec || s.distanceKm),
+        noSets: sets.length === 0,
+      };
+      if (idx !== undefined && conf !== "low") {
+        parsed.libraryId = library[idx].id;
+        parsed.libraryConfidence = conf;
+      }
+      exercises.push(parsed);
+    }
+    if (!exercises.length) continue;
+    out.push({ title: txt(wk.title, 120), date: isRealDate(wk.date) ? wk.date : undefined, notes: txt(wk.notes, 1000), exercises });
+  }
+  if (!out.length) throw new HttpError(422, "The AI couldn't find any exercises in that text.");
+  return out;
+}
+
+/**
+ * The whole library is ~5,000 tokens, which is slow and wastes the provider's per-minute limit. Instead each line of the
+ * notes is matched locally and only the likely candidates (plus a few extra per line) are shown to the AI.
+ */
+export function shortlistLibrary(text: string, library: LibraryEntry[], perLine = 8): LibraryEntry[] {
+  const index = buildIndex(library.map((e) => ({ id: e.id, name: e.name, primary: "Chest", secondary: [], equipment: "Other", type: "WEIGHT_REPS" })));
+  const byId = new Map(library.map((e) => [e.id, e]));
+  const picked = new Set<string>();
+  for (const line of text.split(/\r?\n/).slice(0, 400)) {
+    for (const part of line.split(/\s\/\s|\s\+\s|&|\bthen\b|;/i)) {
+      const words = part.replace(/[^A-Za-z' -]+/g, " ").replace(/\s+/g, " ").trim();
+      if (words.length < 3) continue;
+      for (const c of matchExercise(words, index).suggestions.slice(0, perLine)) picked.add(c.id);
+    }
+  }
+  const out = [...picked].map((id) => byId.get(id)).filter((e): e is LibraryEntry => !!e);
+  // Tiny or unusual notes: fall back to a broad slice so the AI still has something to choose from.
+  return out.length >= 12 ? out : library.slice(0, 140);
+}
+
+export async function aiReadWorkouts(input: AiReadInput): Promise<ParsedWorkout[]> {
+  const libraryList = input.library.map((e, i) => `${i}|${e.name}`).join("\n");
+  const content = await groq(
+    {
+      model: TEXT_MODEL,
+      temperature: 0,
+      reasoning_effort: "medium",
+      max_completion_tokens: 16000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `${SYSTEM}\n\nLIBRARY (index|name):\n${libraryList}` },
+        {
+          role: "user",
+          content: `TODAY: ${input.today}\nWeights with no unit are in ${input.unit === "imperial" ? "lb" : "kg"} (still leave "unit" null).\n\nNOTES:\n"""\n${input.text.slice(0, 20000)}\n"""`,
+        },
+      ],
+    },
+    55_000,
+  );
+  let parsed: unknown;
+  try {
+    parsed = jsonFrom(content);
+  } catch {
+    throw new HttpError(502, "The AI answer couldn't be read.");
+  }
+  return sanitizeAiWorkouts(parsed, input.library, input.unit);
+}

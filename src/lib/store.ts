@@ -7,6 +7,7 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
+import { clearActive, isIdleStale, markActive, rememberUsername, setIdleNotice } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
 import { uid } from "./utils";
 import type {
@@ -24,6 +25,7 @@ import type {
   Role,
   RoutineTemplate,
   SessionFocus,
+  SetType,
   UnitSystem,
   User,
   Workout,
@@ -265,6 +267,9 @@ interface BootstrapData {
 async function establishSession(): Promise<boolean> {
   const r = await api<BootstrapData>("/api/bootstrap");
   if (!r.ok || !r.data?.user) {
+    // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
+    if (isIdleStale()) setIdleNotice();
+    if (isIdleStale()) clearActive();
     setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
     return false;
   }
@@ -435,6 +440,10 @@ export async function login(username: string, password: string): Promise<string 
   const r = await api("/api/auth/login", { body: { username, password } });
   if (!r.ok) return r.error ?? "Login failed.";
   const ok = await establishSession();
+  if (ok) {
+    rememberUsername(username); // only the username is remembered on this device, never the password
+    markActive();
+  }
   return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
 }
 
@@ -444,6 +453,7 @@ export async function logout() {
   await Promise.all([exerciseQ.flush(), templateQ.flush()]);
   await workoutQ.flush();
   flush();
+  clearActive();
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();
@@ -707,7 +717,7 @@ export interface CompletedWorkoutInput {
   exercises: {
     exerciseId: string;
     notes?: string;
-    sets: { reps?: number; weight?: number; durationSec?: number; distanceKm?: number }[];
+    sets: { type?: SetType; reps?: number; weight?: number; durationSec?: number; distanceKm?: number }[];
   }[];
 }
 

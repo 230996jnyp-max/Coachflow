@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { IdleGuard } from "@/components/IdleGuard";
 import { initStore } from "@/lib/store";
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -10,7 +11,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     }
   }, []);
-  return <>{children}</>;
+  return (
+    <>
+      <IdleGuard />
+      {children}
+    </>
+  );
 }
 
 export function Splash() {

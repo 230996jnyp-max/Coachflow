@@ -1,6 +1,7 @@
 import "server-only";
 import { unzipSync, strFromU8 } from "fflate";
-import { getDocumentProxy } from "unpdf";
+import { getDocumentProxy, renderPageAsImage } from "unpdf";
+import { aiConfigured, MAX_IMAGE_DATA_URL, transcribeImages } from "./ai";
 import { HttpError } from "./http";
 import { rowsToLines, type Row } from "../tableText";
 
@@ -251,7 +252,7 @@ interface PdfItem {
   h: number;
 }
 
-async function pdfRows(bytes: Uint8Array, brand: string): Promise<{ rows: Row[]; pages: number }> {
+async function pdfRows(bytes: Uint8Array, brand: string): Promise<{ rows: Row[]; pages: number; chars: number }> {
   let pdf;
   try {
     pdf = await getDocumentProxy(new Uint8Array(bytes));
@@ -310,8 +311,28 @@ async function pdfRows(bytes: Uint8Array, brand: string): Promise<{ rows: Row[];
     }
     rows.push([""]);
   }
-  if (chars < 20) throw unsupported("That PDF has no selectable text (it looks like a scan or a photo). Scanned plans can't be read yet — paste the text instead.");
-  return { rows, pages };
+  return { rows, pages, chars };
+}
+
+/** A PDF with no selectable text (a scan or photo): render its first pages and let the vision AI transcribe them. */
+async function scannedPdfRows(bytes: Uint8Array): Promise<{ rows: Row[]; pages: number }> {
+  if (!aiConfigured()) {
+    throw unsupported("That PDF has no selectable text (it looks like a scan or a photo), and AI reading isn't set up. Paste the text instead.");
+  }
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const pages = Math.min(pdf.numPages, 4);
+  const images: string[] = [];
+  try {
+    for (let p = 1; p <= pages; p++) {
+      let url = await renderPageAsImage(pdf, p, { canvasImport: () => import("@napi-rs/canvas"), scale: 1.6, toDataURL: true });
+      if (url.length > MAX_IMAGE_DATA_URL) url = await renderPageAsImage(pdf, p, { canvasImport: () => import("@napi-rs/canvas"), scale: 1, toDataURL: true });
+      images.push(url);
+    }
+  } catch (e) {
+    console.error("Could not render PDF pages", e);
+    throw unsupported("I couldn't read the pages of that scanned PDF. Try uploading a photo or screenshot of the plan instead.");
+  }
+  return { rows: textToRows(await transcribeImages(images)), pages };
 }
 
 /* ---------------- Entry point ---------------- */
@@ -330,8 +351,10 @@ export async function extractFile(name: string, bytes: Uint8Array, brand: string
   const head = String.fromCharCode(...bytes.subarray(0, 8));
 
   if (head.startsWith("%PDF") || e === "pdf") {
-    const { rows, pages } = await pdfRows(bytes, brand);
-    return finish(rows, "PDF", pages);
+    const { rows, pages, chars } = await pdfRows(bytes, brand);
+    if (chars >= 20) return finish(rows, "PDF", pages);
+    const scan = await scannedPdfRows(bytes);
+    return finish(scan.rows, "Scanned PDF (read by AI)", scan.pages);
   }
 
   if (head.startsWith("PK") || ["docx", "xlsx", "xlsm", "odt", "ods", "pptx"].includes(e)) {
@@ -360,7 +383,12 @@ export async function extractFile(name: string, bytes: Uint8Array, brand: string
 
   if (head.startsWith("ÐÏ\u0011à")) throw unsupported("Old Word/Excel formats (.doc / .xls) can't be read. Save the file as .docx / .xlsx or PDF and try again.");
   if (/^(\x89PNG|\xff\xd8\xff|GIF8|RIFF)/.test(head) || ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tiff"].includes(e)) {
-    throw unsupported("Photos and screenshots can't be read yet. Paste the text instead, or use a PDF/Word/Excel/text file.");
+    const mime = head.startsWith("\x89PNG") ? "png" : head.startsWith("\xff\xd8\xff") ? "jpeg" : head.startsWith("RIFF") ? "webp" : "";
+    if (!mime) throw unsupported("That picture format isn't supported. Use a JPG, PNG or WebP photo or screenshot.");
+    if (!aiConfigured()) throw unsupported("Photos can only be read when AI reading is set up. Paste the text instead.");
+    const url = `data:image/${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+    if (url.length > MAX_IMAGE_DATA_URL) throw unsupported("That photo is too large. Try a smaller screenshot or photo (under about 2.5 MB).");
+    return finish(textToRows(await transcribeImages([url])), "Photo (read by AI)");
   }
   if (looksBinary(bytes)) throw unsupported("I can't read that kind of file. Try PDF, Word (.docx), Excel (.xlsx), CSV, text, RTF or HTML.");
 

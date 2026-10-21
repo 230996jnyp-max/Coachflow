@@ -11,6 +11,8 @@ import { fromKg, round, toKg, uid } from "./utils";
  */
 
 export interface DraftSet {
+  /** N working (default), W warm-up, D drop set, F to failure. */
+  type?: "N" | "W" | "D" | "F";
   reps: string;
   weight: string;
   duration: string; // minutes
@@ -47,10 +49,11 @@ export interface DraftWorkout {
 }
 
 const txt = (n: number | undefined, digits = 2) => (n === undefined || n === 0 ? "" : String(round(n, digits)));
-const sig = (s: ParsedSet) => `${s.reps ?? ""}|${s.weightKg ?? ""}|${s.durationSec ?? ""}|${s.distanceKm ?? ""}`;
+const sig = (s: ParsedSet) => `${s.type ?? "N"}|${s.reps ?? ""}|${s.weightKg ?? ""}|${s.durationSec ?? ""}|${s.distanceKm ?? ""}`;
 
 function toDraftSet(s: ParsedSet, unit: UnitSystem): DraftSet {
   return {
+    type: s.type ?? "N",
     reps: s.reps ? String(s.reps) : "",
     weight: s.weightKg ? txt(fromKg(s.weightKg, unit), 1) : "",
     duration: s.durationSec ? txt(s.durationSec / 60, 2) : "",
@@ -67,9 +70,10 @@ export function draftExercise(p: ParsedExercise, index: MatchIndex, unit: UnitSy
   return {
     key: uid("dx"),
     raw: p.raw,
-    exerciseId: m.best?.id ?? null,
+    // The AI reader may already have chosen the library exercise; otherwise the local matcher decides.
+    exerciseId: p.libraryId ?? m.best?.id ?? null,
     create: null,
-    status: m.status,
+    status: p.libraryId ? (p.libraryConfidence === "high" ? "matched" : "check") : m.status,
     suggestions: m.suggestions,
     timedHint: p.timed,
     noSets: p.noSets,
@@ -151,7 +155,10 @@ export function draftsToTemplates(drafts: DraftWorkout[], resolve: Resolver, uni
           const dist = n(d.distance);
           if (dist) te.distanceKm = dist;
         } else {
-          const rows = d.perSet;
+          // Warm-up sets are not part of the routine's set count; they are mentioned in the notes instead.
+          const rows = d.perSet.filter((s) => s.type !== "W");
+          const warm = d.perSet.length - rows.length;
+          if (warm > 0) notes.push(`${warm} warm-up set${warm === 1 ? "" : "s"} first`);
           te.sets = r.type === "DURATION_DISTANCE" ? 1 : Math.max(1, Math.min(50, rows.length));
           const reps = rows.map((s) => Number(s.reps)).filter((x) => x > 0);
           if (reps.length) [te.repMin, te.repMax] = [Math.min(...reps), Math.max(...reps)];
@@ -198,6 +205,7 @@ export function draftsToWorkouts(drafts: DraftWorkout[], resolve: Resolver, unit
             const duration = n(s.duration);
             const distance = n(s.distance);
             return {
+              ...(s.type && s.type !== "N" ? { type: s.type } : {}),
               ...(reps ? { reps } : {}),
               ...(weight ? { weight: Math.round(toKg(weight, unit) * 100) / 100 } : {}),
               ...(duration ? { durationSec: Math.round(duration * 60) } : {}),

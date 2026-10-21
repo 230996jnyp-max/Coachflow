@@ -11,6 +11,7 @@
     "push:weekly": "node scripts/push-weekly.mjs"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.13",
     "@neondatabase/serverless": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.4.0",
