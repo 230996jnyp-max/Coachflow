@@ -16,7 +16,8 @@ import { ApprovalCard, classLocation, classTime, classTitle, GroupBadge, SpotsPi
 export function useGroupCredits() {
   const { db, user } = useViewer();
   const profile = user ? db.clients.find((c) => c.id === user.id) : undefined;
-  const reserved = db.groups.filter((g) => g.status === "OPEN" && g.mine?.status === "CONFIRMED" && g.mine.role === "MEMBER").length;
+  // Promised to an upcoming class and not yet settled by an attendance mark (the owner of a partner session uses one too).
+  const reserved = db.groups.filter((g) => g.status === "OPEN" && g.mine?.status === "CONFIRMED" && !g.mine.attendance).length;
   const total = profile?.groupClassCredits ?? 0;
   return { total, reserved, available: total - reserved };
 }

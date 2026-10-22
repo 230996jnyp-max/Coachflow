@@ -14,12 +14,14 @@ import { uid } from "./utils";
 import type {
   AppNotification,
   AppSettings,
+  AttendanceStats,
   AvailabilitySlot,
   BodyMetricLog,
   Booking,
   BookingStatus,
   ClientGoal,
   ClientProfile,
+  CreditLogEntry,
   DB,
   Exercise,
   GroupRequest,
@@ -562,13 +564,7 @@ export async function deleteClient(id: string): Promise<string | null> {
   return null;
 }
 
-/** Pushes a client's package balance to the server (fire-and-forget; the coach's device is the source of truth for bookings). */
-function syncCredits(clientId: string) {
-  const c = state.db.clients.find((x) => x.id === clientId);
-  if (!c || state.db.users.find((u) => u.id === state.sessionUserId)?.role !== "TRAINER") return;
-  void api(`/api/clients/${clientId}`, { method: "PATCH", body: { credits: c.credits, packageSize: c.packageSize } });
-}
-
+/** Changes a client's 1-on-1 package by `delta` on the server (relative, so attendance changes made meanwhile are never overwritten). */
 export function adjustCredits(id: string, delta: number, setPackage = false) {
   mutate((db) => ({
     ...db,
@@ -582,7 +578,18 @@ export function adjustCredits(id: string, delta: number, setPackage = false) {
         : c,
     ),
   }));
-  syncCredits(id);
+  if (state.db.users.find((u) => u.id === state.sessionUserId)?.role !== "TRAINER") return;
+  void api(`/api/clients/${id}`, { method: "PATCH", body: { creditsDelta: delta, ...(setPackage ? { setPackageToBalance: true } : {}) } }).then((r) => {
+    if (r.ok) void refreshAccounts();
+  });
+}
+
+/** Same for the group class credits. Returns an error message, or null. */
+export async function adjustGroupCreditsBy(id: string, delta: number): Promise<string | null> {
+  const r = await api(`/api/clients/${id}`, { method: "PATCH", body: { groupCreditsDelta: delta } });
+  if (!r.ok) return r.error ?? "Could not change the credits.";
+  await refreshAccounts();
+  return null;
 }
 
 /* ---------------- Exercises & templates ---------------- */
@@ -1093,16 +1100,6 @@ export async function startClassWorkout(id: string, input: { templateId?: string
   if (!r.error) await refreshTraining(true);
   return r.error;
 }
-export async function completeClass(id: string, attended: string[]): Promise<string | null> {
-  const r = await groupCall(`/api/groups/${id}`, { action: "complete", attended });
-  if (!r.error) void refreshAccounts();
-  return r.error;
-}
-export async function reopenClass(id: string): Promise<string | null> {
-  const r = await groupCall(`/api/groups/${id}`, { action: "reopen" });
-  if (!r.error) void refreshAccounts();
-  return r.error;
-}
 export async function markNotificationsRead(ids: string[] | "all"): Promise<void> {
   await groupCall("/api/notifications", { ids }, "POST");
 }
@@ -1140,6 +1137,38 @@ export async function coachEditSet(workoutId: string, entryId: string, setId: st
   const saved = r.data.workout;
   apply(() => saved);
   return null;
+}
+
+/* ---------------- Attendance ---------------- */
+export type AttendanceTarget = { kind: "BOOKING" | "GROUP"; id: string };
+export interface MarkChange {
+  clientId: string;
+  mark: "PRESENT" | "NO_SHOW" | "CLEAR";
+  /** No-show only: take the credit anyway. */
+  deduct?: boolean;
+}
+
+async function afterAttendance() {
+  await Promise.all([refreshSchedule(), refreshGroups(), refreshAccounts()]);
+}
+
+/** Marks people present / no-show (and optionally finalises the session). Credits are settled on the server. */
+export async function saveAttendance(t: AttendanceTarget, marks: MarkChange[], finalize = false): Promise<string | null> {
+  const r = await api("/api/attendance", { body: { kind: t.kind, id: t.id, marks, finalize } });
+  await afterAttendance();
+  return r.ok ? null : (r.error ?? "Could not save attendance.");
+}
+
+export async function reopenSession(t: AttendanceTarget): Promise<string | null> {
+  const r = await api("/api/attendance", { body: { kind: t.kind, id: t.id, reopen: true } });
+  await afterAttendance();
+  return r.ok ? null : (r.error ?? "Could not reopen the session.");
+}
+
+/** Attendance rate and credit log for one client (the coach picks the client; a client always gets their own). */
+export async function fetchCreditLog(clientId?: string): Promise<{ stats: AttendanceStats; log: CreditLogEntry[] } | null> {
+  const r = await api<{ stats: AttendanceStats; log: CreditLogEntry[] }>(`/api/credits/log${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`);
+  return r.ok && r.data ? r.data : null;
 }
 
 /* ---------------- Settings ---------------- */

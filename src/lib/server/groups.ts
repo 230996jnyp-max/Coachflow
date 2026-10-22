@@ -9,8 +9,9 @@ import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
-import { bookings, groupMembers, groupRequests, groupSessions, notifications, templates, users, workouts, type GroupMemberRow, type GroupRequestRow, type GroupRow, type UserRow } from "./schema";
-import { adjustGroupCredits, rulesFor, toBooking } from "./schedule";
+import { attendance, bookings, groupMembers, groupRequests, groupSessions, notifications, templates, users, workouts, type AttendanceRow, type GroupMemberRow, type GroupRequestRow, type GroupRow, type UserRow } from "./schema";
+import { attendanceFor, attendanceInfo, attKey, logCredit, setMark } from "./credits";
+import { rulesFor, toBooking } from "./schedule";
 import { customExercisesFor, insertWorkoutIfAbsent, parseTemplateExercise, recentDoneWorkouts } from "./training";
 
 /*
@@ -138,12 +139,20 @@ export async function markNotificationsRead(userId: string, ids: string[] | "all
 /** Group credits promised to classes that have not been completed yet. */
 export async function reservedGroupCount(clientId: string): Promise<number> {
   const d = await db();
-  const [r] = await d
-    .select({ n: sql<number>`count(*)::int` })
+  const rows = await d
+    .select({ gid: groupMembers.groupId, role: groupMembers.role, bookingId: groupSessions.bookingId })
     .from(groupMembers)
     .innerJoin(groupSessions, eq(groupSessions.id, groupMembers.groupId))
-    .where(and(eq(groupMembers.clientId, clientId), eq(groupMembers.status, "CONFIRMED"), eq(groupMembers.role, "MEMBER"), eq(groupSessions.status, "OPEN")));
-  return r?.n ?? 0;
+    .where(and(eq(groupMembers.clientId, clientId), eq(groupMembers.status, "CONFIRMED"), eq(groupSessions.status, "OPEN")));
+  if (!rows.length) return 0;
+  // A person who already has an attendance mark has settled their credit, so it is no longer "reserved".
+  const marked = new Set((await d.select({ k: attendance.kind, s: attendance.sessionId }).from(attendance).where(eq(attendance.clientId, clientId))).map((r) => `${r.k}:${r.s}`));
+  return rows.filter((r) => !marked.has(r.role === "OWNER" ? `BOOKING:${r.bookingId}` : `GROUP:${r.gid}`)).length;
+}
+
+/** Credit log line for a group credit being reserved (the balance itself only changes when attendance is marked). */
+export async function logReserved(clientId: string, coachId: string, label: string): Promise<void> {
+  await logCredit({ clientId, coachId, pool: "GROUP", kind: "RESERVED", delta: 0, sessionType: "Group Class", label });
 }
 
 export async function groupCreditsAvailable(client: UserRow): Promise<number> {
@@ -164,7 +173,8 @@ async function membersOf(groupIds: string[]): Promise<Map<string, GroupMemberRow
   return out;
 }
 
-function shape(row: GroupRow, members: GroupMemberRow[], me: UserRow, templateNames: Map<string, string>): GroupSession {
+function shape(row: GroupRow, members: GroupMemberRow[], me: UserRow, templateNames: Map<string, string>, att: Map<string, AttendanceRow>): GroupSession {
+  const markOf = (m: GroupMemberRow) => attendanceInfo(att.get(m.role === "OWNER" && row.bookingId ? attKey("BOOKING", row.bookingId, m.clientId) : attKey("GROUP", row.id, m.clientId)));
   const det = openGroup(row);
   const confirmed = members.filter((m) => m.status === "CONFIRMED" || m.status === "ATTENDED").length;
   const waiting = members.filter((m) => m.status === "WAITLIST");
@@ -192,7 +202,7 @@ function shape(row: GroupRow, members: GroupMemberRow[], me: UserRow, templateNa
     workoutStartedAt: row.workoutStartedAt?.toISOString(),
     workoutTitle: det.workoutTitle,
   };
-  if (own && (own.status === "CONFIRMED" || own.status === "ATTENDED")) g.mine = { status: "CONFIRMED", role: own.role as "OWNER" | "MEMBER" };
+  if (own && (own.status === "CONFIRMED" || own.status === "ATTENDED" || own.status === "ABSENT")) g.mine = { status: "CONFIRMED", role: own.role as "OWNER" | "MEMBER", attendance: markOf(own) };
   else if (own?.status === "WAITLIST") g.mine = { status: "WAITLIST", position: waiting.findIndex((m) => m.clientId === me.id) + 1, role: "MEMBER" };
   if (!isClient) {
     g.members = members.map((m) => ({
@@ -201,6 +211,7 @@ function shape(row: GroupRow, members: GroupMemberRow[], me: UserRow, templateNa
       role: m.role as GroupMember["role"],
       joinedAt: m.joinedAt.toISOString(),
       position: m.status === "WAITLIST" ? waiting.findIndex((w) => w.clientId === m.clientId) + 1 : undefined,
+      attendance: markOf(m),
     }));
   }
   return g;
@@ -239,6 +250,7 @@ export async function loadGroups(me: UserRow): Promise<GroupsPayload> {
   const since = new Date(Date.now() - 120 * 86400000);
   const rows = await d.select().from(groupSessions).where(and(eq(groupSessions.coachId, coachId), gt(groupSessions.endAt, since)));
   const members = await membersOf(rows.map((r) => r.id));
+  const att = new Map([...(await attendanceFor("GROUP", rows.map((r) => r.id))), ...(await attendanceFor("BOOKING", rows.filter((r) => r.bookingId).map((r) => r.bookingId as string)))]);
 
   const tRows = await d.select().from(templates).where(eq(templates.ownerId, coachId));
   const templateNames = new Map<string, string>();
@@ -262,7 +274,7 @@ export async function loadGroups(me: UserRow): Promise<GroupsPayload> {
       if (!mine && !open) continue;
       if (!mine && r.status === "CANCELLED") continue;
     }
-    groups.push(shape(r, list, me, templateNames));
+    groups.push(shape(r, list, me, templateNames, att));
   }
 
   // Join requests: the ones I made, plus (coach / current attendees) the pending ones I must answer.
@@ -341,6 +353,7 @@ export async function promoteWaitlist(group: GroupRow): Promise<void> {
       }
       await d.update(groupMembers).set({ status: "CONFIRMED" }).where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.clientId, m.clientId)));
       await notify([cl.id], "waitlist_promoted", { title: "You're in!", body: `A spot opened up in “${det.title}” and you've been moved off the waitlist. Your spot is confirmed.`, link: `/classes/${group.id}` });
+      await logReserved(cl.id, group.coachId, det.title);
       await ensureWorkoutFor(group, cl.id);
       promoted = true;
       break;
@@ -468,6 +481,7 @@ export async function settleRequest(requestId: string): Promise<GroupRequestRow 
     .values({ groupId: g.id, clientId: joiner.id, status: "CONFIRMED", role: "MEMBER" })
     .onConflictDoUpdate({ target: [groupMembers.groupId, groupMembers.clientId], set: { status: "CONFIRMED", role: "MEMBER", joinedAt: new Date() } });
   const done = await close("APPROVED", "You're in!", `Your request was approved — you're now part of the shared session on ${await whenText(g.coachId, g.startAt)}. 1 group class credit will be used when it's completed.`);
+  await logReserved(joiner.id, g.coachId, "Partner session");
   await ensureWorkoutFor(g, joiner.id);
   return done;
 }
@@ -547,7 +561,10 @@ export async function bookSpot(me: UserRow, g: GroupRow): Promise<"CONFIRMED" | 
       return "WAITLIST";
     }
   }
-  if (status === "CONFIRMED") await ensureWorkoutFor(g, me.id);
+  if (status === "CONFIRMED") {
+    await logReserved(me.id, g.coachId, openGroup(g).title);
+    await ensureWorkoutFor(g, me.id);
+  }
   return status;
 }
 
@@ -558,6 +575,8 @@ export async function leaveGroup(g: GroupRow, clientId: string): Promise<void> {
   if (!m || (m.status !== "CONFIRMED" && m.status !== "WAITLIST")) throw badRequest("They aren't in this class.");
   if (m.role === "OWNER") throw badRequest("Cancel the session from your bookings instead.");
   await d.update(groupMembers).set({ status: "CANCELLED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, clientId)));
+  // A credit already taken for this class (marked Present early) goes back.
+  await setMark({ kind: "GROUP", sessionId: g.id, coachId: g.coachId, clientId, pool: "GROUP", mark: "CLEAR", sessionType: "Group Class", label: openGroup(g).title });
   // Their (not yet started) workout copy goes with them.
   await removeUnstartedWorkout(g, clientId);
   const wasConfirmed = m.status === "CONFIRMED";
@@ -580,49 +599,11 @@ export async function cancelGroup(g: GroupRow, reason: string): Promise<void> {
   const members = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), inArray(groupMembers.status, ["CONFIRMED", "WAITLIST"])));
   await d.update(groupSessions).set({ status: "CANCELLED", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
   await d.update(groupRequests).set({ status: "CANCELLED" }).where(and(eq(groupRequests.groupId, g.id), eq(groupRequests.status, "PENDING")));
-  for (const m of members) await removeUnstartedWorkout(g, m.clientId);
+  for (const m of members) {
+    await removeUnstartedWorkout(g, m.clientId);
+    await setMark({ kind: "GROUP", sessionId: g.id, coachId: g.coachId, clientId: m.clientId, pool: "GROUP", mark: "CLEAR", sessionType: "Group Class", label: det.title });
+  }
   await notify(members.filter((m) => m.role !== "OWNER").map((m) => m.clientId), "group_cancelled", { title: "Class cancelled", body: `“${det.title}” on ${await whenText(g.coachId, g.startAt)} was cancelled${reason ? ` — ${reason}` : ""}. No group credit was used.`, link: "/book" });
-}
-
-/** Marks the class done: attendees use one group credit each; the others are marked absent without charge. */
-export async function completeGroup(g: GroupRow, attended: string[] | null): Promise<{ charged: string[] }> {
-  if (g.status !== "OPEN") throw badRequest("This class is already closed.");
-  const d = await db();
-  const members = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "CONFIRMED")));
-  const charged: string[] = [];
-  for (const m of members) {
-    const came = attended === null || attended.includes(m.clientId);
-    if (!came) {
-      await d.update(groupMembers).set({ status: "ABSENT" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, m.clientId)));
-      continue;
-    }
-    await d.update(groupMembers).set({ status: "ATTENDED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, m.clientId)));
-    if (m.role === "MEMBER") {
-      const [cl] = await d.select().from(users).where(eq(users.id, m.clientId)).limit(1);
-      if (cl) {
-        await adjustGroupCredits(cl, -1);
-        charged.push(m.clientId);
-      }
-    }
-  }
-  await d.update(groupMembers).set({ status: "CANCELLED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "WAITLIST")));
-  await d.update(groupSessions).set({ status: "COMPLETED", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
-  return { charged };
-}
-
-/** Undo a completion: credits are given back and the class is open again. */
-export async function reopenGroup(g: GroupRow): Promise<void> {
-  if (g.status !== "COMPLETED") throw badRequest("Only a completed class can be reopened.");
-  const d = await db();
-  const members = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), inArray(groupMembers.status, ["ATTENDED", "ABSENT"])));
-  for (const m of members) {
-    if (m.status === "ATTENDED" && m.role === "MEMBER") {
-      const [cl] = await d.select().from(users).where(eq(users.id, m.clientId)).limit(1);
-      if (cl) await adjustGroupCredits(cl, 1);
-    }
-    await d.update(groupMembers).set({ status: "CONFIRMED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, m.clientId)));
-  }
-  await d.update(groupSessions).set({ status: "OPEN", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
 }
 
 /** The coach pushes the shared workout to every confirmed attendee. */
@@ -678,9 +659,14 @@ export async function shareBooking(me: UserRow, bookingId: string, capacity: num
   if (b.status !== "CONFIRMED" && b.status !== "PENDING") throw badRequest("Only an upcoming session can be opened to partners.");
   if (b.startAt.getTime() < Date.now() + CLOSE_BEFORE_MIN * 60000) throw badRequest("It's too close to the start time to open this session to partners.");
   if (capacity < 2 || capacity > 8) throw badRequest("A shared session can hold between 2 and 8 people.");
+  const [marked] = await d.select({ id: attendance.id }).from(attendance).where(and(eq(attendance.kind, "BOOKING"), eq(attendance.sessionId, bookingId))).limit(1);
+  if (marked) throw badRequest("Attendance has already been marked for this session.");
+  // A partner session uses the owner's group credit instead of a 1-on-1 credit.
+  if ((await groupCreditsAvailable(me)) < 1) throw badRequest("A partner session uses one of your group class credits, and you have none free. Ask your coach to add some.");
   const [existing] = await d.select().from(groupSessions).where(and(eq(groupSessions.bookingId, bookingId), ne(groupSessions.status, "CANCELLED"))).limit(1);
   if (existing) throw conflict("This session is already open to partners.");
   const bk = toBooking(b);
+  await logCredit({ clientId: me.id, coachId: b.coachId, pool: "GROUP", kind: "RESERVED", delta: 0, sessionType: "Group Class", label: "Partner session", note: "Opened to partners — uses a group credit instead of a 1-on-1 credit" });
   return insertGroup({
     coachId: b.coachId,
     kind: "SHARED",
@@ -760,6 +746,7 @@ export async function onBookingCancelled(bookingId: string, previousOwnerId: str
   const g = await sharedFor(bookingId);
   if (!g || g.status !== "OPEN") return;
   const d = await db();
+  await setMark({ kind: "BOOKING", sessionId: bookingId, coachId: g.coachId, clientId: previousOwnerId, pool: "GROUP", mark: "CLEAR", sessionType: "Group Class", label: "Partner session" });
   const joiners = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "CONFIRMED"), eq(groupMembers.role, "MEMBER"))).orderBy(asc(groupMembers.joinedAt));
   await d.update(groupMembers).set({ status: "CANCELLED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, previousOwnerId)));
   await d.update(groupRequests).set({ status: "CANCELLED" }).where(and(eq(groupRequests.groupId, g.id), eq(groupRequests.status, "PENDING")));
@@ -768,38 +755,11 @@ export async function onBookingCancelled(bookingId: string, previousOwnerId: str
     return;
   }
   const heir = joiners[0];
+  // The heir now holds the session as its owner, so any partner mark of theirs is cleared (they are marked as the owner instead).
+  await setMark({ kind: "GROUP", sessionId: g.id, coachId: g.coachId, clientId: heir.clientId, pool: "GROUP", mark: "CLEAR", sessionType: "Group Class", label: "Partner session" });
   await d.update(bookings).set({ clientId: heir.clientId, status: "CONFIRMED", rev: sql`${bookings.rev} + 1` }).where(eq(bookings.id, bookingId));
   await d.update(groupMembers).set({ role: "OWNER" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, heir.clientId)));
   await notify([heir.clientId], "session_transferred", { title: "The session is now yours", body: "The other client cancelled, so the shared session is now your own session. It's still booked — nothing else changes.", link: "/book" });
-}
-
-/** The coach marked the booking completed (or undid it): partners use / get back a group credit. */
-export async function onBookingStatus(bookingId: string, next: string, prevCharged: boolean, nowCharged: boolean): Promise<void> {
-  const g = await sharedFor(bookingId);
-  if (!g) return;
-  const d = await db();
-  if (next === "COMPLETED" && g.status === "OPEN") {
-    const joiners = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "CONFIRMED"), eq(groupMembers.role, "MEMBER")));
-    for (const m of joiners) {
-      const [cl] = await d.select().from(users).where(eq(users.id, m.clientId)).limit(1);
-      if (cl) await adjustGroupCredits(cl, -1);
-      await d.update(groupMembers).set({ status: "ATTENDED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, m.clientId)));
-    }
-    await d.update(groupMembers).set({ status: "ATTENDED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.role, "OWNER"), eq(groupMembers.status, "CONFIRMED")));
-    await d.update(groupSessions).set({ status: "COMPLETED", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
-  } else if (g.status === "COMPLETED" && prevCharged && !nowCharged) {
-    const members = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "ATTENDED")));
-    for (const m of members) {
-      if (m.role === "MEMBER") {
-        const [cl] = await d.select().from(users).where(eq(users.id, m.clientId)).limit(1);
-        if (cl) await adjustGroupCredits(cl, 1);
-      }
-      await d.update(groupMembers).set({ status: "CONFIRMED" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, m.clientId)));
-    }
-    await d.update(groupSessions).set({ status: "OPEN", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
-  } else if (next === "NO_SHOW" && g.status === "OPEN") {
-    await d.update(groupSessions).set({ status: "COMPLETED", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
-  }
 }
 
 /** The booking was moved: keep the shared session on the same time and place, and tell the partners. */

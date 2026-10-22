@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
+import { logCredit } from "@/lib/server/credits";
+import { whenText } from "@/lib/server/groups";
 import { badRequest, conflict, notFound, readJson, route, str } from "@/lib/server/http";
 import { clientCredits, FOCUS, hasConflict, parsePlace, requestLoc, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck, loadSchedule } from "@/lib/server/schedule";
 import { bookings, gyms } from "@/lib/server/schema";
@@ -76,5 +78,6 @@ export const POST = route(async (req) => {
       detailsEnc: sealDetails(id, { notes, customGym: customGym || undefined, gymId, place }),
     })
     .returning();
+  await logCredit({ clientId: client.id, coachId, pool: "SESSION", kind: "RESERVED", delta: 0, sessionType: "1-on-1 PT", label: `1-on-1 session · ${await whenText(coachId, start)}` });
   return NextResponse.json({ booking: toBooking(row) });
 });

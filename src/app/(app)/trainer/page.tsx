@@ -1,9 +1,10 @@
 "use client";
 
 import { addDays, endOfDay, format, isSameDay, parseISO, startOfDay } from "date-fns";
-import { AlertTriangle, Check, ChevronRight, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, UserCheck, UserX, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { PendingAttendance } from "@/components/attendance/PendingAttendance";
 import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
@@ -11,7 +12,7 @@ import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
 import { doneWorkouts, workoutSetCount } from "@/lib/stats";
-import { setBookingStatus, useNow } from "@/lib/store";
+import { saveAttendance, setBookingStatus, useNow } from "@/lib/store";
 import { fmtDurationShort } from "@/lib/utils";
 
 export default function TrainerDashboard() {
@@ -42,6 +43,8 @@ export default function TrainerDashboard() {
         <Stat label="Next 7 days" value={week.length} sub="booked sessions" />
         <Stat label="Pending requests" value={pending.length} tone={pending.length ? "pr" : undefined} />
       </div>
+
+      <PendingAttendance />
 
       {pending.length > 0 && (
         <section>
@@ -92,10 +95,15 @@ export default function TrainerDashboard() {
                       </div>
                     </div>
                   </button>
-                  {b.status === "CONFIRMED" && isPast ? (
-                    <Button size="sm" variant="success" onClick={() => setBookingStatus(b.id, "COMPLETED")}>
-                      <Check size={14} /> Complete
-                    </Button>
+                  {b.status === "CONFIRMED" ? (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button size="sm" variant={b.attendance?.mark === "PRESENT" ? "success" : "secondary"} aria-pressed={b.attendance?.mark === "PRESENT"} onClick={() => saveAttendance({ kind: "BOOKING", id: b.id }, [{ clientId: b.clientId, mark: "PRESENT" }], isPast && !b.sharedGroupId)}>
+                        <UserCheck size={14} /> Present
+                      </Button>
+                      <Button size="sm" variant={b.attendance?.mark === "NO_SHOW" ? "danger" : "secondary"} aria-pressed={b.attendance?.mark === "NO_SHOW"} onClick={() => saveAttendance({ kind: "BOOKING", id: b.id }, [{ clientId: b.clientId, mark: "NO_SHOW", deduct: b.attendance?.deduct }], isPast && !b.sharedGroupId)}>
+                        <UserX size={14} /> No-Show
+                      </Button>
+                    </div>
                   ) : (
                     <StatusBadge status={b.status} />
                   )}

@@ -115,7 +115,8 @@ export function buildDaySlots(
 }
 
 export function reservedCount(bookings: Booking[], clientId: string): number {
-  return bookings.filter((b) => b.clientId === clientId && ACTIVE_UPCOMING.includes(b.status)).length;
+  // A session with an attendance mark has settled its credit; one opened to partners uses a group credit instead.
+  return bookings.filter((b) => b.clientId === clientId && ACTIVE_UPCOMING.includes(b.status) && !b.attendance && !b.sharedGroupId).length;
 }
 
 export function availableCredits(profile: ClientProfile, bookings: Booking[]): number {

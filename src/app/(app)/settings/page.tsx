@@ -1,5 +1,6 @@
 "use client";
 
+import { CreditHistory } from "@/components/attendance/CreditHistory";
 import { Bell, KeyRound, LogOut, Mail, MapPin, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -57,6 +58,7 @@ export default function SettingsPage() {
     <div className="space-y-8">
       <PageHeader title={isTrainer ? "Settings" : "Profile & Settings"} />
       <PasswordBanner />
+      {!isTrainer && <CreditHistory />}
 
       <section>
         <SectionTitle>Account</SectionTitle>

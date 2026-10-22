@@ -6,6 +6,7 @@ import { BookingList } from "@/components/booking/BookingList";
 import { SyncAllButton } from "@/components/booking/CalendarActions";
 import { CalendarFeedButton } from "@/components/booking/CalendarFeed";
 import { ScheduleBoard } from "@/components/booking/ScheduleBoard";
+import { PendingAttendance } from "@/components/attendance/PendingAttendance";
 import { ClassList } from "@/components/groups/ClassList";
 import { PageHeader, Tabs } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -25,6 +26,9 @@ export default function SchedulePage() {
             <SyncAllButton />
           </>
         } />
+      <div className="mb-5 empty:hidden">
+        <PendingAttendance />
+      </div>
       <Tabs
         value={tab}
         onChange={setTab}

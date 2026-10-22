@@ -1,7 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { Check, Clock, MapPin, MessageSquare, Target, UserX, X } from "lucide-react";
+import { Check, Clock, MapPin, MessageSquare, Target, X } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
 import { Avatar, Button, Field, Input, Modal, Notice, Select, Toggle } from "@/components/ui";
@@ -14,6 +14,7 @@ import { atTime, canCancel, travelProblem, ymd } from "@/lib/scheduling";
 import { locOf } from "@/lib/travel";
 import { cancelBookingAs, rescheduleBooking, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
 import Link from "next/link";
+import { RollCallPanel } from "@/components/attendance/Attendance";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
 
@@ -154,24 +155,12 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           </div>
         )}
 
-        {isTrainer && b.status === "CONFIRMED" && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="success" onClick={() => { setBookingStatus(b.id, "COMPLETED"); onClose(); }}>
-              <Check size={16} /> Mark completed
-            </Button>
-            <Button variant="secondary" onClick={() => { setBookingStatus(b.id, "NO_SHOW"); onClose(); }}>
-              <UserX size={16} /> No-show
-            </Button>
-          </div>
-        )}
-        {isTrainer && b.status === "CONFIRMED" && (
-          <p className="text-xs text-muted">Completing a session deducts 1 credit from the client’s package.</p>
-        )}
+        {isTrainer && (b.status === "CONFIRMED" || charged) && <RollCallPanel target={{ kind: "BOOKING", id: b.id }} />}
 
-        {isTrainer && charged && (
-          <Button variant="secondary" className="w-full" onClick={() => { setBookingStatus(b.id, "CONFIRMED"); onClose(); }}>
-            Undo — return to Confirmed (restores 1 credit)
-          </Button>
+        {!isTrainer && b.attendance && (
+          <div className="rounded-xl border border-line bg-field p-3 text-sm">
+            {b.attendance.mark === "PRESENT" ? "You were marked present — 1 credit used." : b.attendance.deduct ? "You were marked as a no-show — 1 credit was deducted." : "You were marked as a no-show — your credit was returned."}
+          </div>
         )}
 
         {isTrainer && active && (

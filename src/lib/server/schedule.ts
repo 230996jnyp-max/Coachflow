@@ -1,12 +1,12 @@
 import "server-only";
-import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
 import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
 import { openProfile, sealProfile } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
-import { bookings, coachSettings, groupSessions, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
+import { attendance, bookings, coachSettings, groupSessions, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
 
 export interface Rules extends TravelRules {
   sessionMinutes: number;
@@ -138,9 +138,24 @@ export async function loadSchedule(me: UserRow) {
     .where(and(eq(bookings.coachId, coachId), gt(bookings.endAt, since)));
 
   const list: Booking[] = [];
+  const detailIds = rows.filter((r) => me.role !== "CLIENT" || r.clientId === me.id).map((r) => r.id);
+  const marks = new Map<string, { mark: string; charged: boolean }>();
+  const sharedBy = new Map<string, string>();
+  if (detailIds.length) {
+    const recs = await d.select().from(attendance).where(and(eq(attendance.kind, "BOOKING"), inArray(attendance.sessionId, detailIds)));
+    for (const a of recs) marks.set(`${a.sessionId}:${a.clientId}`, a);
+    const shared = await d.select({ id: groupSessions.id, bookingId: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, detailIds), ne(groupSessions.status, "CANCELLED")));
+    for (const g of shared) if (g.bookingId) sharedBy.set(g.bookingId, g.id);
+  }
   for (const r of rows) {
-    if (me.role !== "CLIENT" || r.clientId === me.id) list.push(toBooking(r));
-    else if (OCCUPYING.includes(r.status as BookingStatus)) list.push(toOccupied(r));
+    if (me.role !== "CLIENT" || r.clientId === me.id) {
+      const b = toBooking(r);
+      const a = marks.get(`${r.id}:${r.clientId}`);
+      if (a) b.attendance = { mark: a.mark as "PRESENT" | "NO_SHOW", deduct: a.mark === "NO_SHOW" && a.charged };
+      const g = sharedBy.get(r.id);
+      if (g) b.sharedGroupId = g;
+      list.push(b);
+    } else if (OCCUPYING.includes(r.status as BookingStatus)) list.push(toOccupied(r));
   }
   const gymList: GymLocation[] = gymRows.map((g) => ({ id: g.id, name: g.name, address: g.address, active: g.active }));
   const slotList: AvailabilitySlot[] = slotRows.map((s) => ({
@@ -265,13 +280,18 @@ export async function travelNeighbors(coachId: string, loc: LocRef, rules: Rules
   return out;
 }
 
+/**
+ * 1-on-1 credits promised to upcoming sessions. A session that already has an attendance mark has settled its credit,
+ * and one opened to partners uses a group credit instead.
+ */
 export async function reservedCount(clientId: string): Promise<number> {
   const d = await db();
-  const [r] = await d
-    .select({ n: sql<number>`count(*)::int` })
-    .from(bookings)
-    .where(and(eq(bookings.clientId, clientId), inArray(bookings.status, RESERVING)));
-  return r?.n ?? 0;
+  const rows = await d.select({ id: bookings.id }).from(bookings).where(and(eq(bookings.clientId, clientId), inArray(bookings.status, RESERVING)));
+  if (!rows.length) return 0;
+  const ids = rows.map((r) => r.id);
+  const marked = new Set((await d.select({ s: attendance.sessionId }).from(attendance).where(and(eq(attendance.kind, "BOOKING"), eq(attendance.clientId, clientId), inArray(attendance.sessionId, ids)))).map((r) => r.s));
+  const shared = new Set((await d.select({ b: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, ids), ne(groupSessions.status, "CANCELLED")))).map((r) => r.b));
+  return ids.filter((id) => !marked.has(id) && !shared.has(id)).length;
 }
 
 /** Adds `delta` to a client's package balance (never below 0) and returns the new balance. */

@@ -9,16 +9,15 @@ import {
   bookSpot,
   cancelGroup,
   cancelRequest,
-  completeGroup,
   ensureWorkoutFor,
   GROUP_MAX,
   groupCreditsAvailable,
   leaveGroup,
   loadGroups,
+  logReserved,
   notify,
   openGroup,
   promoteWaitlist,
-  reopenGroup,
   requestJoin,
   requireGroup,
   sealGroup,
@@ -27,18 +26,18 @@ import {
 } from "@/lib/server/groups";
 import { badRequest, conflict, forbidden, int, readJson, route, str } from "@/lib/server/http";
 import { hasConflict, parsePlace, requestLoc, rulesFor, travelCheck } from "@/lib/server/schedule";
-import { groupMembers, groupSessions, gyms, templates } from "@/lib/server/schema";
+import { attendance, groupMembers, groupSessions, gyms, templates } from "@/lib/server/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
-const COACH_ACTIONS = ["edit", "cancel", "addMember", "removeMember", "start", "complete", "reopen"];
+const COACH_ACTIONS = ["edit", "cancel", "addMember", "removeMember", "start"];
 
 /**
  * PATCH { action } on one group.
  *  client: book | leave | request | unshare
- *  coach:  edit | cancel | addMember | removeMember | start | complete | reopen
+ *  coach:  edit | cancel | addMember | removeMember | start   (attendance and completing live in /api/attendance)
  * Every action returns the refreshed class screens for the caller.
  */
 export const PATCH = route<Ctx>(async (req, ctx) => {
@@ -73,6 +72,8 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
       case "unshare": {
         const [own] = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, me.id), eq(groupMembers.role, "OWNER"))).limit(1);
         if (!own || g.kind !== "SHARED") throw forbidden();
+        const [marked] = await d.select({ id: attendance.id }).from(attendance).where(and(eq(attendance.kind, "BOOKING"), eq(attendance.sessionId, g.bookingId ?? ""))).limit(1);
+        if (marked) throw conflict("Attendance has already been marked for this session.");
         const others = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "CONFIRMED"), eq(groupMembers.role, "MEMBER")));
         if (others.length) throw conflict("Someone has already joined, so this session can't be closed to partners.");
         await d.update(groupSessions).set({ status: "CANCELLED", rev: g.rev + 1 }).where(eq(groupSessions.id, g.id));
@@ -172,6 +173,7 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
         .insert(groupMembers)
         .values({ groupId: g.id, clientId, status: "CONFIRMED", role: "MEMBER" })
         .onConflictDoUpdate({ target: [groupMembers.groupId, groupMembers.clientId], set: { status: "CONFIRMED", role: "MEMBER", joinedAt: new Date() } });
+      await logReserved(clientId, g.coachId, det.title);
       await notify([clientId], "group_added", { title: "You've been added to a class", body: `Your coach added you to “${det.title}” on ${await whenText(g.coachId, g.startAt)}.`, link: `/classes/${g.id}` });
       await ensureWorkoutFor(g, clientId);
       return out();
@@ -185,15 +187,6 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
     case "start": {
       const n = await startGroupWorkout(me, g, { templateId: typeof body.templateId === "string" ? body.templateId : undefined, plan: body.plan, title: typeof body.title === "string" ? body.title : undefined });
       return out({ pushed: n });
-    }
-    case "complete": {
-      const attended = Array.isArray(body.attended) ? (body.attended.filter((x) => typeof x === "string") as string[]) : null;
-      const res = await completeGroup(g, attended);
-      return out({ charged: res.charged.length });
-    }
-    case "reopen": {
-      await reopenGroup(g);
-      return out();
     }
     default:
       throw badRequest("Unknown action.");

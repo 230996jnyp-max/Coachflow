@@ -4,6 +4,7 @@ import { GOALS, sealProfile, toProfile, toUser, type ProfileJson } from "@/lib/s
 import { hashPassword, requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, checkPassword, conflict, email, int, isUniqueViolation, readJson, route, str } from "@/lib/server/http";
+import { logCredit } from "@/lib/server/credits";
 import { users } from "@/lib/server/schema";
 import type { ClientGoal } from "@/lib/types";
 
@@ -49,6 +50,8 @@ export const POST = route(async (req) => {
         mustChangePassword: true,
       })
       .returning();
+    if (profile.credits > 0) await logCredit({ clientId: id, coachId: me.id, pool: "SESSION", kind: "OPENING", delta: profile.credits, sessionType: "1-on-1 PT", label: "Starting package", balance: profile.credits });
+    if ((profile.groupClassCredits ?? 0) > 0) await logCredit({ clientId: id, coachId: me.id, pool: "GROUP", kind: "OPENING", delta: profile.groupClassCredits ?? 0, sessionType: "Group Class", label: "Starting package", balance: profile.groupClassCredits ?? 0 });
     return NextResponse.json({ user: toUser(row), profile: toProfile(row) });
   } catch (e) {
     if (isUniqueViolation(e)) throw conflict("That username is already taken.");

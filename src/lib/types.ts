@@ -267,6 +267,39 @@ export interface Booking {
   createdAt: string;
   /** Bumped on reschedule/cancel so calendar apps treat updates to the same event correctly. */
   rev?: number;
+  /** The 1-on-1 client's (or session owner's) attendance mark, once the coach has set one. */
+  attendance?: AttendanceInfo;
+  /** Set while this session is opened to partners: the owner then uses a group credit. */
+  sharedGroupId?: string;
+}
+
+export type AttendanceMark = "PRESENT" | "NO_SHOW";
+
+export interface AttendanceInfo {
+  mark: AttendanceMark;
+  /** NO_SHOW only: the coach chose to take the credit anyway. */
+  deduct: boolean;
+}
+
+export interface AttendanceStats {
+  present: number;
+  noShow: number;
+  /** Present / (Present + No-Show) as a whole percent; null before any session has been marked. */
+  rate: number | null;
+}
+
+export interface CreditLogEntry {
+  id: string;
+  at: string;
+  pool: "SESSION" | "GROUP";
+  kind: string;
+  sessionType: string;
+  label: string;
+  /** Change to the balance: -1 credit taken, +1 credit given back, 0 for a reservation. */
+  delta: number;
+  /** Balance after this event. */
+  balance: number;
+  note?: string;
 }
 
 /** A place chosen from Google Maps search (Singapore). */
@@ -324,6 +357,7 @@ export interface GroupMember {
   joinedAt: string;
   /** Waitlist position (1 = next in line). */
   position?: number;
+  attendance?: AttendanceInfo;
 }
 
 export interface GroupSession {
@@ -351,7 +385,7 @@ export interface GroupSession {
   workoutStartedAt?: string;
   workoutTitle?: string;
   /** The viewer's own place in the class (clients). */
-  mine?: { status: "CONFIRMED" | "WAITLIST"; position?: number; role: "OWNER" | "MEMBER" };
+  mine?: { status: "CONFIRMED" | "WAITLIST"; position?: number; role: "OWNER" | "MEMBER"; attendance?: AttendanceInfo };
   /** The viewer's own join request, while one is pending (shared sessions). */
   myRequest?: string;
   /** The full roster: coaches only. */

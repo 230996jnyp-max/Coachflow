@@ -1,7 +1,7 @@
 "use client";
 
-import { format, isAfter, parseISO } from "date-fns";
-import { ArrowLeft, Ban, CalendarClock, Check, Dumbbell, MapPin, Pencil, Plus, RotateCcw, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { ArrowLeft, Ban, CalendarClock, Dumbbell, MapPin, Pencil, Plus, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ExercisePicker } from "@/components/ExerciseLibrary";
@@ -13,19 +13,16 @@ import { atTime, ymd } from "@/lib/scheduling";
 import {
   addClassMember,
   cancelClass,
-  completeClass,
   editClass,
-  finishWorkout,
   refreshGroups,
   refreshTraining,
   removeClassMember,
-  reopenClass,
   startClassWorkout,
   unshareSession,
-  useNow,
 } from "@/lib/store";
 import type { GroupSession } from "@/lib/types";
 import { ApprovalCard, classLocation, classTime, classTitle, GroupBadge, SpotsPill } from "./groupUi";
+import { RollCallPanel } from "@/components/attendance/Attendance";
 import { ClientActions, GroupCreditsCard } from "./ClassList";
 import { LiveGrid } from "./LiveGrid";
 
@@ -153,11 +150,9 @@ function ClientView({ g }: { g: GroupSession }) {
 /* ---------------- Coach ---------------- */
 function CoachView({ g }: { g: GroupSession }) {
   const { db, clients } = useViewer();
-  const now = useNow(30_000);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
-  const [completeOpen, setCompleteOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [addId, setAddId] = useState("");
@@ -178,7 +173,6 @@ function CoachView({ g }: { g: GroupSession }) {
   const toAnswer = db.groupRequests.filter((r) => r.needsMe && r.groupId === g.id);
   const reservedFor = (id: string) => db.groups.filter((x) => x.status === "OPEN" && x.members?.some((m) => m.clientId === id && m.status === "CONFIRMED" && m.role === "MEMBER")).length;
   const addable = clients.filter((c) => !c.profile.archived && !members.some((m) => m.clientId === c.user.id && (m.status === "CONFIRMED" || m.status === "WAITLIST")));
-  const started = isAfter(now, parseISO(g.start));
 
   return (
     <div className="space-y-6">
@@ -205,22 +199,12 @@ function CoachView({ g }: { g: GroupSession }) {
                 <Pencil size={16} /> Edit
               </Button>
             )}
-            {(started || g.workoutStartedAt) && (
-              <Button variant="success" onClick={() => setCompleteOpen(true)}>
-                <Check size={16} /> Complete class
-              </Button>
-            )}
             {g.kind === "CLASS" && (
               <Button variant="danger" onClick={() => setCancelOpen(true)}>
                 <Ban size={16} /> Cancel class
               </Button>
             )}
           </div>
-        )}
-        {g.status === "COMPLETED" && (
-          <Button variant="secondary" disabled={busy} onClick={() => run(() => reopenClass(g.id))}>
-            <RotateCcw size={16} /> Undo — reopen (gives credits back)
-          </Button>
         )}
         {open && going.length === 0 && <p className="text-xs text-muted">Add or wait for attendees to start the workout.</p>}
         {error && <Notice tone="error">{error}</Notice>}
@@ -229,6 +213,8 @@ function CoachView({ g }: { g: GroupSession }) {
       {toAnswer.map((r) => (
         <ApprovalCard key={r.id} req={r} group={g} />
       ))}
+
+      {(open || g.status === "COMPLETED") && going.length > 0 && <RollCallPanel target={{ kind: g.kind === "SHARED" && g.bookingId ? "BOOKING" : "GROUP", id: g.kind === "SHARED" && g.bookingId ? g.bookingId : g.id }} />}
 
       {g.workoutStartedAt && (
         <section>
@@ -305,7 +291,6 @@ function CoachView({ g }: { g: GroupSession }) {
 
       <EditClassModal g={g} open={edit} onClose={() => setEdit(false)} />
       <StartWorkoutModal g={g} open={startOpen} onClose={() => setStartOpen(false)} />
-      <CompleteModal g={g} open={completeOpen} onClose={() => setCompleteOpen(false)} />
       <Modal
         open={cancelOpen}
         onClose={() => setCancelOpen(false)}
@@ -517,80 +502,6 @@ function StartForm({ g, onClose }: { g: GroupSession; onClose: () => void }) {
             <ExercisePicker open={picker} onClose={() => setPicker(false)} onConfirm={(ids) => setPlan((p) => [...p, ...ids.map((id) => ({ exerciseId: id, sets: 3, repMin: 8, repMax: 12 }))])} />
           </div>
         )}
-        {error && <Notice tone="error">{error}</Notice>}
-      </div>
-    </Modal>
-  );
-}
-
-/* ---------------- Complete ---------------- */
-function CompleteModal({ g, open, onClose }: { g: GroupSession; open: boolean; onClose: () => void }) {
-  return open ? <CompleteForm key={g.id} g={g} onClose={onClose} /> : null;
-}
-
-function CompleteForm({ g, onClose }: { g: GroupSession; onClose: () => void }) {
-  const { db } = useViewer();
-  const going = (g.members ?? []).filter((m) => m.status === "CONFIRMED");
-  const [came, setCame] = useState<Set<string>>(() => new Set(going.map((m) => m.clientId)));
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const used = going.filter((m) => came.has(m.clientId) && m.role === "MEMBER").length;
-
-  const finish = async () => {
-    setBusy(true);
-    setError(null);
-    // Close out everyone's live workout first (saved with the sets they completed).
-    await refreshTraining(true);
-    for (const w of db.workouts.filter((x) => x.groupId === g.id && x.status === "ACTIVE" && came.has(x.clientId))) finishWorkout(w.id);
-    const err = await completeClass(g.id, [...came]);
-    setBusy(false);
-    if (err) setError(err);
-    else onClose();
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Complete class"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="success" onClick={finish} disabled={busy}>
-            <Check size={16} /> {busy ? "Saving…" : `Complete · use ${used} credit${used === 1 ? "" : "s"}`}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <p className="text-sm text-muted">Untick anyone who didn’t come — they keep their credit. Everyone else uses 1 group class credit.</p>
-        <div className="divide-y divide-line rounded-xl border border-line">
-          {going.map((m) => {
-            const nm = db.users.find((u) => u.id === m.clientId)?.name ?? "Client";
-            return (
-              <label key={m.clientId} className="flex min-h-12 cursor-pointer items-center gap-3 px-3">
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 accent-[var(--color-accent,#3b82f6)]"
-                  checked={came.has(m.clientId)}
-                  onChange={(e) =>
-                    setCame((s) => {
-                      const n = new Set(s);
-                      if (e.target.checked) n.add(m.clientId);
-                      else n.delete(m.clientId);
-                      return n;
-                    })
-                  }
-                />
-                <Avatar name={nm} size={28} />
-                <span className="flex-1 text-sm font-semibold">{nm}</span>
-                {m.role === "OWNER" && <span className="text-[11px] text-muted">1-on-1 credit</span>}
-              </label>
-            );
-          })}
-        </div>
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Modal>

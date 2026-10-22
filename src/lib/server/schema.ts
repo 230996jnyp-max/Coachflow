@@ -229,7 +229,44 @@ export const notifications = pgTable(
   (t) => [index("notifications_user_idx").on(t.userId, t.createdAt)],
 );
 
+/**
+ * One row per person per session once the coach has marked them Present or No-Show. `charged` says whether a credit is
+ * currently taken for it, so changing a mark later only ever moves the balance by the difference (never double counts).
+ */
+export const attendance = pgTable(
+  "attendance",
+  {
+    /** `<kind>:<sessionId>:<clientId>` */
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(), // BOOKING | GROUP
+    sessionId: text("session_id").notNull(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    pool: text("pool").notNull(), // SESSION | GROUP
+    mark: text("mark").notNull(), // PRESENT | NO_SHOW
+    charged: boolean("charged").notNull().default(false),
+    markedAt: timestamp("marked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("attendance_client_idx").on(t.clientId), index("attendance_session_idx").on(t.kind, t.sessionId)],
+);
+
+/** Credit transaction history. The figures and labels are encrypted (credits are private to the client and coach). */
+export const creditLog = pgTable(
+  "credit_log",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    pool: text("pool").notNull(),
+    kind: text("kind").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("credit_log_client_idx").on(t.clientId, t.createdAt)],
+);
+
 export type UserRow = typeof users.$inferSelect;
+export type AttendanceRow = typeof attendance.$inferSelect;
 export type GroupRow = typeof groupSessions.$inferSelect;
 export type GroupMemberRow = typeof groupMembers.$inferSelect;
 export type GroupRequestRow = typeof groupRequests.$inferSelect;
@@ -395,4 +432,27 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS attendance (
+    id text PRIMARY KEY,
+    kind text NOT NULL,
+    session_id text NOT NULL,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    pool text NOT NULL,
+    mark text NOT NULL,
+    charged boolean NOT NULL DEFAULT false,
+    marked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS attendance_client_idx ON attendance (client_id)`,
+  `CREATE INDEX IF NOT EXISTS attendance_session_idx ON attendance (kind, session_id)`,
+  `CREATE TABLE IF NOT EXISTS credit_log (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    pool text NOT NULL,
+    kind text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS credit_log_client_idx ON credit_log (client_id, created_at)`,
 ];
