@@ -1,12 +1,12 @@
 import "server-only";
-import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
 import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
 import { openProfile, sealProfile } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
-import { bookings, coachSettings, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
+import { bookings, coachSettings, groupSessions, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
 
 export interface Rules extends TravelRules {
   sessionMinutes: number;
@@ -175,13 +175,40 @@ export function slotAllowed(start: Date, rules: Rules, slotList: AvailabilitySlo
   });
 }
 
-export async function hasConflict(coachId: string, start: Date, end: Date, ignoreId?: string): Promise<boolean> {
+export async function hasConflict(coachId: string, start: Date, end: Date, ignoreId?: string, ignoreGroupId?: string): Promise<boolean> {
   const d = await db();
   const rows = await d
     .select({ id: bookings.id })
     .from(bookings)
     .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), lt(bookings.startAt, end), gt(bookings.endAt, start)));
-  return rows.some((r) => r.id !== ignoreId);
+  if (rows.some((r) => r.id !== ignoreId)) return true;
+  // A coach's group class blocks the same time.
+  const classes = await d
+    .select({ id: groupSessions.id })
+    .from(groupSessions)
+    .where(and(eq(groupSessions.coachId, coachId), eq(groupSessions.kind, "CLASS"), ne(groupSessions.status, "CANCELLED"), lt(groupSessions.startAt, end), gt(groupSessions.endAt, start)));
+  return classes.some((c) => c.id !== ignoreGroupId);
+}
+
+/** A coach's group classes in a time window, with the location each one is held at (for travel-time checks). */
+export async function classEntries(coachId: string, from: Date, to: Date, ignoreGroupId?: string): Promise<{ id: string; start: Date; end: Date; loc: LocRef }[]> {
+  const d = await db();
+  const rows = await d
+    .select()
+    .from(groupSessions)
+    .where(and(eq(groupSessions.coachId, coachId), eq(groupSessions.kind, "CLASS"), ne(groupSessions.status, "CANCELLED"), lt(groupSessions.startAt, to), gt(groupSessions.endAt, from)));
+  const out: { id: string; start: Date; end: Date; loc: LocRef }[] = [];
+  for (const r of rows) {
+    if (r.id === ignoreGroupId) continue;
+    let det: { gymId?: string | null; customGym?: string; place?: PlaceInfo } = {};
+    try {
+      det = decryptJson(r.detailsEnc, `group:${r.id}`);
+    } catch {
+      /* unknown location */
+    }
+    out.push({ id: r.id, start: r.startAt, end: r.endAt, loc: locOf({ gymId: det.gymId ?? null, customGym: det.customGym, place: det.place }) });
+  }
+  return out;
 }
 
 /** The location fields of a booking request, as the travel rules see them. */
@@ -201,15 +228,16 @@ export async function travelCheck(coachId: string, start: Date, end: Date, loc: 
     .select()
     .from(bookings)
     .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), lt(bookings.startAt, new Date(end.getTime() + pad)), gt(bookings.endAt, new Date(start.getTime() - pad))));
-  for (const row of rows) {
+  const entries: { id: string; start: Date; end: Date; loc: LocRef }[] = rows.map((row) => ({ id: row.id, start: row.startAt, end: row.endAt, loc: locOf(toBooking(row)) }));
+  entries.push(...(await classEntries(coachId, new Date(start.getTime() - pad), new Date(end.getTime() + pad), ignoreId)));
+  for (const row of entries) {
     if (row.id === ignoreId) continue;
-    const b = toBooking(row);
-    const need = bufferMinutes(locOf(b), loc, rules);
+    const need = bufferMinutes(row.loc, loc, rules);
     if (need === 0) continue;
-    const before = row.endAt.getTime() <= start.getTime();
-    const after = row.startAt.getTime() >= end.getTime();
+    const before = row.end.getTime() <= start.getTime();
+    const after = row.start.getTime() >= end.getTime();
     if (!before && !after) continue; // an overlap is reported by the clash check
-    const gap = Math.round((before ? start.getTime() - row.endAt.getTime() : row.startAt.getTime() - end.getTime()) / 60000);
+    const gap = Math.round((before ? start.getTime() - row.end.getTime() : row.start.getTime() - end.getTime()) / 60000);
     if (gap < need) {
       return forCoach
         ? `Not enough travel time: this client's gym is a different location from the ${before ? "previous" : "next"} session, which needs about ${need} min (only ${gap} min free). Choose another time, or switch on "Waive travel buffer".`
@@ -226,11 +254,15 @@ export async function travelNeighbors(coachId: string, loc: LocRef, rules: Rules
     .select()
     .from(bookings)
     .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), gt(bookings.endAt, new Date(Date.now() - 86400000)), lt(bookings.startAt, new Date(Date.now() + 120 * 86400000))));
-  return rows.map((row) => {
+  const out = rows.map((row) => {
     const b = toBooking(row);
     const other = locOf(b);
     return { start: row.startAt.toISOString(), end: row.endAt.toISOString(), buffer: bufferMinutes(other, loc, rules), same: rules.travelEnabled && sameLocation(other, loc) };
   });
+  for (const c of await classEntries(coachId, new Date(Date.now() - 86400000), new Date(Date.now() + 120 * 86400000))) {
+    out.push({ start: c.start.toISOString(), end: c.end.toISOString(), buffer: bufferMinutes(c.loc, loc, rules), same: rules.travelEnabled && sameLocation(c.loc, loc) });
+  }
+  return out;
 }
 
 export async function reservedCount(clientId: string): Promise<number> {
@@ -252,3 +284,12 @@ export async function adjustCredits(clientRow: UserRow, delta: number): Promise<
 }
 
 export const clientCredits = (clientRow: UserRow) => openProfile(clientRow).credits;
+
+/** Adds `delta` to a client's group-class credits (never below 0) and returns the new balance. */
+export async function adjustGroupCredits(clientRow: UserRow, delta: number): Promise<number> {
+  const d = await db();
+  const p = openProfile(clientRow);
+  p.groupClassCredits = Math.max(0, (p.groupClassCredits ?? 0) + delta);
+  await d.update(users).set({ profileEnc: sealProfile(clientRow.id, p), updatedAt: new Date() }).where(eq(users.id, clientRow.id));
+  return p.groupClassCredits;
+}

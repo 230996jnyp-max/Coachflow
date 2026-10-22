@@ -238,6 +238,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [topUp, setTopUp] = useState(10);
+  const [groupTopUp, setGroupTopUp] = useState(5);
 
   return (
     <div className="space-y-8">
@@ -322,6 +323,34 @@ function ProfileTab({ clientId }: { clientId: string }) {
               }}
             >
               Add {topUp} credits
+            </Button>
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <SectionTitle>Group class credits</SectionTitle>
+        <Card className="space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-3xl font-bold">{profile.groupClassCredits}</div>
+              <div className="text-xs text-muted">group class credits remaining · {db.groups.filter((g) => g.status === "OPEN" && g.members?.some((m) => m.clientId === clientId && m.status === "CONFIRMED" && m.role === "MEMBER")).length} reserved by upcoming classes · used when a class is completed</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" aria-label="Remove one group credit" disabled={profile.groupClassCredits < 1} onClick={async () => setActionError(await updateClient(clientId, { profile: { groupClassCredits: Math.max(0, profile.groupClassCredits - 1) } }))}>
+                <Minus size={16} />
+              </Button>
+              <Button variant="secondary" aria-label="Add one group credit" onClick={async () => setActionError(await updateClient(clientId, { profile: { groupClassCredits: profile.groupClassCredits + 1 } }))}>
+                <Plus size={16} />
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <Field label="Add group class credits">
+              <Input type="number" inputMode="numeric" min={1} value={groupTopUp} onChange={(e) => setGroupTopUp(Number(e.target.value))} className="w-32" />
+            </Field>
+            <Button disabled={groupTopUp < 1} onClick={async () => setActionError(await updateClient(clientId, { profile: { groupClassCredits: profile.groupClassCredits + groupTopUp } }))}>
+              Add {groupTopUp} group credits
             </Button>
           </div>
         </Card>

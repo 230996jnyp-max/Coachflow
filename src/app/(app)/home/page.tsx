@@ -1,7 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { CalendarPlus, ChevronRight, Dumbbell, Play, Trophy } from "lucide-react";
+import { CalendarPlus, ChevronRight, Dumbbell, Play, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -9,6 +9,8 @@ import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { CalendarQuickLinks } from "@/components/booking/CalendarActions";
+import { GroupCreditsCard } from "@/components/groups/ClassList";
+import { ApprovalCard } from "@/components/groups/groupUi";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -40,6 +42,7 @@ export default function ClientHome() {
   const next = db.bookings
     .filter((b) => b.clientId === user.id && (b.status === "CONFIRMED" || b.status === "PENDING") && parseISO(b.end) > now)
     .sort((a, b) => a.start.localeCompare(b.start))[0];
+  const nextClass = db.groups.filter((g) => g.status === "OPEN" && g.mine?.status === "CONFIRMED" && parseISO(g.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0];
   const week = weeklyBuckets(workouts, exMap, 1, now)[0];
   const avail = profile ? availableCredits(profile, db.bookings) : 0;
   const hour = now.getHours();
@@ -91,6 +94,28 @@ export default function ClientHome() {
             }
           />
         )}
+      </section>
+
+      <section>
+        <SectionTitle action={<Link href="/book" className="text-xs font-semibold text-accent">Group classes →</Link>}>Group classes</SectionTitle>
+        <div className="space-y-2">
+          <GroupCreditsCard />
+          {db.groupRequests.filter((r) => r.needsMe).map((r) => (
+            <ApprovalCard key={r.id} req={r} group={db.groups.find((g) => g.id === r.groupId)} />
+          ))}
+          {nextClass && (
+            <Link href={`/classes/${nextClass.id}`}>
+              <Card className="flex items-center gap-3 border-accent/30 p-3">
+                <Users size={18} className="shrink-0 text-accent" />
+                <div className="min-w-0 flex-1 text-sm">
+                  <div className="truncate font-semibold">{nextClass.kind === "SHARED" ? "Partner session" : nextClass.title}</div>
+                  <div className="text-xs text-muted">{format(parseISO(nextClass.start), "EEE d MMM · h:mm a")}{nextClass.workoutStartedAt ? " · workout live" : ""}</div>
+                </div>
+                <ChevronRight size={16} className="text-muted" />
+              </Card>
+            </Link>
+          )}
+        </div>
       </section>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

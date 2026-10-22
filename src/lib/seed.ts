@@ -84,6 +84,9 @@ export function createEmptyDB(): DB {
     gyms: [],
     slots: [],
     bookings: [],
+    groups: [],
+    groupRequests: [],
+    notifications: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }

@@ -32,6 +32,7 @@ export const POST = route(async (req) => {
     defaultGymId: typeof body.defaultGymId === "string" && body.defaultGymId ? body.defaultGymId.slice(0, 140) : null,
     medicalNotes: str(body.medicalNotes, "Medical notes", { optional: true, max: 2000 }),
     startDate: new Date().toISOString().slice(0, 10),
+    groupClassCredits: int(body.groupClassCredits ?? 0, "Group class credits", 0, 1000),
   };
 
   const d = await db();

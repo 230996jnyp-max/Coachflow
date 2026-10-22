@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 /**
  * users
@@ -162,7 +162,77 @@ export const customExercises = pgTable(
   (t) => [index("custom_exercises_owner_idx").on(t.ownerId)],
 );
 
+/**
+ * Group classes (coach-scheduled, kind CLASS) and client sessions opened to partners (kind SHARED, linked to a booking).
+ * Title, notes, location, template and the pushed workout plan are encrypted in `details_enc` (bound to the group id).
+ */
+export const groupSessions = pgTable(
+  "group_sessions",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    kind: text("kind").notNull(),
+    bookingId: text("booking_id"),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    capacity: integer("capacity").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    seriesId: text("series_id"),
+    workoutStartedAt: timestamp("workout_started_at", { withTimezone: true }),
+    rev: integer("rev").notNull().default(0),
+    detailsEnc: text("details_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("group_sessions_coach_idx").on(t.coachId, t.startAt), index("group_sessions_booking_idx").on(t.bookingId)],
+);
+
+/** Who is in a group. status: CONFIRMED | WAITLIST | CANCELLED | ATTENDED | ABSENT. */
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    groupId: text("group_id").notNull(),
+    clientId: text("client_id").notNull(),
+    status: text("status").notNull(),
+    role: text("role").notNull().default("MEMBER"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.clientId] }), index("group_members_client_idx").on(t.clientId)],
+);
+
+/** A client asking to join a shared session; the coach and every current attendee must approve. */
+export const groupRequests = pgTable(
+  "group_requests",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").notNull(),
+    clientId: text("client_id").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    /** JSON { [userId]: "APPROVED" | "DECLINED" } */
+    approvals: text("approvals").notNull().default("{}"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("group_requests_group_idx").on(t.groupId), index("group_requests_client_idx").on(t.clientId)],
+);
+
+/** In-app notifications (the text is encrypted: it can name people and times). */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notifications_user_idx").on(t.userId, t.createdAt)],
+);
+
 export type UserRow = typeof users.$inferSelect;
+export type GroupRow = typeof groupSessions.$inferSelect;
+export type GroupMemberRow = typeof groupMembers.$inferSelect;
+export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
@@ -279,4 +349,50 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS custom_exercises_owner_idx ON custom_exercises (owner_id)`,
+  `CREATE TABLE IF NOT EXISTS group_sessions (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    kind text NOT NULL,
+    booking_id text,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    capacity integer NOT NULL,
+    status text NOT NULL DEFAULT 'OPEN',
+    series_id text,
+    workout_started_at timestamptz,
+    rev integer NOT NULL DEFAULT 0,
+    details_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_sessions_coach_idx ON group_sessions (coach_id, start_at)`,
+  `CREATE INDEX IF NOT EXISTS group_sessions_booking_idx ON group_sessions (booking_id)`,
+  `CREATE TABLE IF NOT EXISTS group_members (
+    group_id text NOT NULL,
+    client_id text NOT NULL,
+    status text NOT NULL,
+    role text NOT NULL DEFAULT 'MEMBER',
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (group_id, client_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_members_client_idx ON group_members (client_id)`,
+  `CREATE TABLE IF NOT EXISTS group_requests (
+    id text PRIMARY KEY,
+    group_id text NOT NULL,
+    client_id text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    approvals text NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_requests_group_idx ON group_requests (group_id)`,
+  `CREATE INDEX IF NOT EXISTS group_requests_client_idx ON group_requests (client_id)`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    kind text NOT NULL,
+    body_enc text NOT NULL,
+    read_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
 ];

@@ -12,6 +12,7 @@ import { SyncQueue, type SyncResult } from "./syncQueue";
 import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
 import type {
+  AppNotification,
   AppSettings,
   AvailabilitySlot,
   BodyMetricLog,
@@ -21,6 +22,8 @@ import type {
   ClientProfile,
   DB,
   Exercise,
+  GroupRequest,
+  GroupSession,
   GymLocation,
   PlaceInfo,
   ProgressPhoto,
@@ -80,7 +83,7 @@ function flush() {
   if (!uidNow) return;
   // Once workouts/routines/custom exercises are safely in the database, the device keeps no copy of them.
   const cloud = cloudSafe ? { workouts: [], templates: [], exercises: SEED_EXERCISES } : {};
-  set(localKey(uidNow), { ...state.db, ...cloud, users: [], clients: [], gyms: [], slots: [], bookings: [] }).catch(() => undefined);
+  set(localKey(uidNow), { ...state.db, ...cloud, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [] }).catch(() => undefined);
 }
 
 function persist() {
@@ -309,6 +312,9 @@ async function establishSession(): Promise<boolean> {
       gyms: [],
       slots: [],
       bookings: [],
+      groups: [],
+      groupRequests: [],
+      notifications: [],
       // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
       workouts: server ? server.workouts : local.workouts,
       templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
@@ -318,6 +324,7 @@ async function establishSession(): Promise<boolean> {
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
   trainingLoaded = serverOk;
   await refreshSchedule();
+  await refreshGroups();
   return true;
 }
 
@@ -387,14 +394,25 @@ export async function initStore() {
       void refreshAccounts();
       void refreshSchedule();
       void refreshTraining();
+      void refreshGroups();
     }
   }, 45_000);
+  // Live group classes: every 3 seconds while a live grid / group workout is open, and a little slower around class time.
+  let fastN = 0;
+  setInterval(() => {
+    if (typeof document === "undefined" || document.visibilityState !== "visible" || !state.sessionUserId) return;
+    if (liveCount > 0) {
+      void refreshTraining();
+      void refreshGroups();
+    } else if (inClassWindow() && ++fastN % 3 === 0) void refreshGroups();
+  }, 3000);
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         void refreshAccounts();
         void refreshSchedule();
         void refreshTraining();
+        void refreshGroups();
       } else {
         flushTraining(true);
       }
@@ -487,6 +505,7 @@ export interface NewClientInput {
   email: string;
   goal: ClientGoal;
   credits: number;
+  groupClassCredits?: number;
   defaultGymId: string | null;
   medicalNotes: string;
 }
@@ -947,6 +966,179 @@ export async function rescheduleBooking(id: string, start: Date, gymId: string |
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");
+  return null;
+}
+
+/* ---------------- Group classes, shared sessions & notifications ---------------- */
+interface GroupsData {
+  groups: GroupSession[];
+  requests: GroupRequest[];
+  notifications: AppNotification[];
+  unread: number;
+}
+
+/** How many open screens want fast (3 s) updates: the coach's live grid and a client's group workout. */
+let liveCount = 0;
+
+export function useLivePolling(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    liveCount++;
+    void refreshTraining();
+    void refreshGroups();
+    return () => {
+      liveCount = Math.max(0, liveCount - 1);
+    };
+  }, [on]);
+}
+
+function inClassWindow(): boolean {
+  const meId = state.sessionUserId;
+  if (!meId) return false;
+  const staff = state.db.users.find((u) => u.id === meId)?.role === "TRAINER";
+  const now = Date.now();
+  return state.db.groups.some((g) => g.status === "OPEN" && (staff || g.mine?.status === "CONFIRMED") && Date.parse(g.start) - 30 * 60000 < now && Date.parse(g.end) + 120 * 60000 > now);
+}
+
+function applyGroups(data: GroupsData) {
+  const cur = state.db;
+  if (sameJson(cur.groups, data.groups) && sameJson(cur.groupRequests, data.requests) && sameJson(cur.notifications, data.notifications)) return;
+  setState({ ...state, db: { ...cur, groups: data.groups, groupRequests: data.requests, notifications: data.notifications } });
+}
+
+/** Re-reads the classes, join requests and notifications. If a group workout was pushed to me, pulls it in straight away. */
+export async function refreshGroups(): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser) return;
+  const r = await api<GroupsData>("/api/groups");
+  if (state.sessionUserId !== forUser || !r.ok || !r.data) return;
+  applyGroups(r.data);
+  const me = state.db.users.find((u) => u.id === forUser);
+  if (me?.role === "CLIENT") {
+    const waiting = r.data.groups.some((g) => g.status === "OPEN" && g.workoutStartedAt && g.mine?.status === "CONFIRMED" && !state.db.workouts.some((w) => w.groupId === g.id));
+    if (waiting) void refreshTraining();
+  }
+}
+
+async function groupCall<T extends object = Record<string, never>>(path: string, body: unknown, method = "PATCH"): Promise<{ error: string | null; data: (GroupsData & T) | null }> {
+  const r = await api<GroupsData & T>(path, { method, body });
+  if (!r.ok || !r.data) return { error: r.error ?? "That didn't work. Please try again.", data: null };
+  applyGroups(r.data);
+  return { error: null, data: r.data };
+}
+
+/** Takes a spot in a class, or joins its waitlist. Returns an error message, or null (with the outcome). */
+export async function bookClass(id: string): Promise<{ error: string | null; result?: "CONFIRMED" | "WAITLIST" }> {
+  const r = await groupCall<{ result: "CONFIRMED" | "WAITLIST" }>(`/api/groups/${id}`, { action: "book" });
+  return { error: r.error, result: r.data?.result };
+}
+export async function leaveClass(id: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "leave" })).error;
+}
+export async function requestToJoin(id: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "request" })).error;
+}
+export async function withdrawRequest(requestId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/requests/${requestId}`, { decision: "cancel" })).error;
+}
+export async function decideJoinRequest(requestId: string, approve: boolean): Promise<string | null> {
+  const r = await groupCall(`/api/groups/requests/${requestId}`, { decision: approve ? "approve" : "decline" });
+  if (!r.error) void refreshSchedule();
+  return r.error;
+}
+/** A client opens one of their own sessions to a group / partner. */
+export async function shareSession(bookingId: string, capacity: number): Promise<string | null> {
+  return (await groupCall("/api/groups", { shareBookingId: bookingId, capacity }, "POST")).error;
+}
+export async function unshareSession(groupId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${groupId}`, { action: "unshare" })).error;
+}
+
+export interface NewClassInput {
+  title: string;
+  start: Date;
+  durationMin: number;
+  capacity: number;
+  repeatWeeks: number;
+  gymId: string | null;
+  customGym?: string;
+  place?: PlaceInfo | null;
+  templateId?: string;
+  notes: string;
+  waiveTravel?: boolean;
+}
+export async function createClass(i: NewClassInput): Promise<{ error: string | null; skipped: string[] }> {
+  const r = await groupCall<{ skipped: string[] }>(
+    "/api/groups",
+    { title: i.title, start: i.start.toISOString(), durationMin: i.durationMin, capacity: i.capacity, repeatWeeks: i.repeatWeeks, gymId: i.gymId, customGym: i.customGym, place: i.place ?? undefined, templateId: i.templateId || undefined, notes: i.notes, waiveTravel: i.waiveTravel || undefined },
+    "POST",
+  );
+  return { error: r.error, skipped: r.data?.skipped ?? [] };
+}
+export async function editClass(id: string, patch: Record<string, unknown>): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "edit", ...patch })).error;
+}
+export async function cancelClass(id: string, reason: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "cancel", reason })).error;
+}
+export async function addClassMember(id: string, clientId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "addMember", clientId })).error;
+}
+export async function removeClassMember(id: string, clientId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "removeMember", clientId })).error;
+}
+/** Pushes one workout to every confirmed attendee (a routine, or an exercise list built on the spot). */
+export async function startClassWorkout(id: string, input: { templateId?: string; plan?: { exerciseId: string; sets: number; repMin: number; repMax: number }[]; title?: string }): Promise<string | null> {
+  const r = await groupCall<{ pushed: number }>(`/api/groups/${id}`, { action: "start", ...input });
+  if (!r.error) await refreshTraining(true);
+  return r.error;
+}
+export async function completeClass(id: string, attended: string[]): Promise<string | null> {
+  const r = await groupCall(`/api/groups/${id}`, { action: "complete", attended });
+  if (!r.error) void refreshAccounts();
+  return r.error;
+}
+export async function reopenClass(id: string): Promise<string | null> {
+  const r = await groupCall(`/api/groups/${id}`, { action: "reopen" });
+  if (!r.error) void refreshAccounts();
+  return r.error;
+}
+export async function markNotificationsRead(ids: string[] | "all"): Promise<void> {
+  await groupCall("/api/notifications", { ids }, "POST");
+}
+
+/**
+ * Coach, live grid: change values of one set in an attendee's workout. Shown at once, then saved as a field-level change
+ * on the server (so it merges with whatever the client is logging at the same moment).
+ */
+export async function coachEditSet(workoutId: string, entryId: string, setId: string, change: { weight?: number | null; reps?: number | null; durationSec?: number | null; distanceKm?: number | null; done?: boolean }): Promise<string | null> {
+  const apply = (fn: (w: Workout) => Workout) => setState({ ...state, db: { ...state.db, workouts: state.db.workouts.map((w) => (w.id === workoutId ? fn(w) : w)) } });
+  apply((w) => ({
+    ...w,
+    exercises: w.exercises.map((we) =>
+      we.id !== entryId
+        ? we
+        : {
+            ...we,
+            sets: we.sets.map((s) => {
+              if (s.id !== setId) return s;
+              const next: Record<string, unknown> = { ...s };
+              for (const [k, v] of Object.entries(change)) {
+                if (v === null || v === undefined) delete next[k];
+                else next[k] = v;
+              }
+              return next as unknown as WorkoutSet;
+            }),
+          },
+    ),
+  }));
+  const r = await api<{ workout: Workout }>(`/api/training/workouts/${workoutId}`, { method: "PATCH", body: { entryId, setId, change } });
+  if (!r.ok || !r.data) {
+    void refreshTraining(true);
+    return r.error ?? "Couldn't save that change.";
+  }
+  const saved = r.data.workout;
+  apply(() => saved);
   return null;
 }
 

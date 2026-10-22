@@ -4,14 +4,16 @@ import { format, parseISO } from "date-fns";
 import { Check, Clock, MapPin, MessageSquare, Target, UserX, X } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { Avatar, Button, Field, Input, Modal, Notice, Toggle } from "@/components/ui";
+import { Avatar, Button, Field, Input, Modal, Notice, Select, Toggle } from "@/components/ui";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { classesAsBookings } from "@/components/groups/groupUi";
 import { bookingToGymValue, directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import type { PlaceInfo } from "@/lib/types";
 import { useViewer } from "@/lib/hooks";
 import { atTime, canCancel, travelProblem, ymd } from "@/lib/scheduling";
 import { locOf } from "@/lib/travel";
-import { cancelBookingAs, rescheduleBooking, setBookingStatus, useNow } from "@/lib/store";
+import { cancelBookingAs, rescheduleBooking, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
+import Link from "next/link";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
 
@@ -30,17 +32,20 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const [gym, setGym] = useState(() => (b ? bookingToGymValue(b) : ""));
   const [place, setPlace] = useState<PlaceInfo | null>(() => b?.place ?? null);
   const [waive, setWaive] = useState(false);
+  const [groupSize, setGroupSize] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!b) return null;
+  const shared = db.groups.find((g) => g.kind === "SHARED" && g.status === "OPEN" && (g.bookingId === b.id || (!isTrainer && g.mine?.role === "OWNER" && g.start === b.start)));
+  const partners = shared ? Math.max(0, shared.confirmed - 1) : 0;
   const client = db.users.find((u) => u.id === b.clientId);
   const newStart = atTime(date, time);
   const travel = (() => {
     if (!resched || !gym || !isGymComplete(gym) || Number.isNaN(newStart.getTime())) return null;
     const loc = gymToBooking(gym, db.gyms);
     const end = new Date(newStart.getTime() + db.settings.sessionMinutes * 60000);
-    return travelProblem(db.bookings, newStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings, b.id);
+    return travelProblem([...db.bookings, ...classesAsBookings(db.groups)], newStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings, b.id);
   })();
   const cancelErr = canCancel(b, now, db.settings, isTrainer ? "TRAINER" : "CLIENT");
   const active = b.status === "PENDING" || b.status === "CONFIRMED";
@@ -76,6 +81,67 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
         {b.place && <MiniMap place={b.place} href={directionsUrl({ place: b.place })} />}
 
         <AddToCalendar booking={b} />
+
+        {shared && (
+          <div className="space-y-2 rounded-xl border border-pr/30 bg-pr/10 p-3 text-sm">
+            <div className="font-semibold">Open to a group / partner session</div>
+            <div className="text-xs text-muted">
+              {isTrainer ? `${partners} partner${partners === 1 ? "" : "s"} joined · ${shared.spotsLeft} of ${shared.capacity} spots left.` : `${shared.spotsLeft} of ${shared.capacity} spots left${partners ? ` · ${partners} partner${partners === 1 ? "" : "s"} joined` : ""}.`}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/classes/${shared.id}`} onClick={onClose}>
+                <Button size="sm" variant="secondary">View group session</Button>
+              </Link>
+              {!isTrainer && partners === 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    const err = await unshareSession(shared.id);
+                    setBusy(false);
+                    if (err) setError(err);
+                  }}
+                >
+                  Stop sharing
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isTrainer && !shared && active && (
+          <div className="space-y-2 rounded-xl border border-line p-3">
+            <div className="text-sm font-semibold">Open to a group / partner session</div>
+            <p className="text-xs text-muted">Let other clients ask to join. They’re only added when you and your coach both approve.</p>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Field label="Up to how many people?">
+                  <Select value={groupSize} onChange={(e) => setGroupSize(Number(e.target.value))}>
+                    {[2, 3, 4, 5, 6, 8].map((n) => (
+                      <option key={n} value={n}>
+                        {n} people
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  const err = await shareSession(b.id, groupSize);
+                  setBusy(false);
+                  if (err) setError(err);
+                }}
+              >
+                Open it up
+              </Button>
+            </div>
+          </div>
+        )}
 
         {isTrainer && b.status === "PENDING" && (
           <div className="grid grid-cols-2 gap-2">

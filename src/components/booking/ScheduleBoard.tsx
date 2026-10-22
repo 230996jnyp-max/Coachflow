@@ -1,16 +1,18 @@
 "use client";
 
 import { addDays, addWeeks, format, isSameDay, parseISO, startOfWeek } from "date-fns";
-import { CalendarPlus, Car, ChevronLeft, ChevronRight, Lock, MapPin } from "lucide-react";
+import { CalendarPlus, Car, ChevronLeft, ChevronRight, Lock, MapPin, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
+import { classesAsBookings, classTitle, spotsLabel } from "@/components/groups/groupUi";
 import { Button, Card, Field, IconButton } from "@/components/ui";
 import { gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { blocksForDay, buildDaySlots, OCCUPYING, ymd, type SlotView } from "@/lib/scheduling";
 import { fetchTravelNeighbors, useNow } from "@/lib/store";
 import { bufferMinutes, locOf, type TravelNeighbor } from "@/lib/travel";
-import type { PlaceInfo } from "@/lib/types";
+import type { Booking, GroupSession, PlaceInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BookModal } from "./BookModal";
 import { BookingDetail } from "./BookingDetail";
@@ -53,14 +55,17 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const role = mode === "trainer" ? "TRAINER" : "CLIENT";
-  const src = { slots: db.slots, bookings: db.bookings, settings: db.settings };
+  // Coach group classes take up the calendar like any other session.
+  const gridBookings = useMemo(() => [...db.bookings, ...classesAsBookings(db.groups, clientId)], [db.bookings, db.groups, clientId]);
+  const src = { slots: db.slots, bookings: gridBookings, settings: db.settings };
+  const router = useRouter();
 
   const perDay = days.map((d) => ({
     day: d,
     key: ymd(d),
     slots: buildDaySlots(d, src, { now, clientId, role, travel }),
     blocks: blocksForDay(d, db.slots),
-    travelBlocks: mode === "trainer" ? coachTravelBlocks(d, db) : [],
+    travelBlocks: mode === "trainer" ? coachTravelBlocks(d, db, gridBookings) : [],
   }));
 
   const go = (weeks: number) => {
@@ -77,6 +82,10 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
   const selectedKey = perDay.some((d) => d.key === selected) ? selected : perDay[0].key;
 
   const onSlot = (s: SlotView) => {
+    if (s.booking && classOf(s.booking.id, db.groups)) {
+      router.push(`/classes/${s.booking.id}`);
+      return;
+    }
     if (s.state === "open") {
       if (mode === "client") setBookStart(s.start);
       else setTrainerInit({ start: s.start });
@@ -183,12 +192,31 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
   );
 }
 
+function classOf(id: string, groups: GroupSession[]): GroupSession | undefined {
+  return groups.find((g) => g.id === id && g.kind === "CLASS");
+}
+
 function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer"; onClick: () => void }) {
   const { db } = useViewer();
   const time = format(s.start, "h:mm a");
   const b = s.booking;
   const client = b ? db.users.find((u) => u.id === b.clientId) : undefined;
   const base = "flex min-h-[52px] w-full flex-col justify-center rounded-xl border px-3 py-2 text-left transition-colors";
+  const cls = b ? classOf(b.id, db.groups) : undefined;
+
+  if (cls) {
+    const mine = cls.mine?.status === "CONFIRMED";
+    return (
+      <button onClick={onClick} className={cn(base, mine ? "border-success/50 bg-success/15 text-success" : "border-accent/40 bg-accent/15 text-accent hover:brightness-125")}>
+        <span className="flex items-center gap-1.5 text-sm font-bold">
+          <Users size={12} /> {time}
+        </span>
+        <span className="truncate text-[11px] font-semibold">
+          {classTitle(cls)} · {mode === "trainer" ? `${cls.confirmed}/${cls.capacity} booked` : mine ? "You're in" : spotsLabel(cls)}
+        </span>
+      </button>
+    );
+  }
 
   if (s.state === "open") {
     return (
@@ -290,10 +318,10 @@ interface TravelBlock {
   gap: number;
 }
 
-function coachTravelBlocks(day: Date, db: ReturnType<typeof useViewer>["db"]): TravelBlock[] {
+function coachTravelBlocks(day: Date, db: ReturnType<typeof useViewer>["db"], all: Booking[]): TravelBlock[] {
   const r = db.settings;
   if (!r.travelEnabled) return [];
-  const list = db.bookings.filter((b) => OCCUPYING.includes(b.status) && ymd(parseISO(b.start)) === ymd(day) && b.clientId !== "other").sort((a, b) => a.start.localeCompare(b.start));
+  const list = all.filter((b) => OCCUPYING.includes(b.status) && ymd(parseISO(b.start)) === ymd(day) && b.clientId !== "other").sort((a, b) => a.start.localeCompare(b.start));
   const out: TravelBlock[] = [];
   for (let i = 0; i + 1 < list.length; i++) {
     const a = list[i];

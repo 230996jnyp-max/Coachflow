@@ -11,6 +11,7 @@ import { atTime, availableCredits, travelProblem, ymd } from "@/lib/scheduling";
 import { locOf } from "@/lib/travel";
 import { createBooking } from "@/lib/store";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { classesAsBookings } from "@/components/groups/groupUi";
 import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
 import { bookingLocation } from "./bookingUi";
 import { AddToCalendar } from "./CalendarActions";
@@ -50,7 +51,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
     if (!gym || !isGymComplete(gym) || Number.isNaN(sessionStart.getTime())) return null;
     const loc = gymToBooking(gym, db.gyms);
     const end = new Date(sessionStart.getTime() + db.settings.sessionMinutes * 60000);
-    return travelProblem(db.bookings, sessionStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings);
+    return travelProblem([...db.bookings, ...classesAsBookings(db.groups)], sessionStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings);
   })();
 
   if (booked) {

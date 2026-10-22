@@ -1,9 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES, SEED_EXERCISES } from "@/data/exercises";
 import { starterTemplates } from "@/lib/seed";
-import type { Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
+import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, forbidden } from "./http";
@@ -62,6 +62,25 @@ const obj = (v: unknown, name: string): Record<string, unknown> => {
 };
 
 /* ---------------- Parsers ---------------- */
+const COACH_KEYS: CoachEditKey[] = ["weight", "reps", "durationSec", "distanceKm", "done"];
+
+function parseCoachEdit(raw: unknown): CoachEdit | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.at !== "string" || Number.isNaN(Date.parse(r.at))) return undefined;
+  const keys = (Array.isArray(r.keys) ? r.keys : []).filter((k): k is CoachEditKey => COACH_KEYS.includes(k as CoachEditKey));
+  const prevRaw = r.prev && typeof r.prev === "object" && !Array.isArray(r.prev) ? (r.prev as Record<string, unknown>) : {};
+  const prev: CoachEdit["prev"] = {};
+  for (const k of keys) {
+    const v = prevRaw[k];
+    if (k === "done" ? typeof v === "boolean" : typeof v === "number" && Number.isFinite(v)) prev[k] = v as number | boolean;
+  }
+  const out: CoachEdit = { at: new Date(r.at).toISOString(), keys, prev };
+  if (r.superseded === true) out.superseded = true;
+  if (r.conflict === true) out.conflict = true;
+  return out;
+}
+
 function parseSet(raw: unknown): WorkoutSet {
   const r = obj(raw, "Set");
   const type = SET_TYPES.includes(r.type as SetType) ? (r.type as SetType) : "N";
@@ -82,6 +101,8 @@ function parseSet(raw: unknown): WorkoutSet {
   if (level !== undefined) s.level = level;
   if (calories !== undefined) s.calories = calories;
   if (pr && pr.length) s.pr = pr;
+  const coachEdit = parseCoachEdit(r.coachEdit);
+  if (coachEdit) s.coachEdit = coachEdit;
   return s;
 }
 
@@ -110,10 +131,11 @@ export function parseWorkout(raw: unknown): Workout {
   };
   if (r.liveStartedAt) w.liveStartedAt = iso(r.liveStartedAt, "Start time");
   if (typeof r.templateId === "string" && r.templateId) w.templateId = id(r.templateId, "Template");
+  if (typeof r.groupId === "string" && r.groupId) w.groupId = id(r.groupId, "Group");
   return w;
 }
 
-function parseTemplateExercise(raw: unknown): TemplateExercise {
+export function parseTemplateExercise(raw: unknown): TemplateExercise {
   const r = obj(raw, "Template exercise");
   const t: TemplateExercise = {
     exerciseId: id(r.exerciseId, "Exercise id"),
@@ -168,7 +190,7 @@ export async function writableClientIds(me: UserRow): Promise<string[]> {
 }
 
 /* ---------------- Row mappers ---------------- */
-function openWorkout(row: WorkoutRow): Workout | null {
+export function openWorkout(row: WorkoutRow): Workout | null {
   try {
     const w = decryptJson<Workout>(row.dataEnc, aadW(row.id));
     return { ...w, id: row.id, clientId: row.clientId, status: row.status === "ACTIVE" ? "ACTIVE" : "DONE" };
@@ -243,18 +265,134 @@ export async function loadTraining(me: UserRow, since?: Date): Promise<TrainingP
 
 /* ---------------- Writes ---------------- */
 export async function putWorkout(me: UserRow, raw: unknown, mode: "upsert" | "insert-only" = "upsert"): Promise<Workout> {
-  const w = parseWorkout(raw);
+  let w = parseWorkout(raw);
   const allowed = await writableClientIds(me);
   if (!allowed.includes(w.clientId)) throw forbidden("You can't log workouts for this person.");
   const d = await db();
-  const [existing] = await d.select({ clientId: workouts.clientId }).from(workouts).where(eq(workouts.id, w.id)).limit(1);
+  const [existing] = await d.select().from(workouts).where(eq(workouts.id, w.id)).limit(1);
   if (existing) {
     if (mode === "insert-only") return w;
     if (existing.clientId !== w.clientId || !allowed.includes(existing.clientId)) throw forbidden();
+    // A group workout is edited by the client and by the coach at once: keep the coach's edits the client has not seen yet.
+    const current = existing.status === "ACTIVE" ? openWorkout(existing) : null;
+    if (current?.groupId) w = { ...mergeGroupWorkout(current, w, me.role === "CLIENT"), groupId: current.groupId };
   }
   const values = { id: w.id, clientId: w.clientId, startedAt: new Date(w.startedAt), status: w.status, dataEnc: encryptJson(w, aadW(w.id)), updatedAt: new Date() };
   await d.insert(workouts).values(values).onConflictDoUpdate({ target: workouts.id, set: { startedAt: values.startedAt, status: values.status, dataEnc: values.dataEnc, updatedAt: values.updatedAt } });
   return w;
+}
+
+/**
+ * The client saves their whole workout while the coach may have just changed a set on the live grid. A set the coach
+ * edited that the client has not seen yet keeps the coach's values — unless the client changed the same values too, in
+ * which case the client's win and the set is flagged so the coach is told.
+ */
+export function mergeGroupWorkout(current: Workout, incoming: Workout, fromClient: boolean): Workout {
+  if (!fromClient) return incoming;
+  const server = new Map<string, WorkoutSet>();
+  for (const we of current.exercises) for (const s of we.sets) server.set(s.id, s);
+  return {
+    ...incoming,
+    exercises: incoming.exercises.map((we) => ({
+      ...we,
+      sets: we.sets.map((s) => {
+        const e = server.get(s.id);
+        const ce = e?.coachEdit;
+        if (!e || !ce) return s;
+        if (s.coachEdit?.at === ce.at) return s; // the client has seen this edit
+        if (ce.superseded) return s.coachEdit ? s : { ...s, coachEdit: ce };
+        const unchanged = ce.keys.every((k) => (s as unknown as Record<string, unknown>)[k] === ce.prev[k]);
+        if (!unchanged) return { ...s, coachEdit: { ...ce, superseded: true, conflict: true } };
+        const merged: Record<string, unknown> = { ...s, coachEdit: ce };
+        for (const k of ce.keys) {
+          const v = (e as unknown as Record<string, unknown>)[k];
+          if (v === undefined) delete merged[k];
+          else merged[k] = v;
+        }
+        return merged as unknown as WorkoutSet;
+      }),
+    })),
+  };
+}
+
+export interface SetPatch {
+  weight?: number | null;
+  reps?: number | null;
+  durationSec?: number | null;
+  distanceKm?: number | null;
+  done?: boolean;
+}
+
+/** Coach: change values of one set of a client's live group workout, recording what they were before. */
+export async function patchWorkoutSet(me: UserRow, workoutId: string, entryId: string, setId: string, raw: unknown): Promise<Workout> {
+  if (me.role === "CLIENT") throw forbidden();
+  const p = obj(raw, "Change");
+  const d = await db();
+  const [row] = await d.select().from(workouts).where(eq(workouts.id, id(workoutId, "Workout id"))).limit(1);
+  if (!row) throw badRequest("That workout no longer exists.");
+  if (!(await writableClientIds(me)).includes(row.clientId)) throw forbidden();
+  const w = openWorkout(row);
+  if (!w || w.status !== "ACTIVE" || !w.groupId) throw badRequest("Only a live group workout can be edited here.");
+  const limits: Record<string, [number, number]> = { weight: [0, 2000], reps: [0, 10000], durationSec: [0, 172800], distanceKm: [0, 5000] };
+  const changes: Partial<Record<CoachEditKey, number | boolean | null>> = {};
+  for (const k of COACH_KEYS) {
+    if (!(k in p)) continue;
+    const v = p[k];
+    if (k === "done") {
+      if (typeof v !== "boolean") throw badRequest("Done must be true or false.");
+      changes.done = v;
+    } else if (v === null) changes[k] = null;
+    else changes[k] = num(v, k, limits[k][0], limits[k][1]) ?? null;
+  }
+  if (!Object.keys(changes).length) throw badRequest("Nothing to change.");
+  let found = false;
+  const next: Workout = {
+    ...w,
+    exercises: w.exercises.map((we) => {
+      if (we.id !== entryId) return we;
+      return {
+        ...we,
+        sets: we.sets.map((s) => {
+          if (s.id !== setId) return s;
+          found = true;
+          const old = s.coachEdit && !s.coachEdit.superseded ? s.coachEdit : undefined;
+          const keys = [...new Set([...(old?.keys ?? []), ...(Object.keys(changes) as CoachEditKey[])])];
+          const prev: CoachEdit["prev"] = { ...(old?.prev ?? {}) };
+          const out: Record<string, unknown> = { ...s };
+          for (const k of Object.keys(changes) as CoachEditKey[]) {
+            if (!(old?.keys ?? []).includes(k)) {
+              const was = (s as unknown as Record<string, unknown>)[k];
+              if (was !== undefined) prev[k] = was as number | boolean;
+            }
+            const v = changes[k];
+            if (v === null || v === undefined) delete out[k];
+            else out[k] = v;
+          }
+          out.coachEdit = { at: new Date().toISOString(), keys, prev };
+          return out as unknown as WorkoutSet;
+        }),
+      };
+    }),
+  };
+  if (!found) throw badRequest("That set no longer exists.");
+  const values = { dataEnc: encryptJson(next, aadW(next.id)), updatedAt: new Date() };
+  await d.update(workouts).set(values).where(eq(workouts.id, next.id));
+  return next;
+}
+
+/** Creates a workout only if none with that id exists (used to hand every group attendee their own copy). */
+export async function insertWorkoutIfAbsent(w: Workout): Promise<boolean> {
+  const d = await db();
+  const values = { id: w.id, clientId: w.clientId, startedAt: new Date(w.startedAt), status: w.status, dataEnc: encryptJson(w, aadW(w.id)), updatedAt: new Date() };
+  const done = await d.insert(workouts).values(values).onConflictDoNothing().returning({ id: workouts.id });
+  return done.length > 0;
+}
+
+/** A client's recent finished workouts (newest first), for "previous" values. */
+export async function recentDoneWorkouts(clientId: string, limit = 60): Promise<Workout[]> {
+  const d = await db();
+  const rows = await d.select().from(workouts).where(and(eq(workouts.clientId, clientId), eq(workouts.status, "DONE"))).orderBy(desc(workouts.startedAt)).limit(limit);
+  return rows.map(openWorkout).filter(present);
 }
 
 export async function removeWorkout(me: UserRow, workoutId: string): Promise<void> {

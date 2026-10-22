@@ -24,6 +24,7 @@ import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useC
 import { useViewer } from "@/lib/hooks";
 import { logout } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "./groups/NotificationBell";
 import { InstallButton } from "./InstallButton";
 import { Splash } from "./Providers";
 import { Avatar } from "./ui";
@@ -137,6 +138,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="space-y-2 border-t border-line p-3">
+          <div className={cn("flex items-center gap-2", collapsed && "justify-center")}>
+            <NotificationBell />
+            {!collapsed && <span className="text-xs font-semibold text-muted">Notifications</span>}
+          </div>
           {!collapsed && <InstallButton className="w-full" />}
           <div className={cn("flex items-center gap-3 rounded-xl p-2", collapsed && "justify-center")}>
             <Avatar name={user.name} size={36} />
@@ -173,13 +178,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Mobile top bar */}
       <header className="pt-safe sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur md:hidden">
         <div className="flex h-14 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
               <Dumbbell size={18} />
             </div>
-            <span className="font-bold tracking-tight">{db.settings.brandName}</span>
+            <span className="truncate font-bold tracking-tight">{db.settings.brandName}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             {user.isOwner && (
               <Link href="/admin" aria-label="Admin" className="flex h-10 w-10 items-center justify-center rounded-xl border border-pr/40 bg-pr/10 text-pr">
                 <ShieldCheck size={20} />
@@ -193,6 +198,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <MessageCircle size={20} />
               {unread > 0 && <Badge count={unread} />}
             </Link>
+            <NotificationBell />
             <InstallButton compact />
             <Link href="/settings" aria-label="Profile">
               <Avatar name={user.name} size={32} />

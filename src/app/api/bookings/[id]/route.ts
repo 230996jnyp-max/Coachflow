@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
+import { onBookingCancelled, onBookingMoved, onBookingStatus } from "@/lib/server/groups";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
 import { adjustCredits, CHARGED, clientCredits, hasConflict, parsePlace, requestLoc, rulesFor, sealDetails, toBooking, travelCheck } from "@/lib/server/schedule";
 import { bookings, gyms, users } from "@/lib/server/schema";
@@ -39,6 +40,7 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
       throw forbidden(`Sessions can only be cancelled ${rules.noticeHours}h or more before they start — message your coach.`);
     }
     const [u] = await d.update(bookings).set({ status: "CANCELLED", rev: row.rev + 1 }).where(eq(bookings.id, id)).returning();
+    await onBookingCancelled(id, row.clientId);
     return NextResponse.json({ booking: toBooking(u) });
   }
 
@@ -54,6 +56,9 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
       .where(and(eq(bookings.id, id), eq(bookings.coachId, me.id)))
       .returning();
     if (clientRow) credits = delta ? await adjustCredits(clientRow, delta) : clientCredits(clientRow);
+    // A session opened to partners: a cancellation passes it on, a completion uses the partners' group credits.
+    if (next === "CANCELLED" || next === "DECLINED") await onBookingCancelled(id, row.clientId);
+    else await onBookingStatus(id, next, CHARGED.includes(status), CHARGED.includes(next));
     return NextResponse.json({ booking: toBooking(u), credits });
   }
 
@@ -82,6 +87,7 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
       .set({ startAt: start, endAt: end, rev: row.rev + 1, detailsEnc: sealDetails(id, { notes: old.notes, customGym: customGym || undefined, gymId, place }) })
       .where(eq(bookings.id, id))
       .returning();
+    await onBookingMoved(id, start, end, { gymId, customGym: customGym || undefined, place });
     return NextResponse.json({ booking: toBooking(u) });
   }
 
