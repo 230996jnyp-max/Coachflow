@@ -21,6 +21,7 @@ import type {
   DB,
   Exercise,
   GymLocation,
+  PlaceInfo,
   ProgressPhoto,
   Role,
   RoutineTemplate,
@@ -876,6 +877,7 @@ export interface NewBookingInput {
   start: Date;
   gymId: string | null;
   customGym?: string;
+  place?: PlaceInfo | null;
   focus: SessionFocus;
   notes: string;
   createdBy: Role;
@@ -897,6 +899,7 @@ export async function createBooking(input: NewBookingInput): Promise<{ ok: true;
       start: input.start.toISOString(),
       gymId: input.gymId,
       customGym: input.customGym,
+      place: input.place ?? undefined,
       focus: input.focus,
       notes: input.notes,
     },
@@ -925,8 +928,8 @@ export async function cancelBookingAs(id: string, role: Role): Promise<string | 
   return null;
 }
 
-export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string): Promise<string | null> {
-  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym } });
+export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string, place?: PlaceInfo | null): Promise<string | null> {
+  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym, place: place ?? undefined } });
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");

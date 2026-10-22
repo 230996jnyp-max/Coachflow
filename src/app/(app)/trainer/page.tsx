@@ -1,11 +1,12 @@
 "use client";
 
 import { addDays, endOfDay, format, isSameDay, parseISO, startOfDay } from "date-fns";
-import { AlertTriangle, Check, ChevronRight, MapPin, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { BookingDetail } from "@/components/booking/BookingDetail";
-import { gymName, StatusBadge, timeRange } from "@/components/booking/bookingUi";
+import { LocationPill } from "@/components/LocationPill";
+import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
@@ -52,7 +53,7 @@ export default function TrainerDashboard() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{nameOf(b.clientId)}</div>
                   <div className="text-xs text-muted">
-                    {format(parseISO(b.start), "EEE d MMM")} · {timeRange(b)} · {gymName(b, db.gyms)}
+                    {format(parseISO(b.start), "EEE d MMM")} · {timeRange(b)} · <LocationPill small label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} className="font-medium align-middle" />
                   </div>
                 </div>
                 <Button size="sm" variant="success" onClick={() => setBookingStatus(b.id, "CONFIRMED")}>
@@ -86,7 +87,8 @@ export default function TrainerDashboard() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">{nameOf(b.clientId)}</div>
                       <div className="flex items-center gap-1 truncate text-xs text-muted">
-                        <MapPin size={11} /> {gymName(b, db.gyms)} · {b.focus}
+                        <LocationPill nested small label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} className="font-medium" />
+                        <span className="shrink-0">· {b.focus}</span>
                       </div>
                     </div>
                   </button>

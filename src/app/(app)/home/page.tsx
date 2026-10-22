@@ -1,12 +1,13 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { CalendarPlus, ChevronRight, Dumbbell, MapPin, Play, Trophy } from "lucide-react";
+import { CalendarPlus, ChevronRight, Dumbbell, Play, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { BookingDetail } from "@/components/booking/BookingDetail";
-import { gymName, StatusBadge, timeRange } from "@/components/booking/bookingUi";
+import { LocationPill } from "@/components/LocationPill";
+import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { CalendarQuickLinks } from "@/components/booking/CalendarActions";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
@@ -69,7 +70,8 @@ export default function ClientHome() {
                 <StatusBadge status={next.status} />
               </div>
               <div className="mt-3 flex items-center gap-1.5 text-sm text-muted">
-                <MapPin size={14} /> {gymName(next, db.gyms)} · {next.focus}
+                <LocationPill nested label={bookingLocation(next, db.gyms).label} href={bookingLocation(next, db.gyms).href} className="font-medium" />
+                <span className="shrink-0">· {next.focus}</span>
               </div>
             </Card>
           </button>

@@ -50,7 +50,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ file: string }
       end: r.endAt,
       summary: `PT session — ${clientName.get(r.clientId) ?? "Client"}`,
       description: [`Focus: ${b.focus}`, r.status === "PENDING" ? "Awaiting your approval" : "", r.status === "NO_SHOW" ? "No-show" : ""].filter(Boolean).join("\n"),
-      location: b.customGym || (b.gymId ? gymName.get(b.gymId) : undefined) || undefined,
+      location: b.place ? [b.place.name, b.place.address].filter(Boolean).join(", ") : b.customGym || (b.gymId ? gymName.get(b.gymId) : undefined) || undefined,
       rev: r.rev,
       cancelled: r.status === "CANCELLED" || r.status === "DECLINED",
       tentative: r.status === "PENDING",

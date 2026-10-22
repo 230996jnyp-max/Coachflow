@@ -236,6 +236,8 @@ export interface Booking {
   end: string; // ISO
   gymId: string | null;
   customGym?: string;
+  /** Exact Google Maps place (name, address, coordinates) when one was picked. */
+  place?: PlaceInfo;
   focus: SessionFocus;
   notes: string;
   status: BookingStatus;
@@ -243,6 +245,15 @@ export interface Booking {
   createdAt: string;
   /** Bumped on reschedule/cancel so calendar apps treat updates to the same event correctly. */
   rev?: number;
+}
+
+/** A place chosen from Google Maps search (Singapore). */
+export interface PlaceInfo {
+  placeId: string;
+  name: string;
+  address: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface AppSettings {

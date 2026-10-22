@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
-import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, Role, SessionFocus } from "@/lib/types";
+import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
+import { badRequest } from "./http";
 import { openProfile, sealProfile } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
@@ -22,10 +23,29 @@ export const RESERVING: BookingStatus[] = ["PENDING", "CONFIRMED"];
 export const CHARGED: BookingStatus[] = ["COMPLETED", "NO_SHOW"];
 export const FOCUS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
 
-interface Details {
+export interface Details {
   notes: string;
   customGym?: string;
   gymId?: string | null;
+  /** Exact Google Maps place picked for this session (encrypted with the rest of the details). */
+  place?: PlaceInfo;
+}
+
+/** Validates a place coming from the browser (it is rebuilt field by field, never stored as sent). */
+export function parsePlace(raw: unknown): PlaceInfo | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw badRequest("That place isn't valid.");
+  const r = raw as Record<string, unknown>;
+  const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const placeId = text(r.placeId, 200);
+  const name = text(r.name, 150);
+  if (!/^[A-Za-z0-9_-]{5,200}$/.test(placeId) || !name) throw badRequest("That place isn't valid.");
+  const out: PlaceInfo = { placeId, name, address: text(r.address, 300) };
+  if (typeof r.lat === "number" && Number.isFinite(r.lat) && Math.abs(r.lat) <= 90 && typeof r.lng === "number" && Number.isFinite(r.lng) && Math.abs(r.lng) <= 180) {
+    out.lat = r.lat;
+    out.lng = r.lng;
+  }
+  return out;
 }
 
 const aad = (id: string) => `booking:${id}`;
@@ -54,6 +74,7 @@ export function toBooking(row: BookingRow): Booking {
     end: row.endAt.toISOString(),
     gymId: det.gymId ?? null,
     customGym: det.customGym || undefined,
+    place: det.place,
     focus: row.focus as SessionFocus,
     notes: det.notes ?? "",
     status: row.status as BookingStatus,

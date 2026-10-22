@@ -1,14 +1,15 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { ChevronRight, MapPin } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Avatar, Card, EmptyState, Segmented } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { useNow } from "@/lib/store";
 import { BookingDetail } from "./BookingDetail";
 import { CalendarQuickLinks } from "./CalendarActions";
-import { gymName, StatusBadge, timeRange } from "./bookingUi";
+import { LocationPill } from "@/components/LocationPill";
+import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
 
 type Filter = "upcoming" | "pending" | "past" | "cancelled";
 
@@ -61,9 +62,9 @@ export function BookingList({ clientId, filters = ["upcoming", "pending", "past"
                     <div className="mt-0.5 text-xs text-muted">
                       {format(parseISO(b.start), "MMM yyyy")} · {timeRange(b)}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted">
-                      <MapPin size={11} /> {gymName(b, db.gyms)}
-                      {isTrainer && ` · ${b.focus}`}
+                    <div className="mt-0.5 flex items-center gap-1 text-xs text-muted">
+                      <LocationPill nested small label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} className="font-medium" />
+                      {isTrainer && <span className="shrink-0 truncate">· {b.focus}</span>}
                     </div>
                   </div>
                   <StatusBadge status={b.status} />

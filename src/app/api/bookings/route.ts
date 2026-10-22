@@ -4,7 +4,7 @@ import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, conflict, notFound, readJson, route, str } from "@/lib/server/http";
-import { clientCredits, FOCUS, hasConflict, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, loadSchedule } from "@/lib/server/schedule";
+import { clientCredits, FOCUS, hasConflict, parsePlace, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, loadSchedule } from "@/lib/server/schedule";
 import { bookings, gyms } from "@/lib/server/schema";
 import { and, eq } from "drizzle-orm";
 import type { SessionFocus } from "@/lib/types";
@@ -35,7 +35,8 @@ export const POST = route(async (req) => {
 
   const focus: SessionFocus = FOCUS.includes(body.focus as SessionFocus) ? (body.focus as SessionFocus) : "Full Body";
   const gymId = typeof body.gymId === "string" && body.gymId ? body.gymId.slice(0, 80) : null;
-  const customGym = str(body.customGym, "Location", { optional: true, max: 140 });
+  const place = gymId ? undefined : parsePlace(body.place);
+  const customGym = str(body.customGym, "Location", { optional: true, max: 140 }) || place?.name || "";
   const notes = str(body.notes, "Notes", { optional: true, max: 500 });
   if (!gymId && !customGym) throw badRequest("Please choose a gym location.");
 
@@ -66,7 +67,7 @@ export const POST = route(async (req) => {
       status: isClient && !rules.autoConfirm ? "PENDING" : "CONFIRMED",
       focus,
       createdBy: isClient ? "CLIENT" : "TRAINER",
-      detailsEnc: sealDetails(id, { notes, customGym: customGym || undefined, gymId }),
+      detailsEnc: sealDetails(id, { notes, customGym: customGym || undefined, gymId, place }),
     })
     .returning();
   return NextResponse.json({ booking: toBooking(row) });

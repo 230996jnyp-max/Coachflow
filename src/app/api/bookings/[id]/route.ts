@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
-import { adjustCredits, CHARGED, clientCredits, hasConflict, rulesFor, sealDetails, toBooking } from "@/lib/server/schedule";
+import { adjustCredits, CHARGED, clientCredits, hasConflict, parsePlace, rulesFor, sealDetails, toBooking } from "@/lib/server/schedule";
 import { bookings, gyms, users } from "@/lib/server/schema";
 import type { BookingStatus } from "@/lib/types";
 
@@ -17,7 +17,7 @@ const STAFF_STATUSES: BookingStatus[] = ["CONFIRMED", "COMPLETED", "NO_SHOW", "D
  * PATCH { action } on one booking.
  *  cancel       client (within the notice window) or the coach
  *  status       coach: CONFIRMED | COMPLETED | NO_SHOW | DECLINED | CANCELLED — completing/no-show deducts a credit, undoing restores it
- *  reschedule   coach: { start, gymId?, customGym? }
+ *  reschedule   coach: { start, gymId?, customGym?, place? }
  */
 export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx) => {
   const body = await readJson(req);
@@ -66,7 +66,8 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
 
     const old = decryptJson<{ notes: string; customGym?: string; gymId?: string | null }>(row.detailsEnc, `booking:${id}`);
     const gymId = typeof body.gymId === "string" && body.gymId ? body.gymId.slice(0, 80) : null;
-    const customGym = str(body.customGym, "Location", { optional: true, max: 140 });
+    const place = gymId ? undefined : parsePlace(body.place);
+    const customGym = str(body.customGym, "Location", { optional: true, max: 140 }) || place?.name || "";
     if (!gymId && !customGym) throw badRequest("Please choose a gym location.");
     if (gymId) {
       const [g] = await d.select().from(gyms).where(and(eq(gyms.id, gymId), eq(gyms.coachId, me.id))).limit(1);
@@ -74,7 +75,7 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
     }
     const [u] = await d
       .update(bookings)
-      .set({ startAt: start, endAt: end, rev: row.rev + 1, detailsEnc: sealDetails(id, { notes: old.notes, customGym: customGym || undefined, gymId }) })
+      .set({ startAt: start, endAt: end, rev: row.rev + 1, detailsEnc: sealDetails(id, { notes: old.notes, customGym: customGym || undefined, gymId, place }) })
       .where(eq(bookings.id, id))
       .returning();
     return NextResponse.json({ booking: toBooking(u) });

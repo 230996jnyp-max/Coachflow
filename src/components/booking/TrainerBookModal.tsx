@@ -5,11 +5,13 @@ import { CalendarPlus } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
 import { Button, Field, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
-import { gymToBooking, isGymComplete } from "@/lib/gyms";
+import { directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { atTime, availableCredits, ymd } from "@/lib/scheduling";
 import { createBooking } from "@/lib/store";
-import type { Booking, SessionFocus } from "@/lib/types";
+import { LocationPill, MiniMap } from "@/components/LocationPill";
+import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
+import { bookingLocation } from "./bookingUi";
 import { AddToCalendar } from "./CalendarActions";
 import { FOCUS_OPTIONS } from "./BookModal";
 
@@ -31,6 +33,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
   const [time, setTime] = useState(() => (init.start ? format(init.start, "HH:mm") : "09:00"));
   const profile = db.clients.find((c) => c.id === clientId);
   const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
+  const [place, setPlace] = useState<PlaceInfo | null>(null);
   const [focus, setFocus] = useState<SessionFocus>("Full Body");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +49,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
           <div className="rounded-xl border border-success/30 bg-success/10 p-3 text-center text-sm">
             <div className="font-bold">{db.users.find((u) => u.id === booked.clientId)?.name ?? "Client"}</div>
             <div className="text-muted">{format(new Date(booked.start), "EEEE d MMMM · h:mm a")}</div>
+          </div>
+          <div className="flex flex-col items-center gap-2 text-sm">
+            <LocationPill label={bookingLocation(booked, db.gyms).label} href={bookingLocation(booked, db.gyms).href} />
+            {booked.place && <div className="w-full"><MiniMap place={booked.place} href={directionsUrl({ place: booked.place })} /></div>}
           </div>
           <AddToCalendar booking={booked} />
         </div>
@@ -68,7 +75,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             onClick={async () => {
               setError(null);
               if (!gym) return setError("Please choose a gym or place.");
-              if (!isGymComplete(gym)) return setError("Please type the place name.");
+              if (!isGymComplete(gym)) return setError("Please choose the exact location (search and pick it, or type the place).");
               const loc = gymToBooking(gym, db.gyms);
               setBusy(true);
               const res = await createBooking({
@@ -76,6 +83,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
                 start: atTime(date, time),
                 gymId: loc.gymId,
                 customGym: loc.customGym,
+                place: placeForBooking(gym, place),
                 focus,
                 notes: notes.trim(),
                 createdBy: "TRAINER",
@@ -97,7 +105,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             onChange={(e) => {
               setClientId(e.target.value);
               const p = db.clients.find((c) => c.id === e.target.value);
-              if (p?.defaultGymId) setGym(p.defaultGymId);
+              if (p?.defaultGymId) {
+                setGym(p.defaultGymId);
+                setPlace(null);
+              }
             }}
           >
             {active.map((c) => (
@@ -117,7 +128,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
           </Field>
         </div>
         <Field label="Gym location">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
         </Field>
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>

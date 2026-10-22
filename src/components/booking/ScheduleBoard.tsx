@@ -1,7 +1,7 @@
 "use client";
 
 import { addDays, addWeeks, format, isSameDay, startOfWeek } from "date-fns";
-import { CalendarPlus, ChevronLeft, ChevronRight, Lock } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Lock, MapPin } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, Card, IconButton } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -165,7 +165,7 @@ function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer
       >
         <span className="text-sm font-bold">{time}</span>
         <span className="truncate text-[11px] font-semibold">
-          {b.status === "PENDING" ? "Awaiting approval" : b.status === "COMPLETED" ? "Completed" : "Your session"} · {gymName(b, db.gyms)}
+          {b.status === "PENDING" ? "Awaiting approval" : b.status === "COMPLETED" ? "Completed" : "Your session"} · <MapPin size={10} className="mb-0.5 inline" /> {gymName(b, db.gyms)}
         </span>
       </button>
     );
@@ -178,7 +178,7 @@ function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer
         <button onClick={onClick} className={cn(base, tone, "hover:brightness-125")}>
           <span className="text-sm font-bold">{time}</span>
           <span className="truncate text-[11px] font-semibold">
-            {client?.name ?? "Client"} · {gymName(b, db.gyms)}
+            {client?.name ?? "Client"} · <MapPin size={10} className="mb-0.5 inline" /> {gymName(b, db.gyms)}
           </span>
         </button>
       );

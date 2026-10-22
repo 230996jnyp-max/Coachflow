@@ -5,12 +5,14 @@ import { Check, Clock, MapPin, MessageSquare, Target, UserX, X } from "lucide-re
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
 import { Avatar, Button, Field, Input, Modal, Notice } from "@/components/ui";
-import { bookingToGymValue, gymToBooking, isGymComplete } from "@/lib/gyms";
+import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { bookingToGymValue, directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
+import type { PlaceInfo } from "@/lib/types";
 import { useViewer } from "@/lib/hooks";
 import { atTime, canCancel, ymd } from "@/lib/scheduling";
 import { cancelBookingAs, rescheduleBooking, setBookingStatus, useNow } from "@/lib/store";
 import { AddToCalendar } from "./CalendarActions";
-import { gymName, StatusBadge, timeRange } from "./bookingUi";
+import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
 
 /** Details for a single booking. Clients can cancel (inside policy); the trainer can run the whole lifecycle. */
 export function BookingDetail({ bookingId, onClose }: { bookingId: string | null; onClose: () => void }) {
@@ -25,6 +27,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const [date, setDate] = useState(() => (b ? ymd(parseISO(b.start)) : ""));
   const [time, setTime] = useState(() => (b ? format(parseISO(b.start), "HH:mm") : "09:00"));
   const [gym, setGym] = useState(() => (b ? bookingToGymValue(b) : ""));
+  const [place, setPlace] = useState<PlaceInfo | null>(() => b?.place ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -53,10 +56,15 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
             {format(parseISO(b.start), "EEEE d MMMM yyyy")}
             <div className="text-xs text-muted">{timeRange(b)}</div>
           </Line>
-          <Line icon={<MapPin size={16} />}>{gymName(b, db.gyms)}</Line>
+          <Line icon={<MapPin size={16} />}>
+            <LocationPill label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} />
+            {b.place?.address && <div className="text-xs text-muted">{b.place.address}</div>}
+          </Line>
           <Line icon={<Target size={16} />}>{b.focus}</Line>
           {b.notes && <Line icon={<MessageSquare size={16} />}>{b.notes}</Line>}
         </div>
+
+        {b.place && <MiniMap place={b.place} href={directionsUrl({ place: b.place })} />}
 
         <AddToCalendar booking={b} />
 
@@ -108,7 +116,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
                   </Field>
                 </div>
                 <Field label="Gym location">
-                  <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" />
+                  <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
                 </Field>
                 {error && <Notice tone="error">{error}</Notice>}
                 <div className="flex gap-2">
@@ -119,10 +127,10 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
                     className="flex-1"
                     disabled={busy}
                     onClick={async () => {
-                      if (!gym || !isGymComplete(gym)) return setError("Choose a gym or type the place name.");
+                      if (!gym || !isGymComplete(gym)) return setError("Choose a gym and its exact location.");
                       const loc = gymToBooking(gym, db.gyms);
                       setBusy(true);
-                      const err = await rescheduleBooking(b.id, atTime(date, time), loc.gymId, loc.customGym);
+                      const err = await rescheduleBooking(b.id, atTime(date, time), loc.gymId, loc.customGym, placeForBooking(gym, place));
                       setBusy(false);
                       if (err) setError(err);
                       else onClose();
