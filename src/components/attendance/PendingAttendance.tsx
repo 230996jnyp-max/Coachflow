@@ -69,16 +69,16 @@ export function PendingAttendance() {
               </div>
               {single && !only.attendance ? (
                 <>
-                  <Button size="sm" variant="success" disabled={busy === it.key} onClick={() => quick(it, [{ clientId: only.clientId, mark: "PRESENT" }])}>
+                  <Button size="sm" variant="secondary" disabled={busy === it.key} onClick={() => quick(it, [{ clientId: only.clientId, mark: "PRESENT" }])}>
                     <UserCheck size={14} /> Present
                   </Button>
-                  <Button size="sm" variant="danger" disabled={busy === it.key} onClick={() => quick(it, [{ clientId: only.clientId, mark: "NO_SHOW" }])}>
+                  <Button size="sm" variant="secondary" disabled={busy === it.key} onClick={() => quick(it, [{ clientId: only.clientId, mark: "NO_SHOW" }])}>
                     <UserX size={14} /> No-Show
                   </Button>
                 </>
               ) : (
                 all && (
-                  <Button size="sm" variant="success" disabled={busy === it.key} onClick={() => quick(it, roll.people.filter((p) => !p.attendance).map((p) => ({ clientId: p.clientId, mark: "PRESENT" as const })))}>
+                  <Button size="sm" variant="secondary" disabled={busy === it.key} onClick={() => quick(it, roll.people.filter((p) => !p.attendance).map((p) => ({ clientId: p.clientId, mark: "PRESENT" as const })))}>
                     <UserCheck size={14} /> {roll.people.some((p) => p.attendance) ? "Finalize" : "All present"}
                   </Button>
                 )

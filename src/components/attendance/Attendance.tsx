@@ -141,12 +141,14 @@ export function FinalAttendanceModal({ target, open, onClose }: { target: Attend
 function FinalForm({ target, onClose }: { target: AttendanceTarget; onClose: () => void }) {
   const { db } = useViewer();
   const roll = rollFor(db, target);
-  const [choice, setChoice] = useState<Record<string, { mark: "PRESENT" | "NO_SHOW"; deduct: boolean }>>(() =>
-    Object.fromEntries((roll?.people ?? []).map((p) => [p.clientId, { mark: p.attendance?.mark ?? "PRESENT", deduct: p.attendance?.deduct ?? false }])),
+  // Nobody is pre-selected: each person lights up only once the coach taps Present or No-Show (earlier marks are kept).
+  const [choice, setChoice] = useState<Record<string, { mark?: "PRESENT" | "NO_SHOW"; deduct: boolean }>>(() =>
+    Object.fromEntries((roll?.people ?? []).map((p) => [p.clientId, { mark: p.attendance?.mark, deduct: p.attendance?.deduct ?? false }])),
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (!roll) return null;
+  const undecided = roll.people.filter((p) => !choice[p.clientId]?.mark).length;
   const used = roll.people.filter((p) => choice[p.clientId]?.mark === "PRESENT" || (choice[p.clientId]?.mark === "NO_SHOW" && choice[p.clientId]?.deduct)).length;
 
   const finish = async () => {
@@ -159,7 +161,7 @@ function FinalForm({ target, onClose }: { target: AttendanceTarget; onClose: () 
     }
     const err = await saveAttendance(
       target,
-      roll.people.map((p) => ({ clientId: p.clientId, mark: choice[p.clientId].mark, deduct: choice[p.clientId].mark === "NO_SHOW" && choice[p.clientId].deduct })),
+      roll.people.map((p) => ({ clientId: p.clientId, mark: choice[p.clientId].mark as "PRESENT" | "NO_SHOW", deduct: choice[p.clientId].mark === "NO_SHOW" && choice[p.clientId].deduct })),
       true,
     );
     setBusy(false);
@@ -177,14 +179,19 @@ function FinalForm({ target, onClose }: { target: AttendanceTarget; onClose: () 
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="success" onClick={finish} disabled={busy || roll.people.length === 0}>
-            <Check size={16} /> {busy ? "Saving…" : `Finalize · ${used} credit${used === 1 ? "" : "s"} used`}
+          <Button variant="success" onClick={finish} disabled={busy || roll.people.length === 0 || undecided > 0}>
+            <Check size={16} /> {busy ? "Saving…" : undecided > 0 ? `${undecided} still to mark` : `Finalize · ${used} credit${used === 1 ? "" : "s"} used`}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
         <p className="text-sm text-muted">Check each person before you finish — for example, someone who arrived late after the first roll call. A No-Show returns the credit unless you choose to deduct it.</p>
+        {roll.people.length > 1 && (
+          <Button size="sm" variant="outline" onClick={() => setChoice((s) => Object.fromEntries(Object.entries(s).map(([id, v]) => [id, v.mark ? v : { ...v, mark: "PRESENT" as const }])))}>
+            <Check size={14} /> Mark everyone not yet marked as present
+          </Button>
+        )}
         <div className="divide-y divide-line rounded-xl border border-line px-3">
           {roll.people.map((p) => {
             const c = choice[p.clientId];
