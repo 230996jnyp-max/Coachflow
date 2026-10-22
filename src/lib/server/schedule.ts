@@ -2,12 +2,13 @@ import "server-only";
 import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
+import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
 import { openProfile, sealProfile } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { bookings, coachSettings, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
 
-export interface Rules {
+export interface Rules extends TravelRules {
   sessionMinutes: number;
   noticeHours: number;
   autoConfirm: boolean;
@@ -16,7 +17,17 @@ export interface Rules {
   utcOffsetMin: number;
 }
 
-export const DEFAULT_RULES: Rules = { sessionMinutes: 60, noticeHours: 12, autoConfirm: true, allowCustomGym: true, utcOffsetMin: 480 };
+export const DEFAULT_RULES: Rules = {
+  sessionMinutes: 60,
+  noticeHours: 12,
+  autoConfirm: true,
+  allowCustomGym: true,
+  utcOffsetMin: 480,
+  travelEnabled: true,
+  travelDefaultMin: 30,
+  travelParkingMin: 15,
+  travelMaxMin: 90,
+};
 
 export const OCCUPYING: BookingStatus[] = ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"];
 export const RESERVING: BookingStatus[] = ["PENDING", "CONFIRMED"];
@@ -55,7 +66,17 @@ export async function rulesFor(coachId: string): Promise<Rules> {
   const d = await db();
   const [r] = await d.select().from(coachSettings).where(eq(coachSettings.coachId, coachId)).limit(1);
   return r
-    ? { sessionMinutes: r.sessionMinutes, noticeHours: r.noticeHours, autoConfirm: r.autoConfirm, allowCustomGym: r.allowCustomGym, utcOffsetMin: r.utcOffsetMin }
+    ? {
+        sessionMinutes: r.sessionMinutes,
+        noticeHours: r.noticeHours,
+        autoConfirm: r.autoConfirm,
+        allowCustomGym: r.allowCustomGym,
+        utcOffsetMin: r.utcOffsetMin,
+        travelEnabled: r.travelEnabled,
+        travelDefaultMin: r.travelDefaultMin,
+        travelParkingMin: r.travelParkingMin,
+        travelMaxMin: r.travelMaxMin,
+      }
     : DEFAULT_RULES;
 }
 
@@ -161,6 +182,55 @@ export async function hasConflict(coachId: string, start: Date, end: Date, ignor
     .from(bookings)
     .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), lt(bookings.startAt, end), gt(bookings.endAt, start)));
   return rows.some((r) => r.id !== ignoreId);
+}
+
+/** The location fields of a booking request, as the travel rules see them. */
+export function requestLoc(input: { gymId?: string | null; customGym?: string; place?: PlaceInfo }): LocRef {
+  return locOf({ gymId: input.gymId ?? null, customGym: input.customGym, place: input.place });
+}
+
+/**
+ * Is there enough travel time before and after [start, end) for a session at `loc`? Returns a message when there is
+ * not (null when fine). Sessions at the same place need no buffer; a coach can waive the rule when booking directly.
+ */
+export async function travelCheck(coachId: string, start: Date, end: Date, loc: LocRef, rules: Rules, ignoreId: string | undefined, forCoach: boolean): Promise<string | null> {
+  if (!rules.travelEnabled) return null;
+  const d = await db();
+  const pad = Math.max(0, rules.travelMaxMin) * 60000;
+  const rows = await d
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), lt(bookings.startAt, new Date(end.getTime() + pad)), gt(bookings.endAt, new Date(start.getTime() - pad))));
+  for (const row of rows) {
+    if (row.id === ignoreId) continue;
+    const b = toBooking(row);
+    const need = bufferMinutes(locOf(b), loc, rules);
+    if (need === 0) continue;
+    const before = row.endAt.getTime() <= start.getTime();
+    const after = row.startAt.getTime() >= end.getTime();
+    if (!before && !after) continue; // an overlap is reported by the clash check
+    const gap = Math.round((before ? start.getTime() - row.endAt.getTime() : row.startAt.getTime() - end.getTime()) / 60000);
+    if (gap < need) {
+      return forCoach
+        ? `Not enough travel time: this client's gym is a different location from the ${before ? "previous" : "next"} session, which needs about ${need} min (only ${gap} min free). Choose another time, or switch on "Waive travel buffer".`
+        : `That time doesn't leave enough travel time for your coach between locations (about ${need} min needed). Choose a later or earlier time, or train at the same gym as the neighbouring session.`;
+    }
+  }
+  return null;
+}
+
+/** Sessions near `loc` with the buffer each one needs, for a client's slot grid (times only; no names or places). */
+export async function travelNeighbors(coachId: string, loc: LocRef, rules: Rules): Promise<TravelNeighbor[]> {
+  const d = await db();
+  const rows = await d
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.coachId, coachId), inArray(bookings.status, OCCUPYING), gt(bookings.endAt, new Date(Date.now() - 86400000)), lt(bookings.startAt, new Date(Date.now() + 120 * 86400000))));
+  return rows.map((row) => {
+    const b = toBooking(row);
+    const other = locOf(b);
+    return { start: row.startAt.toISOString(), end: row.endAt.toISOString(), buffer: bufferMinutes(other, loc, rules), same: rules.travelEnabled && sameLocation(other, loc) };
+  });
 }
 
 export async function reservedCount(clientId: string): Promise<number> {

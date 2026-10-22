@@ -9,6 +9,7 @@ import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
 import { clearActive, isIdleStale, markActive, rememberUsername, setIdleNotice } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
+import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
 import type {
   AppSettings,
@@ -807,6 +808,10 @@ interface RulesData {
   autoConfirm: boolean;
   allowCustomGym: boolean;
   utcOffsetMin?: number;
+  travelEnabled: boolean;
+  travelDefaultMin: number;
+  travelParkingMin: number;
+  travelMaxMin: number;
 }
 
 interface ScheduleData {
@@ -817,7 +822,7 @@ interface ScheduleData {
 }
 
 function applySchedule(data: ScheduleData) {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym } = data.settings;
+  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin } = data.settings;
   setState({
     ...state,
     db: {
@@ -825,7 +830,7 @@ function applySchedule(data: ScheduleData) {
       gyms: data.gyms,
       slots: data.slots,
       bookings: data.bookings,
-      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym },
+      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin },
     },
   });
 }
@@ -835,6 +840,12 @@ export async function refreshSchedule(): Promise<void> {
   if (!state.sessionUserId) return;
   const r = await api<ScheduleData>("/api/schedule");
   if (r.ok && r.data) applySchedule(r.data);
+}
+
+/** For a location being considered, the coach's sessions with the travel buffer each would need (times only). Null when travel rules are off. */
+export async function fetchTravelNeighbors(loc: { gymId: string | null; customGym?: string; place?: PlaceInfo | null }): Promise<TravelNeighbor[] | null> {
+  const r = await api<{ enabled: boolean; neighbors: TravelNeighbor[] }>("/api/schedule/travel", { body: { gymId: loc.gymId, customGym: loc.customGym, place: loc.place ?? undefined } });
+  return r.ok && r.data?.enabled ? r.data.neighbors : null;
 }
 
 export async function saveGym(g: Omit<GymLocation, "id"> & { id?: string }): Promise<string | null> {
@@ -878,6 +889,8 @@ export interface NewBookingInput {
   gymId: string | null;
   customGym?: string;
   place?: PlaceInfo | null;
+  /** Coach only: book even though there is not enough travel time from another location. */
+  waiveTravel?: boolean;
   focus: SessionFocus;
   notes: string;
   createdBy: Role;
@@ -900,6 +913,7 @@ export async function createBooking(input: NewBookingInput): Promise<{ ok: true;
       gymId: input.gymId,
       customGym: input.customGym,
       place: input.place ?? undefined,
+      waiveTravel: input.waiveTravel === true ? true : undefined,
       focus: input.focus,
       notes: input.notes,
     },
@@ -928,8 +942,8 @@ export async function cancelBookingAs(id: string, role: Role): Promise<string | 
   return null;
 }
 
-export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string, place?: PlaceInfo | null): Promise<string | null> {
-  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym, place: place ?? undefined } });
+export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string, place?: PlaceInfo | null, waiveTravel = false): Promise<string | null> {
+  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym, place: place ?? undefined, waiveTravel: waiveTravel || undefined } });
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");
@@ -938,7 +952,7 @@ export async function rescheduleBooking(id: string, start: Date, gymId: string |
 
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
 export function updateSettings(patch: Partial<AppSettings>) {
@@ -949,7 +963,17 @@ export function updateSettings(patch: Partial<AppSettings>) {
       const s = state.db.settings;
       void api("/api/schedule/settings", {
         method: "PUT",
-        body: { sessionMinutes: s.sessionMinutes, noticeHours: s.noticeHours, autoConfirm: s.autoConfirm, allowCustomGym: s.allowCustomGym, utcOffsetMin: -new Date().getTimezoneOffset() },
+        body: {
+          sessionMinutes: s.sessionMinutes,
+          noticeHours: s.noticeHours,
+          autoConfirm: s.autoConfirm,
+          allowCustomGym: s.allowCustomGym,
+          travelEnabled: s.travelEnabled,
+          travelDefaultMin: s.travelDefaultMin,
+          travelParkingMin: s.travelParkingMin,
+          travelMaxMin: s.travelMaxMin,
+          utcOffsetMin: -new Date().getTimezoneOffset(),
+        },
       });
     }, 600);
   }

@@ -56,6 +56,11 @@ export const coachSettings = pgTable("coach_settings", {
   autoConfirm: boolean("auto_confirm").notNull().default(true),
   allowCustomGym: boolean("allow_custom_gym").notNull().default(true),
   utcOffsetMin: integer("utc_offset_min").notNull().default(480),
+  /** Travel buffer between sessions at different locations (see lib/travel.ts). */
+  travelEnabled: boolean("travel_enabled").notNull().default(true),
+  travelDefaultMin: integer("travel_default_min").notNull().default(30),
+  travelParkingMin: integer("travel_parking_min").notNull().default(15),
+  travelMaxMin: integer("travel_max_min").notNull().default(90),
   /** The coach's starter routines were created once (so a second device or a deleted routine never re-adds them). */
   templatesSeeded: boolean("templates_seeded").notNull().default(false),
 });
@@ -245,6 +250,10 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS templates_seeded boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_enabled boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_default_min integer NOT NULL DEFAULT 30`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_parking_min integer NOT NULL DEFAULT 15`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_max_min integer NOT NULL DEFAULT 90`,
   `CREATE TABLE IF NOT EXISTS workouts (
     id text PRIMARY KEY,
     client_id text NOT NULL,

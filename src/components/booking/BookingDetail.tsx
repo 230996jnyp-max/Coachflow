@@ -4,12 +4,13 @@ import { format, parseISO } from "date-fns";
 import { Check, Clock, MapPin, MessageSquare, Target, UserX, X } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { Avatar, Button, Field, Input, Modal, Notice } from "@/components/ui";
+import { Avatar, Button, Field, Input, Modal, Notice, Toggle } from "@/components/ui";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
 import { bookingToGymValue, directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import type { PlaceInfo } from "@/lib/types";
 import { useViewer } from "@/lib/hooks";
-import { atTime, canCancel, ymd } from "@/lib/scheduling";
+import { atTime, canCancel, travelProblem, ymd } from "@/lib/scheduling";
+import { locOf } from "@/lib/travel";
 import { cancelBookingAs, rescheduleBooking, setBookingStatus, useNow } from "@/lib/store";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
@@ -28,11 +29,19 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const [time, setTime] = useState(() => (b ? format(parseISO(b.start), "HH:mm") : "09:00"));
   const [gym, setGym] = useState(() => (b ? bookingToGymValue(b) : ""));
   const [place, setPlace] = useState<PlaceInfo | null>(() => b?.place ?? null);
+  const [waive, setWaive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!b) return null;
   const client = db.users.find((u) => u.id === b.clientId);
+  const newStart = atTime(date, time);
+  const travel = (() => {
+    if (!resched || !gym || !isGymComplete(gym) || Number.isNaN(newStart.getTime())) return null;
+    const loc = gymToBooking(gym, db.gyms);
+    const end = new Date(newStart.getTime() + db.settings.sessionMinutes * 60000);
+    return travelProblem(db.bookings, newStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings, b.id);
+  })();
   const cancelErr = canCancel(b, now, db.settings, isTrainer ? "TRAINER" : "CLIENT");
   const active = b.status === "PENDING" || b.status === "CONFIRMED";
   const charged = b.status === "COMPLETED" || b.status === "NO_SHOW";
@@ -118,6 +127,12 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
                 <Field label="Gym location">
                   <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
                 </Field>
+                {db.settings.travelEnabled && (travel || waive) && (
+                  <div className="space-y-1">
+                    <Notice tone={waive ? "info" : "warn"}>{waive ? "Travel buffer waived for this change." : travel}</Notice>
+                    <Toggle checked={waive} onChange={setWaive} label="Waive travel buffer" />
+                  </div>
+                )}
                 {error && <Notice tone="error">{error}</Notice>}
                 <div className="flex gap-2">
                   <Button variant="secondary" className="flex-1" onClick={() => setResched(false)}>
@@ -129,8 +144,9 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
                     onClick={async () => {
                       if (!gym || !isGymComplete(gym)) return setError("Choose a gym and its exact location.");
                       const loc = gymToBooking(gym, db.gyms);
+                      if (travel && !waive) return setError(`${travel} Switch on “Waive travel buffer” to save anyway.`);
                       setBusy(true);
-                      const err = await rescheduleBooking(b.id, atTime(date, time), loc.gymId, loc.customGym, placeForBooking(gym, place));
+                      const err = await rescheduleBooking(b.id, atTime(date, time), loc.gymId, loc.customGym, placeForBooking(gym, place), waive);
                       setBusy(false);
                       if (err) setError(err);
                       else onClose();

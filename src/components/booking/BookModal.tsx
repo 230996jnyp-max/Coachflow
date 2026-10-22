@@ -19,15 +19,15 @@ import type { SessionFocus } from "@/lib/types";
 export const FOCUS_OPTIONS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
 
 /** Client tap-to-book modal. `start` is the tapped slot. */
-export function BookModal({ start, clientId, onClose }: { start: Date | null; clientId: string; onClose: () => void }) {
-  return start ? <Form key={start.getTime()} start={start} clientId={clientId} onClose={onClose} /> : null;
+export function BookModal({ start, clientId, initGym, initPlace, onClose }: { start: Date | null; clientId: string; initGym?: string; initPlace?: PlaceInfo | null; onClose: () => void }) {
+  return start ? <Form key={start.getTime()} start={start} clientId={clientId} initGym={initGym} initPlace={initPlace ?? null} onClose={onClose} /> : null;
 }
 
-function Form({ start, clientId, onClose }: { start: Date; clientId: string; onClose: () => void }) {
+function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; clientId: string; initGym?: string; initPlace: PlaceInfo | null; onClose: () => void }) {
   const { db } = useViewer();
   const profile = db.clients.find((c) => c.id === clientId);
-  const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
-  const [place, setPlace] = useState<PlaceInfo | null>(null);
+  const [gym, setGym] = useState<string>(initGym || (profile?.defaultGymId ?? ""));
+  const [place, setPlace] = useState<PlaceInfo | null>(initPlace);
   const [focus, setFocus] = useState<SessionFocus>("Full Body");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);

@@ -19,6 +19,10 @@ export const PUT = route(async (req) => {
     autoConfirm: typeof body.autoConfirm === "boolean" ? body.autoConfirm : cur.autoConfirm,
     allowCustomGym: typeof body.allowCustomGym === "boolean" ? body.allowCustomGym : cur.allowCustomGym,
     utcOffsetMin: "utcOffsetMin" in body ? int(body.utcOffsetMin, "UTC offset", -720, 840) : (cur.utcOffsetMin ?? DEFAULT_RULES.utcOffsetMin),
+    travelEnabled: typeof body.travelEnabled === "boolean" ? body.travelEnabled : cur.travelEnabled,
+    travelDefaultMin: "travelDefaultMin" in body ? int(body.travelDefaultMin, "Default travel buffer", 0, 240) : cur.travelDefaultMin,
+    travelParkingMin: "travelParkingMin" in body ? int(body.travelParkingMin, "Parking buffer", 0, 120) : cur.travelParkingMin,
+    travelMaxMin: "travelMaxMin" in body ? int(body.travelMaxMin, "Maximum travel buffer", 0, 240) : cur.travelMaxMin,
   };
   const d = await db();
   await d

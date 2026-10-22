@@ -263,6 +263,11 @@ export interface AppSettings {
   noticeHours: number;
   autoConfirm: boolean;
   allowCustomGym: boolean;
+  /** Travel buffer between sessions at different locations (see lib/travel.ts). */
+  travelEnabled: boolean;
+  travelDefaultMin: number;
+  travelParkingMin: number;
+  travelMaxMin: number;
   restSeconds: number;
   /** Email a calendar invite (.ics) whenever a session is booked, moved or cancelled. */
   emailInvites?: boolean;

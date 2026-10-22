@@ -118,3 +118,13 @@ Components never touch IndexedDB directly: to move to Supabase/PostgreSQL, re-im
 - **Stored with the booking (encrypted):** name, formatted address, lat/lng and Google place id (`Booking.place`). Other fields keep working for old bookings.
 - **Display:** a map-pin pill on booking cards, the dashboard, session details and the booking confirmations opens Google Maps directions (`https://www.google.com/maps/dir/?api=1&destination=<address>&destination_place_id=<id>`); session details and confirmations show a mini map. Calendar events and the coach calendar feed use "name, address" as the location.
 - **Setup:** `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (browser key restricted to the site's domain, "Places API (New)" enabled). The key only works on the allowed domain, so on localhost (or with no key) the location fields automatically become plain text boxes. The mini map uses free OpenStreetMap tiles until the Maps Embed API is enabled for the key and `NEXT_PUBLIC_MAPS_EMBED=google` is set.
+
+## Smart travel-buffer scheduling
+
+Coaches move between gyms, so availability adapts to *where* neighbouring sessions are (`src/lib/travel.ts`, shared by the browser and the server):
+
+- **Same place = no buffer.** Same Google place id, within 300 m, the same saved gym, or identical typed text: back-to-back is allowed (and flagged "Coach is already at this location - back-to-back slot available!").
+- **Different places:** buffer = estimated drive + the coach's parking/walk allowance. The drive is estimated from the straight-line distance (x1.35 for roads, 30 km/h), rounded up to 5 minutes and capped at the coach's maximum. No Google routing API is used. Locations without coordinates (old bookings, typed text) use the coach's default buffer.
+- **Settings (Settings > Booking rules):** on/off, default buffer (30), parking/walk (15), longest buffer (90); stored per coach in `coach_settings`.
+- **Clients:** a "Training at" picker above the slot grid; `/api/schedule/travel` returns only times, buffer minutes and a same-place flag (never names or locations), and slots that the coach can't reach in time show "Unavailable - Coach travel buffer from another gym location." The server re-checks every booking and reschedule.
+- **Coach:** the master schedule shows travel blocks between sessions at different places; the coach can waive the buffer for one booking or reschedule (clients cannot).

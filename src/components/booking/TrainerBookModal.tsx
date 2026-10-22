@@ -4,10 +4,11 @@ import { format } from "date-fns";
 import { CalendarPlus } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { Button, Field, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
+import { Button, Field, Input, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
 import { directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
-import { atTime, availableCredits, ymd } from "@/lib/scheduling";
+import { atTime, availableCredits, travelProblem, ymd } from "@/lib/scheduling";
+import { locOf } from "@/lib/travel";
 import { createBooking } from "@/lib/store";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
 import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
@@ -34,6 +35,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
   const profile = db.clients.find((c) => c.id === clientId);
   const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
   const [place, setPlace] = useState<PlaceInfo | null>(null);
+  const [waive, setWaive] = useState(false);
   const [focus, setFocus] = useState<SessionFocus>("Full Body");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,15 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
   const [busy, setBusy] = useState(false);
 
   const avail = profile ? availableCredits(profile, db.bookings) : 0;
+
+  // Travel time between sessions at different locations (the coach can waive it for one booking).
+  const sessionStart = atTime(date, time);
+  const problem = (() => {
+    if (!gym || !isGymComplete(gym) || Number.isNaN(sessionStart.getTime())) return null;
+    const loc = gymToBooking(gym, db.gyms);
+    const end = new Date(sessionStart.getTime() + db.settings.sessionMinutes * 60000);
+    return travelProblem(db.bookings, sessionStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings);
+  })();
 
   if (booked) {
     return (
@@ -77,6 +88,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
               if (!gym) return setError("Please choose a gym or place.");
               if (!isGymComplete(gym)) return setError("Please choose the exact location (search and pick it, or type the place).");
               const loc = gymToBooking(gym, db.gyms);
+              if (problem && !waive) return setError(`${problem} Switch on “Waive travel buffer” to book anyway.`);
               setBusy(true);
               const res = await createBooking({
                 clientId,
@@ -84,6 +96,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
                 gymId: loc.gymId,
                 customGym: loc.customGym,
                 place: placeForBooking(gym, place),
+                waiveTravel: waive,
                 focus,
                 notes: notes.trim(),
                 createdBy: "TRAINER",
@@ -130,6 +143,12 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
         <Field label="Gym location">
           <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
         </Field>
+        {db.settings.travelEnabled && (problem || waive) && (
+          <div className="space-y-1">
+            <Notice tone={waive ? "info" : "warn"}>{waive ? "Travel buffer waived for this booking." : problem}</Notice>
+            <Toggle checked={waive} onChange={setWaive} label="Waive travel buffer" />
+          </div>
+        )}
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
             {FOCUS_OPTIONS.map((f) => (

@@ -289,6 +289,50 @@ export default function SettingsPage() {
                 onChange={(v) => updateSettings({ allowCustomGym: v })}
                 label="Let clients enter a custom gym / condo address"
               />
+              <div className="space-y-3 rounded-xl border border-line p-3">
+                <Toggle
+                  checked={s.travelEnabled}
+                  onChange={(v) => updateSettings({ travelEnabled: v })}
+                  label="Travel buffer between sessions at different gyms"
+                />
+                <p className="text-xs text-muted">
+                  Back-to-back sessions at the same place are always allowed. Between two different places, clients can only book times that leave enough travel time, based on the distance plus your parking / walking allowance.
+                </p>
+                {s.travelEnabled && (
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <Field label="Default buffer (min)" hint="Used when a location has no map position.">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={5}
+                        value={s.travelDefaultMin}
+                        onChange={(e) => updateSettings({ travelDefaultMin: Math.max(0, Math.min(240, Number(e.target.value) || 0)) })}
+                      />
+                    </Field>
+                    <Field label="Parking / walk (min)" hint="Added to the estimated drive.">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={5}
+                        value={s.travelParkingMin}
+                        onChange={(e) => updateSettings({ travelParkingMin: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })}
+                      />
+                    </Field>
+                    <Field label="Longest buffer (min)" hint="No buffer is ever longer than this.">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={5}
+                        value={s.travelMaxMin}
+                        onChange={(e) => updateSettings({ travelMaxMin: Math.max(0, Math.min(240, Number(e.target.value) || 0)) })}
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
             </Card>
           </section>
 

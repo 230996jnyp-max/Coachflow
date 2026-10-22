@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
-import { adjustCredits, CHARGED, clientCredits, hasConflict, parsePlace, rulesFor, sealDetails, toBooking } from "@/lib/server/schedule";
+import { adjustCredits, CHARGED, clientCredits, hasConflict, parsePlace, requestLoc, rulesFor, sealDetails, toBooking, travelCheck } from "@/lib/server/schedule";
 import { bookings, gyms, users } from "@/lib/server/schema";
 import type { BookingStatus } from "@/lib/types";
 
@@ -17,7 +17,7 @@ const STAFF_STATUSES: BookingStatus[] = ["CONFIRMED", "COMPLETED", "NO_SHOW", "D
  * PATCH { action } on one booking.
  *  cancel       client (within the notice window) or the coach
  *  status       coach: CONFIRMED | COMPLETED | NO_SHOW | DECLINED | CANCELLED — completing/no-show deducts a credit, undoing restores it
- *  reschedule   coach: { start, gymId?, customGym?, place? }
+ *  reschedule   coach: { start, gymId?, customGym?, place?, waiveTravel? }
  */
 export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx) => {
   const body = await readJson(req);
@@ -72,6 +72,10 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
     if (gymId) {
       const [g] = await d.select().from(gyms).where(and(eq(gyms.id, gymId), eq(gyms.coachId, me.id))).limit(1);
       if (!g) throw badRequest("Unknown gym.");
+    }
+    if (body.waiveTravel !== true) {
+      const travel = await travelCheck(row.coachId, start, end, requestLoc({ gymId, customGym, place }), rules, id, true);
+      if (travel) throw conflict(travel);
     }
     const [u] = await d
       .update(bookings)

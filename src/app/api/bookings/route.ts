@@ -4,7 +4,7 @@ import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, conflict, notFound, readJson, route, str } from "@/lib/server/http";
-import { clientCredits, FOCUS, hasConflict, parsePlace, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, loadSchedule } from "@/lib/server/schedule";
+import { clientCredits, FOCUS, hasConflict, parsePlace, requestLoc, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck, loadSchedule } from "@/lib/server/schedule";
 import { bookings, gyms } from "@/lib/server/schema";
 import { and, eq } from "drizzle-orm";
 import type { SessionFocus } from "@/lib/types";
@@ -54,6 +54,12 @@ export const POST = route(async (req) => {
     if (available <= 0) throw badRequest("No session credits left. Ask your coach to top up your package.");
   }
   if (await hasConflict(coachId, start, end)) throw conflict("That time overlaps another session.");
+  // Travel time between sessions at different locations (only the coach may waive it).
+  const waive = !isClient && body.waiveTravel === true;
+  if (!waive) {
+    const travel = await travelCheck(coachId, start, end, requestLoc({ gymId, customGym, place }), rules, undefined, !isClient);
+    if (travel) throw conflict(travel);
+  }
 
   const id = `b_${randomUUID()}`;
   const [row] = await d
