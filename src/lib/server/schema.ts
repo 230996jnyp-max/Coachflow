@@ -24,6 +24,8 @@ export const users = pgTable(
     failedAttempts: integer("failed_attempts").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     tokenVersion: integer("token_version").notNull().default(0),
+    /** The guided tour has been finished or skipped (the Settings button can replay it). */
+    onboarded: boolean("onboarded").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -298,6 +300,7 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS users_coach_idx ON users (coach_id)`,
   `CREATE INDEX IF NOT EXISTS users_role_idx ON users (role)`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false`,
   `CREATE TABLE IF NOT EXISTS messages (
     id text PRIMARY KEY,
     thread text NOT NULL,

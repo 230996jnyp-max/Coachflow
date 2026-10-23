@@ -493,6 +493,30 @@ export async function changePassword(current: string, next: string): Promise<str
   return null;
 }
 
+const onboardKey = (userId: string) => `coachflow-onboarded:${userId}`;
+
+/** Has this device already seen / finished the guided tour for this user? */
+export function deviceOnboarded(userId: string): boolean {
+  try {
+    return localStorage.getItem(onboardKey(userId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The tour was finished or skipped: remember it on this device and on the account, so it never interrupts again. */
+export function completeOnboarding() {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  try {
+    localStorage.setItem(onboardKey(uid), "1");
+  } catch {
+    /* ignore */
+  }
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, hasCompletedOnboarding: true } : u)) }));
+  void api("/api/me", { method: "PATCH", body: { hasCompletedOnboarding: true } });
+}
+
 export function setUnit(userId: string, unit: UnitSystem) {
   mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === userId ? { ...u, unit } : u)) }));
   void api("/api/me", { method: "PATCH", body: { unit } });

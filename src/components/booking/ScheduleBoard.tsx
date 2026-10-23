@@ -95,7 +95,7 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
   };
 
   return (
-    <div>
+    <div data-tour="schedule-board">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <IconButton label="Previous week" onClick={() => go(-1)}>
@@ -112,7 +112,7 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
           </Button>
         </div>
         {mode === "trainer" && (
-          <Button onClick={() => setTrainerInit({})}>
+          <Button data-tour="book-client" onClick={() => setTrainerInit({})}>
             <CalendarPlus size={16} /> Book client
           </Button>
         )}

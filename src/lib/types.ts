@@ -18,6 +18,8 @@ export interface User {
   email?: string;
   /** Staff accounts can be deactivated by the owner. */
   active?: boolean;
+  /** The first-login guided tour has been finished or skipped. */
+  hasCompletedOnboarding?: boolean;
 }
 
 export type ClientGoal =

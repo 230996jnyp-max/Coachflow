@@ -25,6 +25,7 @@ import { useViewer } from "@/lib/hooks";
 import { logout } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "./groups/NotificationBell";
+import { OnboardingTour } from "./tour/OnboardingTour";
 import { InstallButton } from "./InstallButton";
 import { Splash } from "./Providers";
 import { Avatar } from "./ui";
@@ -122,6 +123,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link
               key={n.href}
               href={n.href}
+              data-tour={`nav-${n.href.slice(1)}`}
               title={n.label}
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors",
@@ -192,6 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             <Link
               href="/messages"
+              data-tour="nav-messages"
               aria-label={unread ? `Messages, ${unread} unread` : "Messages"}
               className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-field text-ink"
             >
@@ -212,6 +215,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       <ChatSync userId={user.id} threads={threads} />
+      <OnboardingTour />
       <ToastHost toasts={chat.toasts} onOpen={(thread) => { dismissToast(thread); router.push("/messages"); }} />
 
       {showBanner && activeWorkout && (

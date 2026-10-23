@@ -96,7 +96,7 @@ export default function ClientHome() {
         )}
       </section>
 
-      <section>
+      <section data-tour="home-credits">
         <SectionTitle action={<Link href="/book" className="text-xs font-semibold text-accent">Group classes →</Link>}>Group classes</SectionTitle>
         <div className="space-y-2">
           <GroupCreditsCard />

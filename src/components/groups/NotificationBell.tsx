@@ -28,6 +28,7 @@ export function NotificationBell({ className }: { className?: string }) {
     <>
       <button
         type="button"
+        data-tour="bell"
         onClick={show}
         aria-label={count ? `Notifications, ${count} new` : "Notifications"}
         className={cn("relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-field text-ink", className)}

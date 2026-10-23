@@ -13,7 +13,7 @@ type Tab = "strength" | "cardio" | "body" | "photos";
 export function ProgressHub({ clientId }: { clientId: string }) {
   const [tab, setTab] = useState<Tab>("strength");
   return (
-    <div>
+    <div data-tour="progress-hub">
       <Tabs
         value={tab}
         onChange={setTab}

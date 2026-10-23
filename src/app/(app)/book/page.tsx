@@ -26,6 +26,7 @@ export default function BookPage() {
         actions={<SyncAllButton clientId={user.id} />}
       />
 
+      <div data-tour="book-tabs">
       <Tabs
         value={tab}
         onChange={setTab}
@@ -34,6 +35,7 @@ export default function BookPage() {
           { value: "classes", label: db.groupRequests.some((r) => r.needsMe) ? "Group classes (1 to answer)" : "Group classes" },
         ]}
       />
+      </div>
 
       {tab === "classes" && <ClassList mode="client" />}
 

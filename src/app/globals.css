@@ -85,3 +85,25 @@ input[type="number"] {
 .animate-sheet {
   animation: sheet-up 0.18s ease-out;
 }
+
+/* Onboarding tour spotlight: dims the page except around the target, with a pulsing accent ring. */
+.tour-spot {
+  border: 2px solid var(--color-accent);
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(5, 8, 14, 0.78);
+  outline: 3px solid rgba(59, 130, 246, 0.6);
+  outline-offset: 2px;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+@keyframes tour-pulse {
+  0%,
+  100% {
+    outline-color: rgba(59, 130, 246, 0.65);
+    outline-offset: 2px;
+  }
+  50% {
+    outline-color: rgba(59, 130, 246, 0.12);
+    outline-offset: 8px;
+  }
+}

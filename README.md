@@ -154,3 +154,13 @@ Server: `src/lib/server/credits.ts` (attendance ledger + credit log), `src/lib/s
 - **Attendance rate & Credit log:** per client (coach: client page > Sessions; client: Profile): Attendance % = Present / (Present + No-Show) across 1-on-1 and group, Attended, No-shows, and a log of every credit event (booked/reserved, attended, no-show returned / deducted, corrections, manual adjustments, starting package) with the resulting balance. The log starts when this feature goes live. Older completed / no-show sessions still count in the rate.
 - **No-show email:** the client gets an in-app notification and an email saying whether the credit was returned or deducted.
 - Old "Mark completed" / "No-show" actions keep working through the same rules. Sessions finished before this feature already took their credit; that state is kept until the coach edits them.
+
+## Guided onboarding tour
+
+`src/components/tour/OnboardingTour.tsx` + `src/lib/tour.ts` (steps and a tiny store). A custom spotlight (no library): the page is dimmed, the target gets a pulsing accent ring, and a card shows "Step n of N", a title, a two-sentence description, **Back / Next** and **Skip Tour** (also Esc / arrow keys). Targets are `data-tour="…"` attributes; the first one that is actually visible is used, so the desktop sidebar and the phone bars both work.
+
+- **When it starts:** automatically on the first login after the person has set their own password (existing accounts see it once too). Finishing or skipping sets `hasCompletedOnboarding: true` on the account (`users.onboarded`, `PATCH /api/me`) and on the device (`coachflow-onboarded:<userId>` in localStorage), so it never interrupts again.
+- **Replay:** Settings (coach) / Profile & Settings (client) > Account > **Replay Onboarding Tour**.
+- **Coach (6 steps):** schedule & attendance, Book client (Google Maps gyms + travel buffers), clients & credits, workout logger (group workouts / live grid), import from notes (AI), notification bell.
+- **Client (5 steps):** home (credits, next session, live group workout), tap-to-book + group classes, workout logging (rest timer, PRs), progress & photo vault, chat with the coach.
+- Each step navigates to its page by itself; targets taller than the screen light up just their top part.

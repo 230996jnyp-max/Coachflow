@@ -57,7 +57,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
         </Link>
       )}
 
-      <section>
+      <section data-tour="workout-start">
         <SectionTitle>Start a workout</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2">
           <Button size="lg" onClick={() => begin({ title: "Workout " + format(new Date(), "d MMM") })}>
@@ -73,7 +73,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
         <section>
           <SectionTitle>Import &amp; export</SectionTitle>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Button size="lg" variant="outline" onClick={() => setImporting(true)}>
+            <Button size="lg" variant="outline" data-tour="workout-import" onClick={() => setImporting(true)}>
               <ClipboardPaste size={18} /> Import from Notepad / text
             </Button>
             <Button size="lg" variant="outline" onClick={() => setExporting({ scope: "HISTORY", clientId })}>

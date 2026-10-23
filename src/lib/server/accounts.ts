@@ -46,6 +46,7 @@ export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
     createdAt: row.createdAt.toISOString(),
     isOwner: row.role === "OWNER",
     active: row.active,
+    hasCompletedOnboarding: row.onboarded,
     ...(opts.withEmail && staff && row.email ? { email: row.email } : {}),
   };
 }
