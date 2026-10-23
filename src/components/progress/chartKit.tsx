@@ -2,14 +2,15 @@
 
 import { subDays } from "date-fns";
 
+/** Chart colours follow the active theme (CSS variables work in SVG attributes and inline styles). */
 export const C = {
-  accent: "#3B82F6",
-  success: "#10B981",
-  pr: "#F59E0B",
-  danger: "#EF4444",
-  purple: "#A78BFA",
-  grid: "#262E40",
-  axis: "#8892A6",
+  accent: "var(--c-accent)",
+  success: "var(--c-success)",
+  pr: "var(--c-pr)",
+  danger: "var(--c-danger)",
+  purple: "var(--c-purple)",
+  grid: "var(--chart-grid)",
+  axis: "var(--c-muted)",
 };
 
 export const axisProps = {
@@ -21,15 +22,15 @@ export const axisProps = {
 
 export const tooltipStyle = {
   contentStyle: {
-    background: "#121620",
-    border: "1px solid #262E40",
+    background: "var(--c-surface)",
+    border: "1px solid var(--c-line)",
     borderRadius: 12,
     fontSize: 12,
-    color: "#E8ECF4",
+    color: "var(--c-ink)",
   },
-  labelStyle: { color: "#8892A6", marginBottom: 4 },
-  itemStyle: { color: "#E8ECF4" },
-  cursor: { stroke: "#262E40" },
+  labelStyle: { color: "var(--c-muted)", marginBottom: 4 },
+  itemStyle: { color: "var(--c-ink)" },
+  cursor: { stroke: "var(--c-line)" },
 } as const;
 
 export type Range = "1M" | "3M" | "6M" | "1Y" | "All";

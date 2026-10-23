@@ -47,6 +47,7 @@ export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
     isOwner: row.role === "OWNER",
     active: row.active,
     hasCompletedOnboarding: row.onboarded,
+    ...(row.theme === "black" || row.theme === "white" || row.theme === "navy" ? { themePreference: row.theme } : {}),
     ...(opts.withEmail && staff && row.email ? { email: row.email } : {}),
   };
 }

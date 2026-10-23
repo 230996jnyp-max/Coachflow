@@ -10,9 +10,9 @@ export const SET_CYCLE: SetType[] = ["N", "W", "D", "F"];
 
 const TYPE_STYLE: Record<SetType, string> = {
   N: "text-ink bg-field",
-  W: "text-yellow-300 bg-yellow-400/15",
-  D: "text-purple-300 bg-purple-400/15",
-  F: "text-red-300 bg-red-400/15",
+  W: "text-pr bg-pr/15",
+  D: "text-purple bg-purple/15",
+  F: "text-danger bg-danger/15",
 };
 
 export function gridTemplate(ex: Exercise, showRpe: boolean): string {
@@ -161,7 +161,7 @@ export function SetRow({
           aria-pressed={set.done}
           className={cn(
             "flex h-11 w-11 items-center justify-center rounded-lg transition-colors",
-            set.done ? "bg-success text-white" : "bg-field text-muted hover:text-ink",
+            set.done ? "bg-success text-on-success" : "bg-field text-muted hover:text-ink",
           )}
         >
           <Check size={20} strokeWidth={3} />

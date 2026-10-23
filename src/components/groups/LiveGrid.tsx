@@ -225,7 +225,7 @@ function ExerciseEditor({ we, ex, unit, prMap, disabled, onSave }: { we: Workout
                   onClick={() => onSave(we.id, s.id, { done: !s.done })}
                   aria-label={s.done ? "Mark set incomplete" : "Mark set complete"}
                   aria-pressed={s.done}
-                  className={cn("flex h-10 w-11 items-center justify-center rounded-lg transition-colors disabled:opacity-50", s.done ? "bg-success text-white" : "bg-field text-muted hover:text-ink")}
+                  className={cn("flex h-10 w-11 items-center justify-center rounded-lg transition-colors disabled:opacity-50", s.done ? "bg-success text-on-success" : "bg-field text-muted hover:text-ink")}
                 >
                   <Check size={18} strokeWidth={3} />
                 </button>

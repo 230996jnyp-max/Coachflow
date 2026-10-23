@@ -517,6 +517,14 @@ export function completeOnboarding() {
   void api("/api/me", { method: "PATCH", body: { hasCompletedOnboarding: true } });
 }
 
+/** Saves the chosen theme on the account (the device copy is written by applyTheme). */
+export function saveThemePreference(id: "black" | "white" | "navy") {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, themePreference: id } : u)) }));
+  void api("/api/me", { method: "PATCH", body: { themePreference: id } });
+}
+
 export function setUnit(userId: string, unit: UnitSystem) {
   mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === userId ? { ...u, unit } : u)) }));
   void api("/api/me", { method: "PATCH", body: { unit } });

@@ -35,7 +35,7 @@ export function NotificationBell({ className }: { className?: string }) {
       >
         <Bell size={20} />
         {count > 0 && (
-          <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{count > 9 ? "9+" : count}</span>
+          <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-on-danger">{count > 9 ? "9+" : count}</span>
         )}
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Notifications" footer={<Button variant="secondary" onClick={() => setOpen(false)}>Close</Button>}>

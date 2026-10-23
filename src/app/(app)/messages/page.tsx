@@ -97,7 +97,7 @@ export default function MessagesPage() {
                             </div>
                             <div className={cn("truncate text-xs", unread ? "text-ink" : "text-muted")}>{last ? `${last.fromId === user.id ? "You: " : ""}${last.text}` : "No messages yet"}</div>
                           </div>
-                          {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">{unread}</span>}
+                          {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-on-accent">{unread}</span>}
                         </button>
                       </li>
                     );

@@ -185,7 +185,7 @@ export function PlaceField({
             </li>
           ))}
           {noBranch && <li className="px-3 py-3 text-sm text-muted">No {brand} branch found for “{typed}”. Try another area or word.</li>}
-          {problem && !problem.denied && <li className="px-3 py-3 text-sm text-red-200">{problem.message}</li>}
+          {problem && !problem.denied && <li className="px-3 py-3 text-sm text-danger">{problem.message}</li>}
           {typed.length >= 2 && (
             <li>
               <button

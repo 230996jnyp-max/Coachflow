@@ -8,11 +8,11 @@ import { users } from "@/lib/server/schema";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** PATCH { unit?, hasCompletedOnboarding? } — personal preferences. */
+/** PATCH { unit?, hasCompletedOnboarding?, themePreference? } — personal preferences. */
 export const PATCH = route(async (req) => {
   const body = await readJson(req);
   const me = await requireUser();
-  const set: { unit?: string; onboarded?: boolean; updatedAt: Date } = { updatedAt: new Date() };
+  const set: { unit?: string; onboarded?: boolean; theme?: string; updatedAt: Date } = { updatedAt: new Date() };
   if ("unit" in body) {
     if (body.unit !== "metric" && body.unit !== "imperial") throw badRequest("Unit must be metric or imperial.");
     set.unit = body.unit;
@@ -21,7 +21,11 @@ export const PATCH = route(async (req) => {
     if (typeof body.hasCompletedOnboarding !== "boolean") throw badRequest("hasCompletedOnboarding must be true or false.");
     set.onboarded = body.hasCompletedOnboarding;
   }
-  if (set.unit === undefined && set.onboarded === undefined) throw badRequest("Nothing to change.");
+  if ("themePreference" in body) {
+    if (body.themePreference !== "black" && body.themePreference !== "white" && body.themePreference !== "navy") throw badRequest("Unknown theme.");
+    set.theme = body.themePreference;
+  }
+  if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined) throw badRequest("Nothing to change.");
   const d = await db();
   await d.update(users).set(set).where(eq(users.id, me.id));
   return NextResponse.json({ ok: true });

@@ -1,5 +1,6 @@
 "use client";
 
+import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Dumbbell, Eye, EyeOff, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -50,9 +51,12 @@ export default function LoginPage() {
 
   return (
     <div className="pt-safe pb-safe flex min-h-dvh items-center justify-center px-4 py-10">
+      <div className="absolute right-4 top-4">
+        <ThemeMenu />
+      </div>
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-white shadow-lg shadow-accent/30">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-on-accent shadow-lg shadow-accent/30">
             <Dumbbell size={32} />
           </div>
           <h1 className="text-3xl font-bold tracking-tight">{db.settings.brandName}</h1>
@@ -107,7 +111,7 @@ export default function LoginPage() {
                 </button>
               </div>
             </Field>
-            {error && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-red-200">{error}</p>}
+            {error && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
             <Button type="submit" size="lg" className="w-full" disabled={busy}>
               <LogIn size={18} /> {busy ? "Signing in…" : "Log in"}
             </Button>

@@ -82,7 +82,7 @@ export function PhotosTab({ clientId }: { clientId: string }) {
                 onClick={() => setPose(p)}
                 className={cn(
                   "min-h-9 shrink-0 rounded-full border px-3 text-xs font-semibold",
-                  pose === p ? "border-accent bg-accent text-white" : "border-line bg-field text-muted",
+                  pose === p ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted",
                 )}
               >
                 {p}

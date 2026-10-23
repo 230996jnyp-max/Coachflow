@@ -164,3 +164,11 @@ Server: `src/lib/server/credits.ts` (attendance ledger + credit log), `src/lib/s
 - **Coach (6 steps):** schedule & attendance, Book client (Google Maps gyms + travel buffers), clients & credits, workout logger (group workouts / live grid), import from notes (AI), notification bell.
 - **Client (5 steps):** home (credits, next session, live group workout), tap-to-book + group classes, workout logging (rest timer, PRs), progress & photo vault, chat with the coach.
 - Each step navigates to its page by itself; targets taller than the screen light up just their top part.
+
+## Themes (Black, White, Navy Blue)
+
+`<html data-theme="black | white | navy">` switches a set of CSS variables in `src/app/globals.css` (Tailwind's `bg-bg`, `bg-surface`, `bg-field`, `border-line`, `text-ink`, `text-muted`, `bg-accent`, `text-on-accent`, `text-on-success`, ... all read them). Charts and the muscle map use the same variables (`src/components/progress/chartKit.tsx`, `MuscleMap.tsx`), so axes, grids and labels stay readable on every theme.
+
+- **Palettes:** Black is the default (`#090B10` / `#121620` / `#1A202E` / `#262E40`, accent `#3B82F6`); White (`#F8FAFC` / `#FFFFFF` / `#F1F5F9` / `#E2E8F0`, accent `#2563EB`); Navy (`#0A1128` / `#111D3B` / `#182850` / `#23386B`, accent `#38BDF8`). Success / PR / danger colours are deepened on White and lightened on Navy, and text on accent / success / danger fills switches between white and dark navy so it stays high-contrast (e.g. dark text on Navy's light-cyan buttons).
+- **Switching:** Settings > Account > Theme (swatch cards), a palette menu in the phone header and at the bottom of the desktop sidebar, and on the login page (device only until sign-in).
+- **Persistence:** the choice is saved in `localStorage` (`coachflow_theme`) and on the account (`users.theme`, `themePreference` via `PATCH /api/me`). A tiny inline script in `layout.tsx` applies it before the first paint (no flash); signing in applies the account's saved theme (so it follows you to a new device), or an account with none yet adopts the device's theme. The `theme-color` meta tag (phone browser bar) follows the theme.

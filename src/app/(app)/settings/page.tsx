@@ -1,5 +1,6 @@
 "use client";
 
+import { ThemePicker } from "@/components/ThemeSwitcher";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
 import { Bell, Compass, KeyRound, LogOut, Mail, MapPin, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -77,6 +78,13 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+          </div>
+          <div className="space-y-3 border-t border-line pt-4">
+            <div>
+              <div className="text-sm font-semibold">Theme</div>
+              <div className="text-xs text-muted">Choose how CoachFlow looks. It is saved to your account and follows you to your other devices.</div>
+            </div>
+            <ThemePicker />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <div>

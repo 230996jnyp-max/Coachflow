@@ -20,6 +20,8 @@ export interface User {
   active?: boolean;
   /** The first-login guided tour has been finished or skipped. */
   hasCompletedOnboarding?: boolean;
+  /** Saved colour theme (the Settings picker and header menu keep it in sync with the device). */
+  themePreference?: "black" | "white" | "navy";
 }
 
 export type ClientGoal =

@@ -12,7 +12,7 @@ export function PasswordBanner() {
       <Notice
         tone="warn"
         action={
-          <Link href="/settings/password" className="inline-flex min-h-11 items-center rounded-lg bg-pr px-3 text-xs font-bold text-black">
+          <Link href="/settings/password" className="inline-flex min-h-11 items-center rounded-lg bg-pr px-3 text-xs font-bold text-on-pr">
             Set my password
           </Link>
         }

@@ -81,7 +81,7 @@ export function AvailabilityManager() {
                 <button
                   key={d.n}
                   onClick={() => setDays((s) => (s.includes(d.n) ? s.filter((x) => x !== d.n) : [...s, d.n]))}
-                  className={cn("min-h-9 min-w-12 rounded-full border px-3 text-xs font-semibold", days.includes(d.n) ? "border-accent bg-accent text-white" : "border-line text-muted")}
+                  className={cn("min-h-9 min-w-12 rounded-full border px-3 text-xs font-semibold", days.includes(d.n) ? "border-accent bg-accent text-on-accent" : "border-line text-muted")}
                 >
                   {d.label}
                 </button>

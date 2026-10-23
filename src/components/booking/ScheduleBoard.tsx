@@ -138,14 +138,14 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
               onClick={() => setSelected(key)}
               className={cn(
                 "flex min-h-[68px] min-w-[54px] flex-1 flex-col items-center justify-center rounded-2xl border text-center transition-colors",
-                isSel ? "border-accent bg-accent text-white" : "border-line bg-surface",
+                isSel ? "border-accent bg-accent text-on-accent" : "border-line bg-surface",
               )}
             >
-              <span className={cn("text-[10px] font-bold uppercase", isSel ? "text-white/80" : "text-muted")}>{format(day, "EEE")}</span>
+              <span className={cn("text-[10px] font-bold uppercase", isSel ? "text-on-accent/80" : "text-muted")}>{format(day, "EEE")}</span>
               <span className="text-lg font-bold leading-tight">{format(day, "d")}</span>
               <span className="mt-0.5 flex h-1.5 gap-0.5">
-                {booked > 0 && <span className={cn("h-1.5 w-1.5 rounded-full", isSel ? "bg-white" : "bg-success")} />}
-                {open > 0 && <span className={cn("h-1.5 w-1.5 rounded-full", isSel ? "bg-white/60" : "bg-accent")} />}
+                {booked > 0 && <span className={cn("h-1.5 w-1.5 rounded-full", isSel ? "bg-on-accent" : "bg-success")} />}
+                {open > 0 && <span className={cn("h-1.5 w-1.5 rounded-full", isSel ? "bg-on-accent/60" : "bg-accent")} />}
               </span>
             </button>
           );
@@ -273,7 +273,7 @@ function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer
     );
   }
   return (
-    <div className={cn(base, "cursor-not-allowed border-line/60 bg-transparent text-muted/50")}>
+    <div className={cn(base, "cursor-not-allowed border-line/60 bg-transparent text-muted/70")}>
       <span className="text-sm font-semibold">{time}</span>
       <span className="text-[11px]">{s.state === "late" ? "Too soon to book" : "Past"}</span>
     </div>
