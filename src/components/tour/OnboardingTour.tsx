@@ -88,6 +88,35 @@ export function OnboardingTour() {
   const next = () => (index >= steps.length - 1 ? finish() : goToStep(index + 1));
   const back = () => index > 0 && goToStep(index - 1);
 
+  // The page is frozen while the tour is open: the tour itself scrolls to each target, the person can't.
+  useEffect(() => {
+    if (!tour.active) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = { overflow: html.style.overflow, pad: body.style.paddingRight };
+    const bar = window.innerWidth - html.clientWidth;
+    html.style.overflow = "hidden";
+    if (bar > 0) body.style.paddingRight = `${bar}px`; // keep the layout from jumping when the scrollbar disappears
+    const stop = (e: Event) => {
+      if (e.cancelable) e.preventDefault();
+    };
+    const SCROLL_KEYS = new Set([" ", "PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"]);
+    const onScrollKey = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key) && !(e.target instanceof HTMLElement && e.target.closest("button, a, input, textarea, select") && e.key === " ")) stop(e);
+    };
+    const opts = { passive: false, capture: true } as const;
+    window.addEventListener("wheel", stop, opts);
+    window.addEventListener("touchmove", stop, opts);
+    window.addEventListener("keydown", onScrollKey, true);
+    return () => {
+      html.style.overflow = prev.overflow;
+      body.style.paddingRight = prev.pad;
+      window.removeEventListener("wheel", stop, opts);
+      window.removeEventListener("touchmove", stop, opts);
+      window.removeEventListener("keydown", onScrollKey, true);
+    };
+  }, [tour.active]);
+
   useEffect(() => {
     if (!tour.active) return;
     const onKey = (e: KeyboardEvent) => {
