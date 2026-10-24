@@ -42,9 +42,21 @@ export function classAsBooking(g: GroupSession, viewerId?: string): Booking {
   };
 }
 
-/** Coach classes that take up the calendar (shared sessions already have their own booking). */
-export function classesAsBookings(groups: GroupSession[], viewerId?: string): Booking[] {
-  return groups.filter((g) => g.kind === "CLASS" && g.status !== "CANCELLED").map((g) => classAsBooking(g, viewerId));
+/**
+ * Coach classes that take up the calendar (shared sessions already have their own booking). With `partnerSessions`
+ * (a client's calendar) other people's open partner sessions are included too, so they show as joinable instead of "booked".
+ */
+export function classesAsBookings(groups: GroupSession[], viewerId?: string, partnerSessions = false): Booking[] {
+  return groups
+    .filter((g) => g.status !== "CANCELLED" && (g.kind === "CLASS" || (partnerSessions && g.kind === "SHARED" && g.status === "OPEN" && g.mine?.role !== "OWNER")))
+    .map((g) => classAsBooking(g, viewerId));
+}
+
+/** A client's calendar: the bookings shown as "taken" by the same time as an open partner session are replaced by that session. */
+export function withPartnerSessions(bookings: Booking[], groups: GroupSession[], viewerId?: string): Booking[] {
+  const partner = classesAsBookings(groups, viewerId, true).filter((b) => groups.find((g) => g.id === b.id)?.kind === "SHARED");
+  const covered = (b: Booking) => b.clientId === "other" && partner.some((p) => p.start === b.start && p.end === b.end);
+  return [...bookings.filter((b) => !covered(b)), ...classesAsBookings(groups, viewerId, true)];
 }
 
 export function GroupBadge({ g }: { g: GroupSession }) {

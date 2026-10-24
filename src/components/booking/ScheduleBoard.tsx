@@ -5,7 +5,7 @@ import { CalendarPlus, Car, ChevronLeft, ChevronRight, Lock, MapPin, Users } fro
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { classesAsBookings, classTitle, spotsLabel } from "@/components/groups/groupUi";
+import { classesAsBookings, classTitle, spotsLabel, withPartnerSessions } from "@/components/groups/groupUi";
 import { Button, Card, Field, IconButton } from "@/components/ui";
 import { gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
@@ -56,7 +56,11 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const role = mode === "trainer" ? "TRAINER" : "CLIENT";
   // Coach group classes take up the calendar like any other session.
-  const gridBookings = useMemo(() => [...db.bookings, ...classesAsBookings(db.groups, clientId)], [db.bookings, db.groups, clientId]);
+  // A client also sees other people's partner sessions that are open to join (no names, only the spots left).
+  const gridBookings = useMemo(
+    () => (mode === "client" ? withPartnerSessions(db.bookings, db.groups, clientId) : [...db.bookings, ...classesAsBookings(db.groups, clientId)]),
+    [db.bookings, db.groups, clientId, mode],
+  );
   const src = { slots: db.slots, bookings: gridBookings, settings: db.settings };
   const router = useRouter();
 
@@ -193,7 +197,7 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
 }
 
 function classOf(id: string, groups: GroupSession[]): GroupSession | undefined {
-  return groups.find((g) => g.id === id && g.kind === "CLASS");
+  return groups.find((g) => g.id === id && (g.kind === "CLASS" || g.kind === "SHARED"));
 }
 
 function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer"; onClick: () => void }) {
@@ -212,7 +216,7 @@ function SlotPill({ s, mode, onClick }: { s: SlotView; mode: "client" | "trainer
           <Users size={12} /> {time}
         </span>
         <span className="truncate text-[11px] font-semibold">
-          {classTitle(cls)} · {mode === "trainer" ? `${cls.confirmed}/${cls.capacity} booked` : mine ? "You're in" : spotsLabel(cls)}
+          {classTitle(cls)} · {mode === "trainer" ? `${cls.confirmed}/${cls.capacity} booked` : mine ? "You're in" : cls.kind === "SHARED" && cls.spotsLeft > 0 ? `${spotsLabel(cls)} · tap to ask to join` : spotsLabel(cls)}
         </span>
       </button>
     );
