@@ -69,7 +69,7 @@ export default function PasswordPage() {
       )}
       {done && (
         <div role="status" className="pointer-events-none fixed inset-x-0 top-3 z-[80] flex justify-center px-4 pt-safe">
-          <div className="flex items-center gap-2 rounded-2xl border border-success/40 bg-surface px-4 py-3 text-sm font-semibold text-emerald-200 shadow-2xl">
+          <div className="flex items-center gap-2 rounded-2xl border border-success/40 bg-surface px-4 py-3 text-sm font-semibold text-success shadow-2xl">
             <CheckCircle2 size={18} className="text-success" /> Password updated — taking you home…
           </div>
         </div>
@@ -88,8 +88,8 @@ export default function PasswordPage() {
             </Field>
           </fieldset>
           {/* An error and the success state are mutually exclusive. */}
-          {error && !done && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-red-200">{error}</p>}
-          {done && <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-emerald-200">Password updated successfully.</p>}
+          {error && !done && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+          {done && <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">Password updated successfully.</p>}
           <Button type="submit" className="w-full" disabled={busy || done}>
             <KeyRound size={16} /> {busy ? "Updating…" : done ? "Redirecting…" : "Update password"}
           </Button>

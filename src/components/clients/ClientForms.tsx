@@ -46,6 +46,7 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
   const [email, setEmail] = useState("");
   const [goal, setGoal] = useState<ClientGoal>("Hypertrophy");
   const [credits, setCredits] = useState(10);
+  const [groupCredits, setGroupCredits] = useState(0);
   const [gym, setGym] = useState<string>("");
   const [medical, setMedical] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +70,7 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
       email: email.trim(),
       goal,
       credits: Math.max(0, credits),
+      groupClassCredits: Math.max(0, groupCredits),
       defaultGymId: gym || null,
       medicalNotes: medical.trim(),
     });
@@ -119,6 +121,9 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
           </Field>
           <Field label="Session package credits">
             <Input type="number" inputMode="numeric" min={0} value={credits} onChange={(e) => setCredits(Number(e.target.value))} />
+          </Field>
+          <Field label="Group class credits" hint="Used for group classes and partner sessions. Can be changed any time.">
+            <Input type="number" inputMode="numeric" min={0} value={groupCredits} onChange={(e) => setGroupCredits(Number(e.target.value))} />
           </Field>
           <Field label="Phone / WhatsApp">
             <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+65 9xxx xxxx" inputMode="tel" />

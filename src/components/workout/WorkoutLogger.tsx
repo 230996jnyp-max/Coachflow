@@ -45,6 +45,7 @@ import {
   newWorkoutExercise,
   templateFromWorkout,
   updateWorkout,
+  useLivePolling,
   useNow,
 } from "@/lib/store";
 import type { Exercise, PRKind, SetType, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
@@ -96,6 +97,9 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
 
   const template = w?.templateId ? db.templates.find((t) => t.id === w.templateId) : undefined;
 
+  // A live group workout: the coach may be editing alongside, so keep it fresh every few seconds.
+  useLivePolling(!!w?.groupId && w.status === "ACTIVE");
+
   if (!user) return null;
   if (!w || (!isTrainer && w.clientId !== user.id)) {
     return (
@@ -110,11 +114,32 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
 
   const client = db.users.find((u) => u.id === w.clientId);
   const isActive = w.status === "ACTIVE";
+  if (w.groupId && isActive && isTrainer && w.clientId !== user.id) {
+    return (
+      <Card className="space-y-3 p-6 text-center">
+        <div className="font-semibold">{client?.name ?? "A client"}’s live group workout</div>
+        <p className="text-sm text-muted">This workout is part of a group class. Follow and edit everyone on the live grid so your changes merge with what they log.</p>
+        <Link href={`/classes/${w.groupId}`} className="inline-block text-sm font-semibold text-accent">
+          Open the live grid →
+        </Link>
+      </Card>
+    );
+  }
   const up = (fn: (x: Workout) => Workout) => updateWorkout(w.id, fn);
   const patchEx = (weId: string, fn: (we: WorkoutExercise) => WorkoutExercise) =>
     up((x) => ({ ...x, exercises: x.exercises.map((we) => (we.id === weId ? fn(we) : we)) }));
   const patchSet = (weId: string, setId: string, patch: Partial<WorkoutSet>) =>
-    patchEx(weId, (we) => ({ ...we, sets: we.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)) }));
+    patchEx(weId, (we) => ({
+      ...we,
+      sets: we.sets.map((s) => {
+        if (s.id !== setId) return s;
+        const next = { ...s, ...patch };
+        // Changing a value the coach edited ends the "edited by coach" tag, and the server then keeps this value.
+        const ce = s.coachEdit;
+        if (ce && !ce.superseded && ce.keys.some((k) => (next as unknown as Record<string, unknown>)[k] !== (s as unknown as Record<string, unknown>)[k])) next.coachEdit = { ...ce, superseded: true };
+        return next;
+      }),
+    }));
 
   const prevSetFor = (we: WorkoutExercise, set: WorkoutSet): WorkoutSet | undefined => {
     const prev = prevMap.get(we.id);
@@ -249,6 +274,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
             Logged by {w.loggedBy === "TRAINER" ? "Trainer" : "Client"}
           </Badge>
           {!isActive && <Badge className="border-success/30 bg-success/15 text-success">Completed</Badge>}
+          {w.groupId && <Badge className="border-accent/30 bg-accent/15 text-accent">Group class</Badge>}
         </div>
 
         <div className="grid grid-cols-3 gap-2 text-center">
@@ -425,6 +451,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                       showRpe={showRpe}
                       repHint={repHint}
                       prFlags={prMap.get(set.id)}
+                      coachEdited={!!set.coachEdit && !set.coachEdit.superseded}
                       onChange={(patch) => patchSet(we.id, set.id, patch)}
                       onToggleDone={() => toggleDone(we, set)}
                       onCycleType={() => cycleType(we, set)}

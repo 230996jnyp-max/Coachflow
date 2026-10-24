@@ -7,23 +7,32 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
+import { clearActive, isIdleStale, markActive, rememberUsername, setIdleNotice } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
+import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
 import type {
+  AppNotification,
   AppSettings,
+  AttendanceStats,
   AvailabilitySlot,
   BodyMetricLog,
   Booking,
   BookingStatus,
   ClientGoal,
   ClientProfile,
+  CreditLogEntry,
   DB,
   Exercise,
+  GroupRequest,
+  GroupSession,
   GymLocation,
+  PlaceInfo,
   ProgressPhoto,
   Role,
   RoutineTemplate,
   SessionFocus,
+  SetType,
   UnitSystem,
   User,
   Workout,
@@ -76,7 +85,7 @@ function flush() {
   if (!uidNow) return;
   // Once workouts/routines/custom exercises are safely in the database, the device keeps no copy of them.
   const cloud = cloudSafe ? { workouts: [], templates: [], exercises: SEED_EXERCISES } : {};
-  set(localKey(uidNow), { ...state.db, ...cloud, users: [], clients: [], gyms: [], slots: [], bookings: [] }).catch(() => undefined);
+  set(localKey(uidNow), { ...state.db, ...cloud, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [] }).catch(() => undefined);
 }
 
 function persist() {
@@ -265,6 +274,9 @@ interface BootstrapData {
 async function establishSession(): Promise<boolean> {
   const r = await api<BootstrapData>("/api/bootstrap");
   if (!r.ok || !r.data?.user) {
+    // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
+    if (isIdleStale()) setIdleNotice();
+    if (isIdleStale()) clearActive();
     setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
     return false;
   }
@@ -302,6 +314,9 @@ async function establishSession(): Promise<boolean> {
       gyms: [],
       slots: [],
       bookings: [],
+      groups: [],
+      groupRequests: [],
+      notifications: [],
       // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
       workouts: server ? server.workouts : local.workouts,
       templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
@@ -311,6 +326,7 @@ async function establishSession(): Promise<boolean> {
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
   trainingLoaded = serverOk;
   await refreshSchedule();
+  await refreshGroups();
   return true;
 }
 
@@ -380,14 +396,25 @@ export async function initStore() {
       void refreshAccounts();
       void refreshSchedule();
       void refreshTraining();
+      void refreshGroups();
     }
   }, 45_000);
+  // Live group classes: every 3 seconds while a live grid / group workout is open, and a little slower around class time.
+  let fastN = 0;
+  setInterval(() => {
+    if (typeof document === "undefined" || document.visibilityState !== "visible" || !state.sessionUserId) return;
+    if (liveCount > 0) {
+      void refreshTraining();
+      void refreshGroups();
+    } else if (inClassWindow() && ++fastN % 3 === 0) void refreshGroups();
+  }, 3000);
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         void refreshAccounts();
         void refreshSchedule();
         void refreshTraining();
+        void refreshGroups();
       } else {
         flushTraining(true);
       }
@@ -435,6 +462,10 @@ export async function login(username: string, password: string): Promise<string 
   const r = await api("/api/auth/login", { body: { username, password } });
   if (!r.ok) return r.error ?? "Login failed.";
   const ok = await establishSession();
+  if (ok) {
+    rememberUsername(username); // only the username is remembered on this device, never the password
+    markActive();
+  }
   return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
 }
 
@@ -444,6 +475,7 @@ export async function logout() {
   await Promise.all([exerciseQ.flush(), templateQ.flush()]);
   await workoutQ.flush();
   flush();
+  clearActive();
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();
@@ -461,6 +493,38 @@ export async function changePassword(current: string, next: string): Promise<str
   return null;
 }
 
+const onboardKey = (userId: string) => `coachflow-onboarded:${userId}`;
+
+/** Has this device already seen / finished the guided tour for this user? */
+export function deviceOnboarded(userId: string): boolean {
+  try {
+    return localStorage.getItem(onboardKey(userId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The tour was finished or skipped: remember it on this device and on the account, so it never interrupts again. */
+export function completeOnboarding() {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  try {
+    localStorage.setItem(onboardKey(uid), "1");
+  } catch {
+    /* ignore */
+  }
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, hasCompletedOnboarding: true } : u)) }));
+  void api("/api/me", { method: "PATCH", body: { hasCompletedOnboarding: true } });
+}
+
+/** Saves the chosen theme on the account (the device copy is written by applyTheme). */
+export function saveThemePreference(id: "black" | "white" | "navy") {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, themePreference: id } : u)) }));
+  void api("/api/me", { method: "PATCH", body: { themePreference: id } });
+}
+
 export function setUnit(userId: string, unit: UnitSystem) {
   mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === userId ? { ...u, unit } : u)) }));
   void api("/api/me", { method: "PATCH", body: { unit } });
@@ -475,6 +539,7 @@ export interface NewClientInput {
   email: string;
   goal: ClientGoal;
   credits: number;
+  groupClassCredits?: number;
   defaultGymId: string | null;
   medicalNotes: string;
 }
@@ -531,13 +596,7 @@ export async function deleteClient(id: string): Promise<string | null> {
   return null;
 }
 
-/** Pushes a client's package balance to the server (fire-and-forget; the coach's device is the source of truth for bookings). */
-function syncCredits(clientId: string) {
-  const c = state.db.clients.find((x) => x.id === clientId);
-  if (!c || state.db.users.find((u) => u.id === state.sessionUserId)?.role !== "TRAINER") return;
-  void api(`/api/clients/${clientId}`, { method: "PATCH", body: { credits: c.credits, packageSize: c.packageSize } });
-}
-
+/** Changes a client's 1-on-1 package by `delta` on the server (relative, so attendance changes made meanwhile are never overwritten). */
 export function adjustCredits(id: string, delta: number, setPackage = false) {
   mutate((db) => ({
     ...db,
@@ -551,7 +610,18 @@ export function adjustCredits(id: string, delta: number, setPackage = false) {
         : c,
     ),
   }));
-  syncCredits(id);
+  if (state.db.users.find((u) => u.id === state.sessionUserId)?.role !== "TRAINER") return;
+  void api(`/api/clients/${id}`, { method: "PATCH", body: { creditsDelta: delta, ...(setPackage ? { setPackageToBalance: true } : {}) } }).then((r) => {
+    if (r.ok) void refreshAccounts();
+  });
+}
+
+/** Same for the group class credits. Returns an error message, or null. */
+export async function adjustGroupCreditsBy(id: string, delta: number): Promise<string | null> {
+  const r = await api(`/api/clients/${id}`, { method: "PATCH", body: { groupCreditsDelta: delta } });
+  if (!r.ok) return r.error ?? "Could not change the credits.";
+  await refreshAccounts();
+  return null;
 }
 
 /* ---------------- Exercises & templates ---------------- */
@@ -707,7 +777,7 @@ export interface CompletedWorkoutInput {
   exercises: {
     exerciseId: string;
     notes?: string;
-    sets: { reps?: number; weight?: number; durationSec?: number; distanceKm?: number }[];
+    sets: { type?: SetType; reps?: number; weight?: number; durationSec?: number; distanceKm?: number }[];
   }[];
 }
 
@@ -796,6 +866,10 @@ interface RulesData {
   autoConfirm: boolean;
   allowCustomGym: boolean;
   utcOffsetMin?: number;
+  travelEnabled: boolean;
+  travelDefaultMin: number;
+  travelParkingMin: number;
+  travelMaxMin: number;
 }
 
 interface ScheduleData {
@@ -806,7 +880,7 @@ interface ScheduleData {
 }
 
 function applySchedule(data: ScheduleData) {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym } = data.settings;
+  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin } = data.settings;
   setState({
     ...state,
     db: {
@@ -814,7 +888,7 @@ function applySchedule(data: ScheduleData) {
       gyms: data.gyms,
       slots: data.slots,
       bookings: data.bookings,
-      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym },
+      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin },
     },
   });
 }
@@ -824,6 +898,12 @@ export async function refreshSchedule(): Promise<void> {
   if (!state.sessionUserId) return;
   const r = await api<ScheduleData>("/api/schedule");
   if (r.ok && r.data) applySchedule(r.data);
+}
+
+/** For a location being considered, the coach's sessions with the travel buffer each would need (times only). Null when travel rules are off. */
+export async function fetchTravelNeighbors(loc: { gymId: string | null; customGym?: string; place?: PlaceInfo | null }): Promise<TravelNeighbor[] | null> {
+  const r = await api<{ enabled: boolean; neighbors: TravelNeighbor[] }>("/api/schedule/travel", { body: { gymId: loc.gymId, customGym: loc.customGym, place: loc.place ?? undefined } });
+  return r.ok && r.data?.enabled ? r.data.neighbors : null;
 }
 
 export async function saveGym(g: Omit<GymLocation, "id"> & { id?: string }): Promise<string | null> {
@@ -866,6 +946,9 @@ export interface NewBookingInput {
   start: Date;
   gymId: string | null;
   customGym?: string;
+  place?: PlaceInfo | null;
+  /** Coach only: book even though there is not enough travel time from another location. */
+  waiveTravel?: boolean;
   focus: SessionFocus;
   notes: string;
   createdBy: Role;
@@ -887,6 +970,8 @@ export async function createBooking(input: NewBookingInput): Promise<{ ok: true;
       start: input.start.toISOString(),
       gymId: input.gymId,
       customGym: input.customGym,
+      place: input.place ?? undefined,
+      waiveTravel: input.waiveTravel === true ? true : undefined,
       focus: input.focus,
       notes: input.notes,
     },
@@ -915,17 +1000,212 @@ export async function cancelBookingAs(id: string, role: Role): Promise<string | 
   return null;
 }
 
-export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string): Promise<string | null> {
-  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym } });
+export async function rescheduleBooking(id: string, start: Date, gymId: string | null, customGym?: string, place?: PlaceInfo | null, waiveTravel = false): Promise<string | null> {
+  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "reschedule", start: start.toISOString(), gymId, customGym, place: place ?? undefined, waiveTravel: waiveTravel || undefined } });
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");
   return null;
 }
 
+/* ---------------- Group classes, shared sessions & notifications ---------------- */
+interface GroupsData {
+  groups: GroupSession[];
+  requests: GroupRequest[];
+  notifications: AppNotification[];
+  unread: number;
+}
+
+/** How many open screens want fast (3 s) updates: the coach's live grid and a client's group workout. */
+let liveCount = 0;
+
+export function useLivePolling(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    liveCount++;
+    void refreshTraining();
+    void refreshGroups();
+    return () => {
+      liveCount = Math.max(0, liveCount - 1);
+    };
+  }, [on]);
+}
+
+function inClassWindow(): boolean {
+  const meId = state.sessionUserId;
+  if (!meId) return false;
+  const staff = state.db.users.find((u) => u.id === meId)?.role === "TRAINER";
+  const now = Date.now();
+  return state.db.groups.some((g) => g.status === "OPEN" && (staff || g.mine?.status === "CONFIRMED") && Date.parse(g.start) - 30 * 60000 < now && Date.parse(g.end) + 120 * 60000 > now);
+}
+
+function applyGroups(data: GroupsData) {
+  const cur = state.db;
+  if (sameJson(cur.groups, data.groups) && sameJson(cur.groupRequests, data.requests) && sameJson(cur.notifications, data.notifications)) return;
+  setState({ ...state, db: { ...cur, groups: data.groups, groupRequests: data.requests, notifications: data.notifications } });
+}
+
+/** Re-reads the classes, join requests and notifications. If a group workout was pushed to me, pulls it in straight away. */
+export async function refreshGroups(): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser) return;
+  const r = await api<GroupsData>("/api/groups");
+  if (state.sessionUserId !== forUser || !r.ok || !r.data) return;
+  applyGroups(r.data);
+  const me = state.db.users.find((u) => u.id === forUser);
+  if (me?.role === "CLIENT") {
+    const waiting = r.data.groups.some((g) => g.status === "OPEN" && g.workoutStartedAt && g.mine?.status === "CONFIRMED" && !state.db.workouts.some((w) => w.groupId === g.id));
+    if (waiting) void refreshTraining();
+  }
+}
+
+async function groupCall<T extends object = Record<string, never>>(path: string, body: unknown, method = "PATCH"): Promise<{ error: string | null; data: (GroupsData & T) | null }> {
+  const r = await api<GroupsData & T>(path, { method, body });
+  if (!r.ok || !r.data) return { error: r.error ?? "That didn't work. Please try again.", data: null };
+  applyGroups(r.data);
+  return { error: null, data: r.data };
+}
+
+/** Takes a spot in a class, or joins its waitlist. Returns an error message, or null (with the outcome). */
+export async function bookClass(id: string): Promise<{ error: string | null; result?: "CONFIRMED" | "WAITLIST" }> {
+  const r = await groupCall<{ result: "CONFIRMED" | "WAITLIST" }>(`/api/groups/${id}`, { action: "book" });
+  return { error: r.error, result: r.data?.result };
+}
+export async function leaveClass(id: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "leave" })).error;
+}
+export async function requestToJoin(id: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "request" })).error;
+}
+export async function withdrawRequest(requestId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/requests/${requestId}`, { decision: "cancel" })).error;
+}
+export async function decideJoinRequest(requestId: string, approve: boolean): Promise<string | null> {
+  const r = await groupCall(`/api/groups/requests/${requestId}`, { decision: approve ? "approve" : "decline" });
+  if (!r.error) void refreshSchedule();
+  return r.error;
+}
+/** A client opens one of their own sessions to a group / partner. */
+export async function shareSession(bookingId: string, capacity: number): Promise<string | null> {
+  return (await groupCall("/api/groups", { shareBookingId: bookingId, capacity }, "POST")).error;
+}
+export async function unshareSession(groupId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${groupId}`, { action: "unshare" })).error;
+}
+
+export interface NewClassInput {
+  title: string;
+  start: Date;
+  durationMin: number;
+  capacity: number;
+  repeatWeeks: number;
+  gymId: string | null;
+  customGym?: string;
+  place?: PlaceInfo | null;
+  templateId?: string;
+  notes: string;
+  waiveTravel?: boolean;
+}
+export async function createClass(i: NewClassInput): Promise<{ error: string | null; skipped: string[] }> {
+  const r = await groupCall<{ skipped: string[] }>(
+    "/api/groups",
+    { title: i.title, start: i.start.toISOString(), durationMin: i.durationMin, capacity: i.capacity, repeatWeeks: i.repeatWeeks, gymId: i.gymId, customGym: i.customGym, place: i.place ?? undefined, templateId: i.templateId || undefined, notes: i.notes, waiveTravel: i.waiveTravel || undefined },
+    "POST",
+  );
+  return { error: r.error, skipped: r.data?.skipped ?? [] };
+}
+export async function editClass(id: string, patch: Record<string, unknown>): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "edit", ...patch })).error;
+}
+export async function cancelClass(id: string, reason: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "cancel", reason })).error;
+}
+export async function addClassMember(id: string, clientId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "addMember", clientId })).error;
+}
+export async function removeClassMember(id: string, clientId: string): Promise<string | null> {
+  return (await groupCall(`/api/groups/${id}`, { action: "removeMember", clientId })).error;
+}
+/** Pushes one workout to every confirmed attendee (a routine, or an exercise list built on the spot). */
+export async function startClassWorkout(id: string, input: { templateId?: string; plan?: { exerciseId: string; sets: number; repMin: number; repMax: number }[]; title?: string }): Promise<string | null> {
+  const r = await groupCall<{ pushed: number }>(`/api/groups/${id}`, { action: "start", ...input });
+  if (!r.error) await refreshTraining(true);
+  return r.error;
+}
+export async function markNotificationsRead(ids: string[] | "all"): Promise<void> {
+  await groupCall("/api/notifications", { ids }, "POST");
+}
+
+/**
+ * Coach, live grid: change values of one set in an attendee's workout. Shown at once, then saved as a field-level change
+ * on the server (so it merges with whatever the client is logging at the same moment).
+ */
+export async function coachEditSet(workoutId: string, entryId: string, setId: string, change: { weight?: number | null; reps?: number | null; durationSec?: number | null; distanceKm?: number | null; done?: boolean }): Promise<string | null> {
+  const apply = (fn: (w: Workout) => Workout) => setState({ ...state, db: { ...state.db, workouts: state.db.workouts.map((w) => (w.id === workoutId ? fn(w) : w)) } });
+  apply((w) => ({
+    ...w,
+    exercises: w.exercises.map((we) =>
+      we.id !== entryId
+        ? we
+        : {
+            ...we,
+            sets: we.sets.map((s) => {
+              if (s.id !== setId) return s;
+              const next: Record<string, unknown> = { ...s };
+              for (const [k, v] of Object.entries(change)) {
+                if (v === null || v === undefined) delete next[k];
+                else next[k] = v;
+              }
+              return next as unknown as WorkoutSet;
+            }),
+          },
+    ),
+  }));
+  const r = await api<{ workout: Workout }>(`/api/training/workouts/${workoutId}`, { method: "PATCH", body: { entryId, setId, change } });
+  if (!r.ok || !r.data) {
+    void refreshTraining(true);
+    return r.error ?? "Couldn't save that change.";
+  }
+  const saved = r.data.workout;
+  apply(() => saved);
+  return null;
+}
+
+/* ---------------- Attendance ---------------- */
+export type AttendanceTarget = { kind: "BOOKING" | "GROUP"; id: string };
+export interface MarkChange {
+  clientId: string;
+  mark: "PRESENT" | "NO_SHOW" | "CLEAR";
+  /** No-show only: take the credit anyway. */
+  deduct?: boolean;
+}
+
+async function afterAttendance() {
+  await Promise.all([refreshSchedule(), refreshGroups(), refreshAccounts()]);
+}
+
+/** Marks people present / no-show (and optionally finalises the session). Credits are settled on the server. */
+export async function saveAttendance(t: AttendanceTarget, marks: MarkChange[], finalize = false): Promise<string | null> {
+  const r = await api("/api/attendance", { body: { kind: t.kind, id: t.id, marks, finalize } });
+  await afterAttendance();
+  return r.ok ? null : (r.error ?? "Could not save attendance.");
+}
+
+export async function reopenSession(t: AttendanceTarget): Promise<string | null> {
+  const r = await api("/api/attendance", { body: { kind: t.kind, id: t.id, reopen: true } });
+  await afterAttendance();
+  return r.ok ? null : (r.error ?? "Could not reopen the session.");
+}
+
+/** Attendance rate and credit log for one client (the coach picks the client; a client always gets their own). */
+export async function fetchCreditLog(clientId?: string): Promise<{ stats: AttendanceStats; log: CreditLogEntry[] } | null> {
+  const r = await api<{ stats: AttendanceStats; log: CreditLogEntry[] }>(`/api/credits/log${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`);
+  return r.ok && r.data ? r.data : null;
+}
+
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
 export function updateSettings(patch: Partial<AppSettings>) {
@@ -936,7 +1216,17 @@ export function updateSettings(patch: Partial<AppSettings>) {
       const s = state.db.settings;
       void api("/api/schedule/settings", {
         method: "PUT",
-        body: { sessionMinutes: s.sessionMinutes, noticeHours: s.noticeHours, autoConfirm: s.autoConfirm, allowCustomGym: s.allowCustomGym, utcOffsetMin: -new Date().getTimezoneOffset() },
+        body: {
+          sessionMinutes: s.sessionMinutes,
+          noticeHours: s.noticeHours,
+          autoConfirm: s.autoConfirm,
+          allowCustomGym: s.allowCustomGym,
+          travelEnabled: s.travelEnabled,
+          travelDefaultMin: s.travelDefaultMin,
+          travelParkingMin: s.travelParkingMin,
+          travelMaxMin: s.travelMaxMin,
+          utcOffsetMin: -new Date().getTimezoneOffset(),
+        },
       });
     }, 600);
   }

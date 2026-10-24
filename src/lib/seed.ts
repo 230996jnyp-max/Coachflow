@@ -10,6 +10,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noticeHours: 12,
   autoConfirm: true,
   allowCustomGym: true,
+  travelEnabled: true,
+  travelDefaultMin: 30,
+  travelParkingMin: 15,
+  travelMaxMin: 90,
   restSeconds: 90,
   emailInvites: true,
   emailChat: true,
@@ -80,6 +84,9 @@ export function createEmptyDB(): DB {
     gyms: [],
     slots: [],
     bookings: [],
+    groups: [],
+    groupRequests: [],
+    notifications: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }

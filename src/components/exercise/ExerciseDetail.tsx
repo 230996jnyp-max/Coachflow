@@ -183,7 +183,7 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
                         <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" />
                         <YAxis {...axisProps} domain={[0, "dataMax + 5"]} tickFormatter={(v) => (metric.kind === "seconds" ? fmtClock(v) : String(Math.round(v)))} />
                         <Tooltip {...tooltipStyle} formatter={(v) => [fmtVal(Number(v)), metric.label]} />
-                        <Line dataKey="v" stroke="#2F80ED" strokeWidth={2.5} dot={{ r: 3.5, fill: "#2F80ED", strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                        <Line dataKey="v" stroke={C.accent} strokeWidth={2.5} dot={{ r: 3.5, fill: C.accent, strokeWidth: 0 }} activeDot={{ r: 5 }} />
                         {record && <ReferenceDot x={record.label} y={record.v} r={6} fill="#FACC15" stroke="#fff" strokeWidth={2} />}
                       </LineChart>
                     </ResponsiveContainer>
@@ -195,7 +195,7 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
                         onClick={() => setMetricKey(m.key)}
                         className={cn(
                           "min-h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition-colors",
-                          m.key === metric.key ? "bg-accent text-white" : "bg-field text-muted hover:text-ink",
+                          m.key === metric.key ? "bg-accent text-on-accent" : "bg-field text-muted hover:text-ink",
                         )}
                       >
                         {m.label}

@@ -4,9 +4,9 @@ import type { MuscleGroup } from "@/lib/types";
 
 type Role = "primary" | "secondary" | "none";
 
-const FILL: Record<Role, string> = { primary: "#EF4444", secondary: "#F59E0B", none: "#2B3448" };
-const BASE = "#1B2232";
-const STROKE = "#0E131D";
+const FILL: Record<Role, string> = { primary: "var(--c-danger)", secondary: "var(--c-pr)", none: "var(--mm-none)" };
+const BASE = "var(--mm-base)";
+const STROKE = "var(--mm-stroke)";
 
 interface Part {
   id: string;
@@ -88,7 +88,7 @@ function Figure({ parts, primary, secondary, label }: { parts: Part[]; primary: 
       {parts.map((p) => (
         <Shape key={p.id} part={p} role={roleFor(p.muscles, primary, secondary)} />
       ))}
-      <text x={100} y={408} textAnchor="middle" fontSize={11} fontWeight={700} fill="#8892A6" letterSpacing={1.5}>
+      <text x={100} y={408} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--c-muted)" letterSpacing={1.5}>
         {label}
       </text>
     </g>

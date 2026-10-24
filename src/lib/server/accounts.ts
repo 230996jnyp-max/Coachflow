@@ -16,6 +16,8 @@ export interface ProfileJson {
   defaultGymId: string | null;
   medicalNotes: string;
   startDate: string;
+  /** Group-class credits (older profiles do not have the field yet: read it with `?? 0`). */
+  groupClassCredits?: number;
 }
 
 export const GOALS: ClientGoal[] = ["Hypertrophy", "Fat Loss", "Strength", "Conditioning", "General Fitness"];
@@ -44,6 +46,8 @@ export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
     createdAt: row.createdAt.toISOString(),
     isOwner: row.role === "OWNER",
     active: row.active,
+    hasCompletedOnboarding: row.onboarded,
+    ...(row.theme === "black" || row.theme === "white" || row.theme === "navy" ? { themePreference: row.theme } : {}),
     ...(opts.withEmail && staff && row.email ? { email: row.email } : {}),
   };
 }
@@ -62,6 +66,7 @@ export function toProfile(row: UserRow): ClientProfile {
     archived: !row.active,
     startDate: p.startDate,
     coachId: row.coachId ?? "",
+    groupClassCredits: p.groupClassCredits ?? 0,
   };
 }
 

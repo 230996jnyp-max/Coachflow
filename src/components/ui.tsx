@@ -7,12 +7,12 @@ import { cn, initials } from "@/lib/utils";
 /* ---------- Button ---------- */
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "success" | "outline";
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-white hover:bg-blue-500 active:bg-blue-600",
+  primary: "bg-accent text-on-accent hover:brightness-110 active:brightness-95",
   secondary: "bg-field text-ink hover:bg-line border border-line",
   outline: "border border-accent/50 text-accent hover:bg-accent/10",
   ghost: "text-muted hover:text-ink hover:bg-field",
   danger: "bg-danger/15 text-danger hover:bg-danger/25 border border-danger/30",
-  success: "bg-success text-white hover:bg-emerald-500",
+  success: "bg-success text-on-success hover:brightness-110",
 };
 
 export function Button({
@@ -153,7 +153,7 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
   );
 }
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }) {
   return <input {...props} className={cn(fieldBase, "h-11", className)} />;
 }
 
@@ -182,7 +182,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
         onClick={() => onChange(!checked)}
         className={cn("relative h-7 w-12 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-line")}
       >
-        <span className={cn("absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all", checked ? "left-[22px]" : "left-0.5")} />
+        <span className={cn("absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all", checked ? "left-[22px]" : "left-0.5")} />
       </button>
     </label>
   );
@@ -208,7 +208,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             "min-h-9 flex-1 rounded-lg px-3 text-xs font-semibold transition-colors",
-            value === o.value ? "bg-accent text-white" : "text-muted hover:text-ink",
+            value === o.value ? "bg-accent text-on-accent" : "text-muted hover:text-ink",
           )}
         >
           {o.label}
@@ -343,10 +343,10 @@ export function ConfirmDialog({
 
 export function Notice({ tone = "info", children, action }: { tone?: "info" | "warn" | "error" | "success"; children: ReactNode; action?: ReactNode }) {
   const styles = {
-    info: "border-accent/30 bg-accent/10 text-blue-200",
-    warn: "border-pr/30 bg-pr/10 text-amber-200",
-    error: "border-danger/30 bg-danger/10 text-red-200",
-    success: "border-success/30 bg-success/10 text-emerald-200",
+    info: "border-accent/30 bg-accent/10 text-ink",
+    warn: "border-pr/30 bg-pr/10 text-ink",
+    error: "border-danger/30 bg-danger/10 text-danger",
+    success: "border-success/30 bg-success/10 text-success",
   }[tone];
   return (
     <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm", styles)}>

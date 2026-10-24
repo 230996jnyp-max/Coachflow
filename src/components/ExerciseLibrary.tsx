@@ -128,7 +128,7 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
               onClick={() => setMuscle(m)}
               className={cn(
                 "min-h-9 shrink-0 rounded-full border px-3 text-xs font-semibold transition-colors",
-                muscle === m ? "border-accent bg-accent text-white" : "border-line bg-field text-muted hover:text-ink",
+                muscle === m ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink",
               )}
             >
               {m}
@@ -163,7 +163,7 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
                 <div
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-                    isSel ? "bg-accent text-white" : "bg-field text-muted",
+                    isSel ? "bg-accent text-on-accent" : "bg-field text-muted",
                   )}
                 >
                   {isSel ? <Check size={18} /> : ex.name[0]}

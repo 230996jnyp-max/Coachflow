@@ -18,6 +18,10 @@ export interface User {
   email?: string;
   /** Staff accounts can be deactivated by the owner. */
   active?: boolean;
+  /** The first-login guided tour has been finished or skipped. */
+  hasCompletedOnboarding?: boolean;
+  /** Saved colour theme (the Settings picker and header menu keep it in sync with the device). */
+  themePreference?: "black" | "white" | "navy";
 }
 
 export type ClientGoal =
@@ -43,6 +47,8 @@ export interface ClientProfile {
   startDate: string;
   /** The coach this client belongs to. */
   coachId: string;
+  /** Remaining group-class credits (separate from the 1-on-1 package). Used when a class is completed. */
+  groupClassCredits: number;
 }
 
 export type MuscleGroup =
@@ -114,6 +120,24 @@ export interface WorkoutSet {
   done: boolean;
   /** Persisted when the workout is saved so history can show badges. */
   pr?: PRKind[];
+  /** Set when the coach changed this set from the group live grid (see CoachEdit). */
+  coachEdit?: CoachEdit;
+}
+
+export type CoachEditKey = "weight" | "reps" | "durationSec" | "distanceKm" | "done";
+
+/**
+ * A coach's change to one set of a client's live group workout. `prev` holds the values before the edit so the server
+ * can tell whether the client changed the same set at the same time (the client's value then wins).
+ */
+export interface CoachEdit {
+  at: string;
+  keys: CoachEditKey[];
+  prev: Partial<Record<CoachEditKey, number | boolean>>;
+  /** The client changed the set after the coach did (the "Edited by coach" tag goes away). */
+  superseded?: boolean;
+  /** Client and coach changed the same set at the same time; the client's value was kept. */
+  conflict?: boolean;
 }
 
 export interface WorkoutExercise {
@@ -138,6 +162,8 @@ export interface Workout {
   loggedBy: Role;
   loggedById: string;
   templateId?: string;
+  /** Group class / shared session this workout belongs to (every attendee gets their own copy). */
+  groupId?: string;
   exercises: WorkoutExercise[];
 }
 
@@ -236,6 +262,8 @@ export interface Booking {
   end: string; // ISO
   gymId: string | null;
   customGym?: string;
+  /** Exact Google Maps place (name, address, coordinates) when one was picked. */
+  place?: PlaceInfo;
   focus: SessionFocus;
   notes: string;
   status: BookingStatus;
@@ -243,6 +271,48 @@ export interface Booking {
   createdAt: string;
   /** Bumped on reschedule/cancel so calendar apps treat updates to the same event correctly. */
   rev?: number;
+  /** The 1-on-1 client's (or session owner's) attendance mark, once the coach has set one. */
+  attendance?: AttendanceInfo;
+  /** Set while this session is opened to partners: the owner then uses a group credit. */
+  sharedGroupId?: string;
+}
+
+export type AttendanceMark = "PRESENT" | "NO_SHOW";
+
+export interface AttendanceInfo {
+  mark: AttendanceMark;
+  /** NO_SHOW only: the coach chose to take the credit anyway. */
+  deduct: boolean;
+}
+
+export interface AttendanceStats {
+  present: number;
+  noShow: number;
+  /** Present / (Present + No-Show) as a whole percent; null before any session has been marked. */
+  rate: number | null;
+}
+
+export interface CreditLogEntry {
+  id: string;
+  at: string;
+  pool: "SESSION" | "GROUP";
+  kind: string;
+  sessionType: string;
+  label: string;
+  /** Change to the balance: -1 credit taken, +1 credit given back, 0 for a reservation. */
+  delta: number;
+  /** Balance after this event. */
+  balance: number;
+  note?: string;
+}
+
+/** A place chosen from Google Maps search (Singapore). */
+export interface PlaceInfo {
+  placeId: string;
+  name: string;
+  address: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface AppSettings {
@@ -252,6 +322,11 @@ export interface AppSettings {
   noticeHours: number;
   autoConfirm: boolean;
   allowCustomGym: boolean;
+  /** Travel buffer between sessions at different locations (see lib/travel.ts). */
+  travelEnabled: boolean;
+  travelDefaultMin: number;
+  travelParkingMin: number;
+  travelMaxMin: number;
   restSeconds: number;
   /** Email a calendar invite (.ics) whenever a session is booked, moved or cancelled. */
   emailInvites?: boolean;
@@ -274,6 +349,78 @@ export interface ChatMessage {
   email?: { status: "sent" | "preview" | "failed" | "off"; to?: string; error?: string };
 }
 
+/* ---------------- Group classes & shared sessions ---------------- */
+export type GroupKind = "CLASS" | "SHARED";
+export type GroupStatus = "OPEN" | "CANCELLED" | "COMPLETED";
+export type MemberStatus = "CONFIRMED" | "WAITLIST" | "CANCELLED" | "ATTENDED" | "ABSENT";
+
+export interface GroupMember {
+  clientId: string;
+  status: MemberStatus;
+  role: "OWNER" | "MEMBER";
+  joinedAt: string;
+  /** Waitlist position (1 = next in line). */
+  position?: number;
+  attendance?: AttendanceInfo;
+}
+
+export interface GroupSession {
+  id: string;
+  /** CLASS = scheduled by the coach; SHARED = a client's session opened to partners. */
+  kind: GroupKind;
+  title: string;
+  start: string;
+  end: string;
+  capacity: number;
+  status: GroupStatus;
+  gymId: string | null;
+  customGym?: string;
+  place?: PlaceInfo;
+  notes: string;
+  templateId?: string;
+  templateName?: string;
+  bookingId?: string;
+  seriesId?: string;
+  /** How many spots are taken / left (the only attendee information clients get). */
+  confirmed: number;
+  spotsLeft: number;
+  waitlist: number;
+  /** Set once the coach has pushed the group workout. */
+  workoutStartedAt?: string;
+  workoutTitle?: string;
+  /** The viewer's own place in the class (clients). */
+  mine?: { status: "CONFIRMED" | "WAITLIST"; position?: number; role: "OWNER" | "MEMBER"; attendance?: AttendanceInfo };
+  /** The viewer's own join request, while one is pending (shared sessions). */
+  myRequest?: string;
+  /** The full roster: coaches only. */
+  members?: GroupMember[];
+}
+
+export interface GroupRequest {
+  id: string;
+  groupId: string;
+  status: "PENDING" | "APPROVED" | "DECLINED" | "EXPIRED" | "CANCELLED";
+  createdAt: string;
+  expiresAt: string;
+  /** Who is asking: a first name for current attendees, the full name for the coach. Empty for the requester themself. */
+  requesterName: string;
+  mine: boolean;
+  /** This viewer still has to approve or decline it. */
+  needsMe: boolean;
+  approved: number;
+  required: number;
+}
+
+export interface AppNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  link?: string;
+  createdAt: string;
+  read: boolean;
+}
+
 export interface DB {
   version: number;
   users: User[];
@@ -286,5 +433,8 @@ export interface DB {
   gyms: GymLocation[];
   slots: AvailabilitySlot[];
   bookings: Booking[];
+  groups: GroupSession[];
+  groupRequests: GroupRequest[];
+  notifications: AppNotification[];
   settings: AppSettings;
 }

@@ -13,6 +13,8 @@
 export type ParsedUnit = "metric" | "imperial";
 
 export interface ParsedSet {
+  /** Set type when it is not a normal working set: W warm-up, D drop set, F to failure (AI reader only). */
+  type?: "W" | "D" | "F";
   reps?: number;
   /** Always kilograms. */
   weightKg?: number;
@@ -30,6 +32,9 @@ export interface ParsedExercise {
   notes: string;
   /** True for time / distance based lines (cardio, planks…). */
   timed: boolean;
+  /** Set by the AI reader: the library exercise it mapped this line to, and how sure it was. */
+  libraryId?: string;
+  libraryConfidence?: "high" | "medium";
   /** The line had no sets/reps/time, so defaults were filled in. */
   noSets: boolean;
 }

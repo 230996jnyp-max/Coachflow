@@ -1,16 +1,18 @@
 "use client";
 
 import { addDays, endOfDay, format, isSameDay, parseISO, startOfDay } from "date-fns";
-import { AlertTriangle, Check, ChevronRight, MapPin, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, UserCheck, UserX, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { PendingAttendance } from "@/components/attendance/PendingAttendance";
 import { BookingDetail } from "@/components/booking/BookingDetail";
-import { gymName, StatusBadge, timeRange } from "@/components/booking/bookingUi";
+import { LocationPill } from "@/components/LocationPill";
+import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
 import { doneWorkouts, workoutSetCount } from "@/lib/stats";
-import { setBookingStatus, useNow } from "@/lib/store";
+import { saveAttendance, setBookingStatus, useNow } from "@/lib/store";
 import { fmtDurationShort } from "@/lib/utils";
 
 export default function TrainerDashboard() {
@@ -42,6 +44,8 @@ export default function TrainerDashboard() {
         <Stat label="Pending requests" value={pending.length} tone={pending.length ? "pr" : undefined} />
       </div>
 
+      <PendingAttendance />
+
       {pending.length > 0 && (
         <section>
           <SectionTitle>Booking requests</SectionTitle>
@@ -52,7 +56,7 @@ export default function TrainerDashboard() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{nameOf(b.clientId)}</div>
                   <div className="text-xs text-muted">
-                    {format(parseISO(b.start), "EEE d MMM")} · {timeRange(b)} · {gymName(b, db.gyms)}
+                    {format(parseISO(b.start), "EEE d MMM")} · {timeRange(b)} · <LocationPill small label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} className="font-medium align-middle" />
                   </div>
                 </div>
                 <Button size="sm" variant="success" onClick={() => setBookingStatus(b.id, "CONFIRMED")}>
@@ -86,14 +90,20 @@ export default function TrainerDashboard() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">{nameOf(b.clientId)}</div>
                       <div className="flex items-center gap-1 truncate text-xs text-muted">
-                        <MapPin size={11} /> {gymName(b, db.gyms)} · {b.focus}
+                        <LocationPill nested small label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} className="font-medium" />
+                        <span className="shrink-0">· {b.focus}</span>
                       </div>
                     </div>
                   </button>
-                  {b.status === "CONFIRMED" && isPast ? (
-                    <Button size="sm" variant="success" onClick={() => setBookingStatus(b.id, "COMPLETED")}>
-                      <Check size={14} /> Complete
-                    </Button>
+                  {b.status === "CONFIRMED" ? (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button size="sm" variant={b.attendance?.mark === "PRESENT" ? "success" : "secondary"} aria-pressed={b.attendance?.mark === "PRESENT"} onClick={() => saveAttendance({ kind: "BOOKING", id: b.id }, [{ clientId: b.clientId, mark: "PRESENT" }], isPast && !b.sharedGroupId)}>
+                        <UserCheck size={14} /> Present
+                      </Button>
+                      <Button size="sm" variant={b.attendance?.mark === "NO_SHOW" ? "danger" : "secondary"} aria-pressed={b.attendance?.mark === "NO_SHOW"} onClick={() => saveAttendance({ kind: "BOOKING", id: b.id }, [{ clientId: b.clientId, mark: "NO_SHOW", deduct: b.attendance?.deduct }], isPast && !b.sharedGroupId)}>
+                        <UserX size={14} /> No-Show
+                      </Button>
+                    </div>
                   ) : (
                     <StatusBadge status={b.status} />
                   )}

@@ -4,28 +4,35 @@ import { format } from "date-fns";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { Button, Field, Modal, Notice, Select, Textarea } from "@/components/ui";
+import { Button, Field, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
+import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { directionsUrl } from "@/lib/gyms";
 import { AddToCalendar } from "./CalendarActions";
-import { gymToBooking, isGymComplete } from "@/lib/gyms";
+import { bookingLocation } from "./bookingUi";
+import { gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
-import { createBooking } from "@/lib/store";
-import type { Booking } from "@/lib/types";
+import { createBooking, shareSession } from "@/lib/store";
+import type { Booking, PlaceInfo } from "@/lib/types";
 import type { SessionFocus } from "@/lib/types";
 
 export const FOCUS_OPTIONS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
 
 /** Client tap-to-book modal. `start` is the tapped slot. */
-export function BookModal({ start, clientId, onClose }: { start: Date | null; clientId: string; onClose: () => void }) {
-  return start ? <Form key={start.getTime()} start={start} clientId={clientId} onClose={onClose} /> : null;
+export function BookModal({ start, clientId, initGym, initPlace, onClose }: { start: Date | null; clientId: string; initGym?: string; initPlace?: PlaceInfo | null; onClose: () => void }) {
+  return start ? <Form key={start.getTime()} start={start} clientId={clientId} initGym={initGym} initPlace={initPlace ?? null} onClose={onClose} /> : null;
 }
 
-function Form({ start, clientId, onClose }: { start: Date; clientId: string; onClose: () => void }) {
+function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; clientId: string; initGym?: string; initPlace: PlaceInfo | null; onClose: () => void }) {
   const { db } = useViewer();
   const profile = db.clients.find((c) => c.id === clientId);
-  const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
+  const [gym, setGym] = useState<string>(initGym || (profile?.defaultGymId ?? ""));
+  const [place, setPlace] = useState<PlaceInfo | null>(initPlace);
   const [focus, setFocus] = useState<SessionFocus>("Full Body");
   const [notes, setNotes] = useState("");
+  const [share, setShare] = useState(false);
+  const [groupSize, setGroupSize] = useState(4);
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [booked, setBooked] = useState<Booking | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +43,7 @@ function Form({ start, clientId, onClose }: { start: Date; clientId: string; onC
   const submit = async () => {
     setError(null);
     if (!gym) return setError("Please choose where you’ll train.");
-    if (!isGymComplete(gym)) return setError("Please type the place name.");
+    if (!isGymComplete(gym)) return setError("Please choose the exact location (search and pick it, or type the place).");
     const loc = gymToBooking(gym, db.gyms);
     if (busy) return;
     setBusy(true);
@@ -45,12 +52,20 @@ function Form({ start, clientId, onClose }: { start: Date; clientId: string; onC
       start,
       gymId: loc.gymId,
       customGym: loc.customGym,
+      place: placeForBooking(gym, place),
       focus,
       notes: notes.trim(),
       createdBy: "CLIENT",
     });
+    if (!res.ok) {
+      setBusy(false);
+      return setError(res.error);
+    }
+    if (share) {
+      const err = await shareSession(res.booking.id, groupSize);
+      setShareNote(err ? `Your session is booked, but it couldn’t be opened to partners: ${err}` : "Your session is open to partners. Anyone who asks to join needs approval from you and your coach.");
+    }
     setBusy(false);
-    if (!res.ok) return setError(res.error);
     setBooked(res.booking);
   };
 
@@ -66,7 +81,12 @@ function Form({ start, clientId, onClose }: { start: Date; clientId: string; onC
             {db.settings.autoConfirm ? "A session credit has been reserved for you." : "Your trainer will confirm shortly. A credit is reserved meanwhile."}
           </p>
         </div>
-        <div className="mt-2">
+        {shareNote && <div className="mt-3"><Notice tone="info">{shareNote}</Notice></div>}
+        <div className="mt-3 flex flex-col items-center gap-2 text-sm">
+          <LocationPill label={bookingLocation(booked, db.gyms).label} href={bookingLocation(booked, db.gyms).href} />
+          {booked.place && <div className="w-full"><MiniMap place={booked.place} href={directionsUrl({ place: booked.place })} /></div>}
+        </div>
+        <div className="mt-3">
           <AddToCalendar booking={booked} />
         </div>
       </Modal>
@@ -107,7 +127,7 @@ function Form({ start, clientId, onClose }: { start: Date; clientId: string; onC
         )}
 
         <Field label="Gym location" hint="Required">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} place={place} onPlace={setPlace} />
         </Field>
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
@@ -119,6 +139,23 @@ function Form({ start, clientId, onClose }: { start: Date; clientId: string; onC
         <Field label="Notes for trainer">
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Want to focus on deadlift form today" />
         </Field>
+        <div className="space-y-2 rounded-xl border border-line p-3">
+          <Toggle checked={share} onChange={setShare} label="Open to a group / partner session" />
+          {share && (
+            <>
+              <Field label="Up to how many people (including you)?">
+                <Select value={groupSize} onChange={(e) => setGroupSize(Number(e.target.value))}>
+                  {[2, 3, 4, 5, 6, 8].map((n) => (
+                    <option key={n} value={n}>
+                      {n} people
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <p className="text-xs text-muted">Other clients can ask to join. They’re only added when you and your coach both approve, and each uses one of their group class credits.</p>
+            </>
+          )}
+        </div>
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Modal>

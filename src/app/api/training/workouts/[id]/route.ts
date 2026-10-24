@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { badRequest, readJson, route } from "@/lib/server/http";
-import { putWorkout, removeWorkout } from "@/lib/server/training";
+import { patchWorkoutSet, putWorkout, removeWorkout } from "@/lib/server/training";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +17,16 @@ export const PUT = route<Ctx>(async (req, ctx) => {
   if (!w || w.id !== id) throw badRequest("Workout does not match the address.");
   await putWorkout(me, w);
   return NextResponse.json({ ok: true });
+});
+
+/** PATCH { entryId, setId, change } - the coach changes values of one set on the live group grid (merged with the client's own edits). */
+export const PATCH = route<Ctx>(async (req, ctx) => {
+  const body = await readJson(req);
+  const me = await requireUser(["OWNER", "COACH"]);
+  const { id } = await ctx.params;
+  if (typeof body.entryId !== "string" || typeof body.setId !== "string") throw badRequest("Missing set.");
+  const workout = await patchWorkoutSet(me, id, body.entryId, body.setId, body.change);
+  return NextResponse.json({ workout });
 });
 
 export const DELETE = route<Ctx>(async (_req, ctx) => {

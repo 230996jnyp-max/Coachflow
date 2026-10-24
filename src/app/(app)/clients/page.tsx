@@ -37,7 +37,7 @@ export default function ClientsPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3" data-tour="clients-search">
         <div className="relative min-w-[200px] flex-1">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients…" className="pl-9" />
@@ -65,7 +65,7 @@ export default function ClientsPage() {
           }
         />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2" data-tour="clients-list">
           {rows.map(({ user, profile }) => {
             const avail = availableCredits(profile, db.bookings);
             const next = db.bookings
@@ -90,7 +90,7 @@ export default function ClientsPage() {
                         <Ticket size={14} className={avail <= 2 ? "text-danger" : "text-accent"} />
                         <span className={avail <= 2 ? "text-danger" : ""}>{profile.credits}</span>
                       </div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Credits</div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Credits · {profile.groupClassCredits} group</div>
                     </div>
                     <div className="rounded-xl bg-field py-2">
                       <div className="text-sm font-bold leading-7">{next ? format(parseISO(next.start), "EEE d MMM") : "—"}</div>

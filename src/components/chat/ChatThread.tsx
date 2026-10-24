@@ -122,14 +122,14 @@ export function ChatThread({
                 </div>
               )}
               <div className={cn("flex", mine ? "justify-end" : "justify-start", grouped ? "mt-0.5" : mine ? "mt-2" : "")}>
-                <div className={cn("max-w-[82%] rounded-2xl px-3.5 py-2 text-sm", mine ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-field text-ink", m.pending && "opacity-60")}>
+                <div className={cn("max-w-[82%] rounded-2xl px-3.5 py-2 text-sm", mine ? "rounded-br-md bg-accent text-on-accent" : "rounded-bl-md bg-field text-ink", m.pending && "opacity-60")}>
                   {m.broadcast && (
-                    <div className={cn("mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider", mine ? "text-white/80" : "text-pr")}>
+                    <div className={cn("mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider", mine ? "text-on-accent/80" : "text-pr")}>
                       <Megaphone size={10} /> Announcement
                     </div>
                   )}
                   <div className="whitespace-pre-wrap break-words">{m.text}</div>
-                  <div className={cn("mt-1 flex items-center justify-end gap-1.5 text-[10px]", mine ? "text-white/70" : "text-muted")}>
+                  <div className={cn("mt-1 flex items-center justify-end gap-1.5 text-[10px]", mine ? "text-on-accent/70" : "text-muted")}>
                     {format(parseISO(m.createdAt), "h:mm a")}
                     {mine && !m.pending && !m.failed && <Check size={11} />}
                   </div>

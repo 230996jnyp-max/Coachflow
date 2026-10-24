@@ -89,7 +89,7 @@ export function RestTimerBar({ rest, onChange, onDismiss }: { rest: RestState; o
             <button onClick={() => adjust(15)} className="flex h-11 min-w-[56px] items-center justify-center gap-1 rounded-xl bg-field text-xs font-bold hover:bg-line" aria-label="Add 15 seconds">
               <Plus size={12} /> 15s
             </button>
-            <button onClick={onDismiss} className="flex h-11 items-center gap-1 rounded-xl bg-accent px-3 text-xs font-bold text-white" aria-label="Skip rest">
+            <button onClick={onDismiss} className="flex h-11 items-center gap-1 rounded-xl bg-accent px-3 text-xs font-bold text-on-accent" aria-label="Skip rest">
               <SkipForward size={14} /> Skip
             </button>
           </div>

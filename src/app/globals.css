@@ -1,29 +1,114 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-bg: #090b10;
-  --color-surface: #121620;
-  --color-field: #1a202e;
-  --color-line: #262e40;
-  --color-accent: #3b82f6;
-  --color-accent-dim: #1d3a6e;
-  --color-success: #10b981;
-  --color-pr: #f59e0b;
-  --color-danger: #ef4444;
-  --color-muted: #8892a6;
-  --color-ink: #e8ecf4;
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-field: var(--c-field);
+  --color-line: var(--c-line);
+  --color-accent: var(--c-accent);
+  --color-accent-dim: var(--c-accent-dim);
+  --color-on-accent: var(--c-on-accent);
+  --color-success: var(--c-success);
+  --color-pr: var(--c-pr);
+  --color-on-pr: var(--c-on-pr);
+  --color-on-success: var(--c-on-success);
+  --color-on-danger: var(--c-on-danger);
+  --color-danger: var(--c-danger);
+  --color-purple: var(--c-purple);
+  --color-muted: var(--c-muted);
+  --color-ink: var(--c-ink);
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-:root {
+/*
+ * Themes. <html data-theme="black | white | navy"> (set before first paint by the inline script in layout.tsx).
+ * Status colours (success / pr / danger / purple) are deepened on the light theme so text in those colours stays readable.
+ */
+:root,
+[data-theme="black"] {
+  --c-bg: #090b10;
+  --c-surface: #121620;
+  --c-field: #1a202e;
+  --c-line: #262e40;
+  --c-ink: #f8fafc;
+  --c-muted: #94a3b8;
+  --c-accent: #3b82f6;
+  --c-accent-dim: #1d3a6e;
+  --c-on-accent: #ffffff;
+  --c-success: #10b981;
+  --c-on-success: #04261b;
+  --c-on-danger: #ffffff;
+  --c-pr: #f59e0b;
+  --c-on-pr: #111827;
+  --c-danger: #ef4444;
+  --c-purple: #a78bfa;
+  /* charts & body map */
+  --chart-grid: #262e40;
+  --chart-series-pink: #f472b6;
+  --chart-series-cyan: #22d3ee;
+  --mm-none: #2b3448;
+  --mm-base: #1b2232;
+  --mm-stroke: #0e131d;
+  color-scheme: dark;
+}
+
+[data-theme="white"] {
+  --c-bg: #f8fafc;
+  --c-surface: #ffffff;
+  --c-field: #f1f5f9;
+  --c-line: #e2e8f0;
+  --c-ink: #0f172a;
+  --c-muted: #475569;
+  --c-accent: #2563eb;
+  --c-accent-dim: #dbeafe;
+  --c-on-accent: #ffffff;
+  --c-success: #047857;
+  --c-on-success: #ffffff;
+  --c-on-danger: #ffffff;
+  --c-pr: #b45309;
+  --c-on-pr: #ffffff;
+  --c-danger: #dc2626;
+  --c-purple: #6d28d9;
+  --chart-grid: #e2e8f0;
+  --chart-series-pink: #be185d;
+  --chart-series-cyan: #0e7490;
+  --mm-none: #e2e8f0;
+  --mm-base: #f1f5f9;
+  --mm-stroke: #cbd5e1;
+  color-scheme: light;
+}
+
+[data-theme="navy"] {
+  --c-bg: #0a1128;
+  --c-surface: #111d3b;
+  --c-field: #182850;
+  --c-line: #23386b;
+  --c-ink: #f0f6fc;
+  --c-muted: #93b4e0;
+  --c-accent: #38bdf8;
+  --c-accent-dim: #123b66;
+  --c-on-accent: #0a1128;
+  --c-success: #34d399;
+  --c-on-success: #04261b;
+  --c-on-danger: #2a0a0a;
+  --c-pr: #fbbf24;
+  --c-on-pr: #111827;
+  --c-danger: #f87171;
+  --c-purple: #c4b5fd;
+  --chart-grid: #23386b;
+  --chart-series-pink: #f9a8d4;
+  --chart-series-cyan: #67e8f9;
+  --mm-none: #23386b;
+  --mm-base: #182850;
+  --mm-stroke: #0a1128;
   color-scheme: dark;
 }
 
 html,
 body {
-  background: #090b10;
-  color: #e8ecf4;
+  background: var(--c-bg);
+  color: var(--c-ink);
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
@@ -38,12 +123,6 @@ body {
 }
 .pt-safe {
   padding-top: env(safe-area-inset-top);
-}
-
-input,
-select,
-textarea {
-  color-scheme: dark;
 }
 
 input[type="number"]::-webkit-outer-spin-button,
@@ -61,7 +140,7 @@ input[type="number"] {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262e40;
+  background: var(--c-line);
   border-radius: 8px;
 }
 
@@ -84,4 +163,26 @@ input[type="number"] {
 }
 .animate-sheet {
   animation: sheet-up 0.18s ease-out;
+}
+
+/* Onboarding tour spotlight: dims the page except around the target, with a pulsing accent ring. */
+.tour-spot {
+  border: 2px solid var(--c-accent);
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(5, 8, 14, 0.78);
+  outline: 3px solid color-mix(in srgb, var(--c-accent) 60%, transparent);
+  outline-offset: 2px;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+@keyframes tour-pulse {
+  0%,
+  100% {
+    outline-color: color-mix(in srgb, var(--c-accent) 65%, transparent);
+    outline-offset: 2px;
+  }
+  50% {
+    outline-color: color-mix(in srgb, var(--c-accent) 12%, transparent);
+    outline-offset: 8px;
+  }
 }

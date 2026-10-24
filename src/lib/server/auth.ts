@@ -9,6 +9,8 @@ import { users, type UserRow } from "./schema";
 
 const COOKIE = "cf_session";
 const MAX_AGE = 7 * 24 * 60 * 60;
+/** A session with no real user activity for this long is dead, even if the cookie is still valid. */
+export const IDLE_SECONDS = 4 * 60 * 60;
 
 export type DbRole = "OWNER" | "COACH" | "CLIENT";
 export const isStaff = (u: Pick<UserRow, "role">) => u.role === "OWNER" || u.role === "COACH";
@@ -24,7 +26,8 @@ export const verifyPassword = (plain: string, hash: string) => bcrypt.compare(pl
 
 /** Issues the httpOnly session cookie. `tokenVersion` lets us revoke every session (password change, deactivation). */
 export async function createSession(user: UserRow) {
-  const jwt = await new SignJWT({ tv: user.tokenVersion })
+  // `la` = last activity. Background polling never refreshes it; only the explicit activity ping and logging in do.
+  const jwt = await new SignJWT({ tv: user.tokenVersion, la: Math.floor(Date.now() / 1000) })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt()
@@ -53,6 +56,9 @@ export async function currentUser(): Promise<UserRow | null> {
     const d = await db();
     const [row] = await d.select().from(users).where(eq(users.id, payload.sub)).limit(1);
     if (!row || !row.active || row.tokenVersion !== payload.tv) return null;
+    // Sessions issued before inactivity tracking have no `la`; their issue time stands in for it.
+    const lastActive = typeof payload.la === "number" ? payload.la : (payload.iat ?? 0);
+    if (Date.now() / 1000 - lastActive > IDLE_SECONDS) return null;
     return row;
   } catch {
     return null;

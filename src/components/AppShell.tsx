@@ -24,6 +24,9 @@ import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useC
 import { useViewer } from "@/lib/hooks";
 import { logout } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "./groups/NotificationBell";
+import { ThemeMenu } from "./ThemeSwitcher";
+import { OnboardingTour } from "./tour/OnboardingTour";
 import { InstallButton } from "./InstallButton";
 import { Splash } from "./Providers";
 import { Avatar } from "./ui";
@@ -111,7 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className={cn("flex h-16 items-center gap-3 border-b border-line px-4", collapsed && "justify-center px-0")}>
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <Dumbbell size={20} />
           </div>
           {!collapsed && <span className="text-lg font-bold tracking-tight">{db.settings.brandName}</span>}
@@ -121,6 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Link
               key={n.href}
               href={n.href}
+              data-tour={`nav-${n.href.slice(1)}`}
               title={n.label}
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors",
@@ -137,6 +141,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="space-y-2 border-t border-line p-3">
+          <div className={cn("flex items-center gap-2", collapsed && "flex-col")}>
+            <NotificationBell />
+            <ThemeMenu align="left" up />
+            {!collapsed && <span className="text-xs font-semibold text-muted">Notifications</span>}
+          </div>
           {!collapsed && <InstallButton className="w-full" />}
           <div className={cn("flex items-center gap-3 rounded-xl p-2", collapsed && "justify-center")}>
             <Avatar name={user.name} size={36} />
@@ -173,13 +182,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Mobile top bar */}
       <header className="pt-safe sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur md:hidden">
         <div className="flex h-14 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-on-accent">
               <Dumbbell size={18} />
             </div>
-            <span className="font-bold tracking-tight">{db.settings.brandName}</span>
+            <span className="truncate font-bold tracking-tight">{db.settings.brandName}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             {user.isOwner && (
               <Link href="/admin" aria-label="Admin" className="flex h-10 w-10 items-center justify-center rounded-xl border border-pr/40 bg-pr/10 text-pr">
                 <ShieldCheck size={20} />
@@ -187,12 +196,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             <Link
               href="/messages"
+              data-tour="nav-messages"
               aria-label={unread ? `Messages, ${unread} unread` : "Messages"}
               className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-field text-ink"
             >
               <MessageCircle size={20} />
               {unread > 0 && <Badge count={unread} />}
             </Link>
+            <NotificationBell />
+            <ThemeMenu />
             <InstallButton compact />
             <Link href="/settings" aria-label="Profile">
               <Avatar name={user.name} size={32} />
@@ -206,6 +218,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       <ChatSync userId={user.id} threads={threads} />
+      <OnboardingTour />
       <ToastHost toasts={chat.toasts} onOpen={(thread) => { dismissToast(thread); router.push("/messages"); }} />
 
       {showBanner && activeWorkout && (
@@ -248,7 +261,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function Badge({ count }: { count: number }) {
   return (
-    <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+    <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-on-danger">
       {count > 9 ? "9+" : count}
     </span>
   );
@@ -275,7 +288,7 @@ function ToastHost({ toasts, onOpen }: { toasts: { id: string; thread: string; t
           onClick={() => onOpen(t.id)}
           className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-accent/40 bg-surface p-3 text-left shadow-2xl"
         >
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent">
             <MessageCircle size={18} />
           </span>
           <span className="min-w-0 flex-1">

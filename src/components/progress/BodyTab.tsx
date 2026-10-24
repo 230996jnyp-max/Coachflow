@@ -18,8 +18,8 @@ const CIRC: { key: Circ; label: string; color: string }[] = [
   { key: "chest", label: "Chest", color: C.success },
   { key: "hips", label: "Hips", color: C.pr },
   { key: "arm", label: "Arm", color: C.purple },
-  { key: "thigh", label: "Thigh", color: "#F472B6" },
-  { key: "calves", label: "Calves", color: "#22D3EE" },
+  { key: "thigh", label: "Thigh", color: "var(--chart-series-pink)" },
+  { key: "calves", label: "Calves", color: "var(--chart-series-cyan)" },
 ];
 
 function circValue(m: BodyMetricLog, k: Circ): number | undefined {
@@ -172,7 +172,7 @@ export function BodyTab({ clientId }: { clientId: string }) {
                       key={c.key}
                       onClick={() => setLines((l) => (on ? l.filter((x) => x !== c.key) : [...l, c.key]))}
                       className="min-h-9 rounded-full border px-3 text-xs font-semibold transition-colors"
-                      style={on ? { borderColor: c.color, background: c.color + "26", color: c.color } : { borderColor: "#262E40", color: "#8892A6" }}
+                      style={on ? { borderColor: c.color, background: `color-mix(in srgb, ${c.color} 15%, transparent)`, color: c.color } : { borderColor: "var(--c-line)", color: "var(--c-muted)" }}
                     >
                       {c.label}
                     </button>

@@ -7,7 +7,7 @@ export function bookingToEvent(b: Booking, db: DB, viewerIsTrainer: boolean): Ic
   const client = db.users.find((u) => u.id === b.clientId);
   const coachId = db.clients.find((c) => c.id === b.clientId)?.coachId;
   const trainer = db.users.find((u) => u.id === coachId) ?? db.users.find((u) => u.role === "TRAINER");
-  const gym = b.customGym || db.gyms.find((g) => g.id === b.gymId)?.name || "Location TBC";
+  const gym = b.place ? [b.place.name, b.place.address].filter(Boolean).join(", ") : b.customGym || db.gyms.find((g) => g.id === b.gymId)?.name || "Location TBC";
   const who = viewerIsTrainer ? client?.name ?? "Client" : trainer?.name ?? "Your trainer";
   return {
     uid: b.id,

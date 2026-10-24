@@ -3,8 +3,10 @@ import { NextResponse } from "next/server";
 import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
+import { logCredit } from "@/lib/server/credits";
+import { whenText } from "@/lib/server/groups";
 import { badRequest, conflict, notFound, readJson, route, str } from "@/lib/server/http";
-import { clientCredits, FOCUS, hasConflict, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, loadSchedule } from "@/lib/server/schedule";
+import { clientCredits, FOCUS, hasConflict, parsePlace, requestLoc, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck, loadSchedule } from "@/lib/server/schedule";
 import { bookings, gyms } from "@/lib/server/schema";
 import { and, eq } from "drizzle-orm";
 import type { SessionFocus } from "@/lib/types";
@@ -35,7 +37,8 @@ export const POST = route(async (req) => {
 
   const focus: SessionFocus = FOCUS.includes(body.focus as SessionFocus) ? (body.focus as SessionFocus) : "Full Body";
   const gymId = typeof body.gymId === "string" && body.gymId ? body.gymId.slice(0, 80) : null;
-  const customGym = str(body.customGym, "Location", { optional: true, max: 140 });
+  const place = gymId ? undefined : parsePlace(body.place);
+  const customGym = str(body.customGym, "Location", { optional: true, max: 140 }) || place?.name || "";
   const notes = str(body.notes, "Notes", { optional: true, max: 500 });
   if (!gymId && !customGym) throw badRequest("Please choose a gym location.");
 
@@ -53,6 +56,12 @@ export const POST = route(async (req) => {
     if (available <= 0) throw badRequest("No session credits left. Ask your coach to top up your package.");
   }
   if (await hasConflict(coachId, start, end)) throw conflict("That time overlaps another session.");
+  // Travel time between sessions at different locations (only the coach may waive it).
+  const waive = !isClient && body.waiveTravel === true;
+  if (!waive) {
+    const travel = await travelCheck(coachId, start, end, requestLoc({ gymId, customGym, place }), rules, undefined, !isClient);
+    if (travel) throw conflict(travel);
+  }
 
   const id = `b_${randomUUID()}`;
   const [row] = await d
@@ -66,8 +75,9 @@ export const POST = route(async (req) => {
       status: isClient && !rules.autoConfirm ? "PENDING" : "CONFIRMED",
       focus,
       createdBy: isClient ? "CLIENT" : "TRAINER",
-      detailsEnc: sealDetails(id, { notes, customGym: customGym || undefined, gymId }),
+      detailsEnc: sealDetails(id, { notes, customGym: customGym || undefined, gymId, place }),
     })
     .returning();
+  await logCredit({ clientId: client.id, coachId, pool: "SESSION", kind: "RESERVED", delta: 0, sessionType: "1-on-1 PT", label: `1-on-1 session · ${await whenText(coachId, start)}` });
   return NextResponse.json({ booking: toBooking(row) });
 });

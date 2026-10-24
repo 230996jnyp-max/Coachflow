@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 /**
  * users
@@ -24,6 +24,10 @@ export const users = pgTable(
     failedAttempts: integer("failed_attempts").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     tokenVersion: integer("token_version").notNull().default(0),
+    /** The guided tour has been finished or skipped (the Settings button can replay it). */
+    onboarded: boolean("onboarded").notNull().default(false),
+    /** Chosen colour theme (black | white | navy); null until the person picks one. */
+    theme: text("theme"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -56,6 +60,11 @@ export const coachSettings = pgTable("coach_settings", {
   autoConfirm: boolean("auto_confirm").notNull().default(true),
   allowCustomGym: boolean("allow_custom_gym").notNull().default(true),
   utcOffsetMin: integer("utc_offset_min").notNull().default(480),
+  /** Travel buffer between sessions at different locations (see lib/travel.ts). */
+  travelEnabled: boolean("travel_enabled").notNull().default(true),
+  travelDefaultMin: integer("travel_default_min").notNull().default(30),
+  travelParkingMin: integer("travel_parking_min").notNull().default(15),
+  travelMaxMin: integer("travel_max_min").notNull().default(90),
   /** The coach's starter routines were created once (so a second device or a deleted routine never re-adds them). */
   templatesSeeded: boolean("templates_seeded").notNull().default(false),
 });
@@ -157,7 +166,114 @@ export const customExercises = pgTable(
   (t) => [index("custom_exercises_owner_idx").on(t.ownerId)],
 );
 
+/**
+ * Group classes (coach-scheduled, kind CLASS) and client sessions opened to partners (kind SHARED, linked to a booking).
+ * Title, notes, location, template and the pushed workout plan are encrypted in `details_enc` (bound to the group id).
+ */
+export const groupSessions = pgTable(
+  "group_sessions",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    kind: text("kind").notNull(),
+    bookingId: text("booking_id"),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+    capacity: integer("capacity").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    seriesId: text("series_id"),
+    workoutStartedAt: timestamp("workout_started_at", { withTimezone: true }),
+    rev: integer("rev").notNull().default(0),
+    detailsEnc: text("details_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("group_sessions_coach_idx").on(t.coachId, t.startAt), index("group_sessions_booking_idx").on(t.bookingId)],
+);
+
+/** Who is in a group. status: CONFIRMED | WAITLIST | CANCELLED | ATTENDED | ABSENT. */
+export const groupMembers = pgTable(
+  "group_members",
+  {
+    groupId: text("group_id").notNull(),
+    clientId: text("client_id").notNull(),
+    status: text("status").notNull(),
+    role: text("role").notNull().default("MEMBER"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.clientId] }), index("group_members_client_idx").on(t.clientId)],
+);
+
+/** A client asking to join a shared session; the coach and every current attendee must approve. */
+export const groupRequests = pgTable(
+  "group_requests",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").notNull(),
+    clientId: text("client_id").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    /** JSON { [userId]: "APPROVED" | "DECLINED" } */
+    approvals: text("approvals").notNull().default("{}"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("group_requests_group_idx").on(t.groupId), index("group_requests_client_idx").on(t.clientId)],
+);
+
+/** In-app notifications (the text is encrypted: it can name people and times). */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notifications_user_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * One row per person per session once the coach has marked them Present or No-Show. `charged` says whether a credit is
+ * currently taken for it, so changing a mark later only ever moves the balance by the difference (never double counts).
+ */
+export const attendance = pgTable(
+  "attendance",
+  {
+    /** `<kind>:<sessionId>:<clientId>` */
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(), // BOOKING | GROUP
+    sessionId: text("session_id").notNull(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    pool: text("pool").notNull(), // SESSION | GROUP
+    mark: text("mark").notNull(), // PRESENT | NO_SHOW
+    charged: boolean("charged").notNull().default(false),
+    markedAt: timestamp("marked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("attendance_client_idx").on(t.clientId), index("attendance_session_idx").on(t.kind, t.sessionId)],
+);
+
+/** Credit transaction history. The figures and labels are encrypted (credits are private to the client and coach). */
+export const creditLog = pgTable(
+  "credit_log",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    pool: text("pool").notNull(),
+    kind: text("kind").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("credit_log_client_idx").on(t.clientId, t.createdAt)],
+);
+
 export type UserRow = typeof users.$inferSelect;
+export type AttendanceRow = typeof attendance.$inferSelect;
+export type GroupRow = typeof groupSessions.$inferSelect;
+export type GroupMemberRow = typeof groupMembers.$inferSelect;
+export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
@@ -186,6 +302,8 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS users_coach_idx ON users (coach_id)`,
   `CREATE INDEX IF NOT EXISTS users_role_idx ON users (role)`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme text`,
   `CREATE TABLE IF NOT EXISTS messages (
     id text PRIMARY KEY,
     thread text NOT NULL,
@@ -245,6 +363,10 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS templates_seeded boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_enabled boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_default_min integer NOT NULL DEFAULT 30`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_parking_min integer NOT NULL DEFAULT 15`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_max_min integer NOT NULL DEFAULT 90`,
   `CREATE TABLE IF NOT EXISTS workouts (
     id text PRIMARY KEY,
     client_id text NOT NULL,
@@ -270,4 +392,73 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS custom_exercises_owner_idx ON custom_exercises (owner_id)`,
+  `CREATE TABLE IF NOT EXISTS group_sessions (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    kind text NOT NULL,
+    booking_id text,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    capacity integer NOT NULL,
+    status text NOT NULL DEFAULT 'OPEN',
+    series_id text,
+    workout_started_at timestamptz,
+    rev integer NOT NULL DEFAULT 0,
+    details_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_sessions_coach_idx ON group_sessions (coach_id, start_at)`,
+  `CREATE INDEX IF NOT EXISTS group_sessions_booking_idx ON group_sessions (booking_id)`,
+  `CREATE TABLE IF NOT EXISTS group_members (
+    group_id text NOT NULL,
+    client_id text NOT NULL,
+    status text NOT NULL,
+    role text NOT NULL DEFAULT 'MEMBER',
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (group_id, client_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_members_client_idx ON group_members (client_id)`,
+  `CREATE TABLE IF NOT EXISTS group_requests (
+    id text PRIMARY KEY,
+    group_id text NOT NULL,
+    client_id text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    approvals text NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS group_requests_group_idx ON group_requests (group_id)`,
+  `CREATE INDEX IF NOT EXISTS group_requests_client_idx ON group_requests (client_id)`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    kind text NOT NULL,
+    body_enc text NOT NULL,
+    read_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS attendance (
+    id text PRIMARY KEY,
+    kind text NOT NULL,
+    session_id text NOT NULL,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    pool text NOT NULL,
+    mark text NOT NULL,
+    charged boolean NOT NULL DEFAULT false,
+    marked_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS attendance_client_idx ON attendance (client_id)`,
+  `CREATE INDEX IF NOT EXISTS attendance_session_idx ON attendance (kind, session_id)`,
+  `CREATE TABLE IF NOT EXISTS credit_log (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    pool text NOT NULL,
+    kind text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS credit_log_client_idx ON credit_log (client_id, created_at)`,
 ];

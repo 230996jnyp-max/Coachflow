@@ -3,9 +3,11 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
+import { applyBookingStatus, applyAttendance, clearBookingMark } from "@/lib/server/attendance";
+import { onBookingCancelled, onBookingMoved } from "@/lib/server/groups";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
-import { adjustCredits, CHARGED, clientCredits, hasConflict, rulesFor, sealDetails, toBooking } from "@/lib/server/schedule";
-import { bookings, gyms, users } from "@/lib/server/schema";
+import { hasConflict, parsePlace, requestLoc, rulesFor, sealDetails, toBooking, travelCheck } from "@/lib/server/schedule";
+import { bookings, gyms } from "@/lib/server/schema";
 import type { BookingStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,7 +19,7 @@ const STAFF_STATUSES: BookingStatus[] = ["CONFIRMED", "COMPLETED", "NO_SHOW", "D
  * PATCH { action } on one booking.
  *  cancel       client (within the notice window) or the coach
  *  status       coach: CONFIRMED | COMPLETED | NO_SHOW | DECLINED | CANCELLED — completing/no-show deducts a credit, undoing restores it
- *  reschedule   coach: { start, gymId?, customGym? }
+ *  reschedule   coach: { start, gymId?, customGym?, place?, waiveTravel? }
  */
 export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx) => {
   const body = await readJson(req);
@@ -30,8 +32,6 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
 
   const rules = await rulesFor(row.coachId);
   const status = row.status as BookingStatus;
-  const [clientRow] = await d.select().from(users).where(eq(users.id, row.clientId)).limit(1);
-  let credits: number | undefined;
 
   if (body.action === "cancel") {
     if (status !== "PENDING" && status !== "CONFIRMED") throw badRequest("This session can no longer be cancelled.");
@@ -39,6 +39,8 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
       throw forbidden(`Sessions can only be cancelled ${rules.noticeHours}h or more before they start — message your coach.`);
     }
     const [u] = await d.update(bookings).set({ status: "CANCELLED", rev: row.rev + 1 }).where(eq(bookings.id, id)).returning();
+    await clearBookingMark(row);
+    await onBookingCancelled(id, row.clientId);
     return NextResponse.json({ booking: toBooking(u) });
   }
 
@@ -47,14 +49,16 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
   if (body.action === "status") {
     const next = body.status as BookingStatus;
     if (!STAFF_STATUSES.includes(next)) throw badRequest("Unknown status.");
-    const delta = CHARGED.includes(next) && !CHARGED.includes(status) ? -1 : !CHARGED.includes(next) && CHARGED.includes(status) ? 1 : 0;
-    const [u] = await d
-      .update(bookings)
-      .set({ status: next, rev: next === "CANCELLED" || next === "DECLINED" ? row.rev + 1 : row.rev })
-      .where(and(eq(bookings.id, id), eq(bookings.coachId, me.id)))
-      .returning();
-    if (clientRow) credits = delta ? await adjustCredits(clientRow, delta) : clientCredits(clientRow);
-    return NextResponse.json({ booking: toBooking(u), credits });
+    if (next === "COMPLETED" || next === "NO_SHOW") await applyBookingStatus(me, id, next);
+    else if (next === "CONFIRMED" && (status === "COMPLETED" || status === "NO_SHOW")) await applyAttendance(me, { kind: "BOOKING", id, reopen: true });
+    else {
+      if (next === "CANCELLED" || next === "DECLINED") await clearBookingMark(row);
+      await d.update(bookings).set({ status: next, rev: next === "CANCELLED" || next === "DECLINED" ? row.rev + 1 : row.rev }).where(and(eq(bookings.id, id), eq(bookings.coachId, me.id)));
+      // A session opened to partners: a cancellation passes it on to the first partner.
+      if (next === "CANCELLED" || next === "DECLINED") await onBookingCancelled(id, row.clientId);
+    }
+    const [u] = await d.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    return NextResponse.json({ booking: toBooking(u) });
   }
 
   if (body.action === "reschedule") {
@@ -66,17 +70,23 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
 
     const old = decryptJson<{ notes: string; customGym?: string; gymId?: string | null }>(row.detailsEnc, `booking:${id}`);
     const gymId = typeof body.gymId === "string" && body.gymId ? body.gymId.slice(0, 80) : null;
-    const customGym = str(body.customGym, "Location", { optional: true, max: 140 });
+    const place = gymId ? undefined : parsePlace(body.place);
+    const customGym = str(body.customGym, "Location", { optional: true, max: 140 }) || place?.name || "";
     if (!gymId && !customGym) throw badRequest("Please choose a gym location.");
     if (gymId) {
       const [g] = await d.select().from(gyms).where(and(eq(gyms.id, gymId), eq(gyms.coachId, me.id))).limit(1);
       if (!g) throw badRequest("Unknown gym.");
     }
+    if (body.waiveTravel !== true) {
+      const travel = await travelCheck(row.coachId, start, end, requestLoc({ gymId, customGym, place }), rules, id, true);
+      if (travel) throw conflict(travel);
+    }
     const [u] = await d
       .update(bookings)
-      .set({ startAt: start, endAt: end, rev: row.rev + 1, detailsEnc: sealDetails(id, { notes: old.notes, customGym: customGym || undefined, gymId }) })
+      .set({ startAt: start, endAt: end, rev: row.rev + 1, detailsEnc: sealDetails(id, { notes: old.notes, customGym: customGym || undefined, gymId, place }) })
       .where(eq(bookings.id, id))
       .returning();
+    await onBookingMoved(id, start, end, { gymId, customGym: customGym || undefined, place });
     return NextResponse.json({ booking: toBooking(u) });
   }
 

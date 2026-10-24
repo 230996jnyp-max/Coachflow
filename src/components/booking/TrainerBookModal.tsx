@@ -4,12 +4,16 @@ import { format } from "date-fns";
 import { CalendarPlus } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
-import { Button, Field, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
-import { gymToBooking, isGymComplete } from "@/lib/gyms";
+import { Button, Field, Input, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
+import { directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
-import { atTime, availableCredits, ymd } from "@/lib/scheduling";
+import { atTime, availableCredits, travelProblem, ymd } from "@/lib/scheduling";
+import { locOf } from "@/lib/travel";
 import { createBooking } from "@/lib/store";
-import type { Booking, SessionFocus } from "@/lib/types";
+import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { classesAsBookings } from "@/components/groups/groupUi";
+import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
+import { bookingLocation } from "./bookingUi";
 import { AddToCalendar } from "./CalendarActions";
 import { FOCUS_OPTIONS } from "./BookModal";
 
@@ -31,6 +35,8 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
   const [time, setTime] = useState(() => (init.start ? format(init.start, "HH:mm") : "09:00"));
   const profile = db.clients.find((c) => c.id === clientId);
   const [gym, setGym] = useState<string>(profile?.defaultGymId ?? "");
+  const [place, setPlace] = useState<PlaceInfo | null>(null);
+  const [waive, setWaive] = useState(false);
   const [focus, setFocus] = useState<SessionFocus>("Full Body");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +45,15 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
 
   const avail = profile ? availableCredits(profile, db.bookings) : 0;
 
+  // Travel time between sessions at different locations (the coach can waive it for one booking).
+  const sessionStart = atTime(date, time);
+  const problem = (() => {
+    if (!gym || !isGymComplete(gym) || Number.isNaN(sessionStart.getTime())) return null;
+    const loc = gymToBooking(gym, db.gyms);
+    const end = new Date(sessionStart.getTime() + db.settings.sessionMinutes * 60000);
+    return travelProblem([...db.bookings, ...classesAsBookings(db.groups)], sessionStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings);
+  })();
+
   if (booked) {
     return (
       <Modal open onClose={onClose} title="Session booked" footer={<Button onClick={onClose}>Done</Button>}>
@@ -46,6 +61,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
           <div className="rounded-xl border border-success/30 bg-success/10 p-3 text-center text-sm">
             <div className="font-bold">{db.users.find((u) => u.id === booked.clientId)?.name ?? "Client"}</div>
             <div className="text-muted">{format(new Date(booked.start), "EEEE d MMMM · h:mm a")}</div>
+          </div>
+          <div className="flex flex-col items-center gap-2 text-sm">
+            <LocationPill label={bookingLocation(booked, db.gyms).label} href={bookingLocation(booked, db.gyms).href} />
+            {booked.place && <div className="w-full"><MiniMap place={booked.place} href={directionsUrl({ place: booked.place })} /></div>}
           </div>
           <AddToCalendar booking={booked} />
         </div>
@@ -68,14 +87,17 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             onClick={async () => {
               setError(null);
               if (!gym) return setError("Please choose a gym or place.");
-              if (!isGymComplete(gym)) return setError("Please type the place name.");
+              if (!isGymComplete(gym)) return setError("Please choose the exact location (search and pick it, or type the place).");
               const loc = gymToBooking(gym, db.gyms);
+              if (problem && !waive) return setError(`${problem} Switch on “Waive travel buffer” to book anyway.`);
               setBusy(true);
               const res = await createBooking({
                 clientId,
                 start: atTime(date, time),
                 gymId: loc.gymId,
                 customGym: loc.customGym,
+                place: placeForBooking(gym, place),
+                waiveTravel: waive,
                 focus,
                 notes: notes.trim(),
                 createdBy: "TRAINER",
@@ -97,7 +119,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             onChange={(e) => {
               setClientId(e.target.value);
               const p = db.clients.find((c) => c.id === e.target.value);
-              if (p?.defaultGymId) setGym(p.defaultGymId);
+              if (p?.defaultGymId) {
+                setGym(p.defaultGymId);
+                setPlace(null);
+              }
             }}
           >
             {active.map((c) => (
@@ -117,8 +142,14 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
           </Field>
         </div>
         <Field label="Gym location">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
         </Field>
+        {db.settings.travelEnabled && (problem || waive) && (
+          <div className="space-y-1">
+            <Notice tone={waive ? "info" : "warn"}>{waive ? "Travel buffer waived for this booking." : problem}</Notice>
+            <Toggle checked={waive} onChange={setWaive} label="Waive travel buffer" />
+          </div>
+        )}
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
             {FOCUS_OPTIONS.map((f) => (

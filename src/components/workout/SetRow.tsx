@@ -10,9 +10,9 @@ export const SET_CYCLE: SetType[] = ["N", "W", "D", "F"];
 
 const TYPE_STYLE: Record<SetType, string> = {
   N: "text-ink bg-field",
-  W: "text-yellow-300 bg-yellow-400/15",
-  D: "text-purple-300 bg-purple-400/15",
-  F: "text-red-300 bg-red-400/15",
+  W: "text-pr bg-pr/15",
+  D: "text-purple bg-purple/15",
+  F: "text-danger bg-danger/15",
 };
 
 export function gridTemplate(ex: Exercise, showRpe: boolean): string {
@@ -70,6 +70,7 @@ export function SetRow({
   showRpe,
   repHint,
   prFlags,
+  coachEdited,
   onChange,
   onToggleDone,
   onCycleType,
@@ -83,6 +84,8 @@ export function SetRow({
   showRpe: boolean;
   repHint?: string;
   prFlags?: PRKind[];
+  /** The coach changed this set from the live group grid. */
+  coachEdited?: boolean;
   onChange: (patch: Partial<WorkoutSet>) => void;
   onToggleDone: () => void;
   onCycleType: () => void;
@@ -158,7 +161,7 @@ export function SetRow({
           aria-pressed={set.done}
           className={cn(
             "flex h-11 w-11 items-center justify-center rounded-lg transition-colors",
-            set.done ? "bg-success text-white" : "bg-field text-muted hover:text-ink",
+            set.done ? "bg-success text-on-success" : "bg-field text-muted hover:text-ink",
           )}
         >
           <Check size={20} strokeWidth={3} />
@@ -177,6 +180,12 @@ export function SetRow({
           <div className="w-20">
             <NumberCell label="Calories" value={set.calories} onChange={(v) => onChange({ calories: v })} decimals={false} placeholder="–" done={set.done} className="h-9" />
           </div>
+        </div>
+      )}
+
+      {coachEdited && (
+        <div className="mt-1 px-1 pb-1">
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Edited by coach</span>
         </div>
       )}
 

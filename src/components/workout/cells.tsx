@@ -61,7 +61,7 @@ export function NumberCell({
         setSeen(n);
         onChange(n);
       }}
-      className={cn(cellBase, done && "bg-success/15 text-emerald-100", className)}
+      className={cn(cellBase, done && "bg-success/15 text-ink", className)}
     />
   );
 }
@@ -103,7 +103,7 @@ export function ClockCell({
       onChange={(e) => setText(e.target.value.replace(/[^\d:]/g, ""))}
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      className={cn(cellBase, done && "bg-success/15 text-emerald-100")}
+      className={cn(cellBase, done && "bg-success/15 text-ink")}
     />
   );
 }

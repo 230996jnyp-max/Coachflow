@@ -1,4 +1,5 @@
 import { addMinutes, format, isBefore, parseISO } from "date-fns";
+import { bufferMinutes, checkNeighbors, locOf, type LocRef, type TravelNeighbor } from "./travel";
 import type { AppSettings, AvailabilitySlot, Booking, ClientProfile, Role } from "./types";
 
 export const ymd = (d: Date) => format(d, "yyyy-MM-dd");
@@ -15,7 +16,8 @@ export const ACTIVE_UPCOMING: Booking["status"][] = ["PENDING", "CONFIRMED"];
 
 const overlaps = (aS: Date, aE: Date, bS: Date, bE: Date) => aS < bE && bS < aE;
 
-export type SlotState = "open" | "mine" | "taken" | "past" | "late";
+/** "travel" = free, but the coach could not get there from another location in time. */
+export type SlotState = "open" | "mine" | "taken" | "past" | "late" | "travel";
 
 export interface SlotView {
   key: string;
@@ -25,6 +27,10 @@ export interface SlotView {
   booking?: Booking;
   /** True when this entry is a booking that sits outside the published availability. */
   offSchedule?: boolean;
+  /** Open slot directly next to a session at the same place: no travel needed. */
+  backToBack?: boolean;
+  /** Minutes of travel the coach would need (state "travel"). */
+  travelNeed?: number;
 }
 
 interface Source {
@@ -50,9 +56,9 @@ export function windowsForDay(day: Date, slots: AvailabilitySlot[]): Availabilit
 export function buildDaySlots(
   day: Date,
   src: Source,
-  opts: { now: Date; clientId?: string; role: Role },
+  opts: { now: Date; clientId?: string; role: Role; /** Sessions near the chosen location with the buffer each needs (clients, once a location is picked). */ travel?: TravelNeighbor[] | null },
 ): SlotView[] {
-  const { now, clientId, role } = opts;
+  const { now, clientId, role, travel } = opts;
   const step = src.settings.sessionMinutes;
   const blocks = blocksForDay(day, src.slots).map((b) => ({
     s: atTime(ymd(day), b.start),
@@ -81,7 +87,16 @@ export function buildDaySlots(
       } else if (isBefore(s, now)) state = "past";
       else if (role === "CLIENT" && isBefore(s, addMinutes(now, src.settings.noticeHours * 60))) state = "late";
       else state = "open";
-      views.push({ key: `${s.getTime()}`, start: s, end: e, state, booking: bk });
+      let backToBack = false;
+      let travelNeed: number | undefined;
+      if (state === "open" && travel) {
+        const v = checkNeighbors(s, e, travel);
+        if (!v.ok) {
+          state = "travel";
+          travelNeed = v.need;
+        } else backToBack = v.backToBackSame;
+      }
+      views.push({ key: `${s.getTime()}`, start: s, end: e, state, booking: bk, backToBack, travelNeed });
     }
   }
 
@@ -100,7 +115,8 @@ export function buildDaySlots(
 }
 
 export function reservedCount(bookings: Booking[], clientId: string): number {
-  return bookings.filter((b) => b.clientId === clientId && ACTIVE_UPCOMING.includes(b.status)).length;
+  // A session with an attendance mark has settled its credit; one opened to partners uses a group credit instead.
+  return bookings.filter((b) => b.clientId === clientId && ACTIVE_UPCOMING.includes(b.status) && !b.attendance && !b.sharedGroupId).length;
 }
 
 export function availableCredits(profile: ClientProfile, bookings: Booking[]): number {
@@ -114,6 +130,27 @@ export function bookingConflict(bookings: Booking[], start: Date, end: Date, ign
       OCCUPYING.includes(b.status) &&
       overlaps(start, end, parseISO(b.start), parseISO(b.end)),
   );
+}
+
+/**
+ * Coach-side check (the coach sees every booking): would a session at `loc` leave too little travel time next to a
+ * session at another place? Returns a plain-language problem, or null when it fits. The server checks the same rule.
+ */
+export function travelProblem(bookings: Booking[], start: Date, end: Date, loc: LocRef, s: AppSettings, ignoreId?: string): string | null {
+  if (!s.travelEnabled) return null;
+  for (const b of bookings) {
+    if (b.id === ignoreId || !OCCUPYING.includes(b.status)) continue;
+    const bs = parseISO(b.start);
+    const be = parseISO(b.end);
+    const before = be.getTime() <= start.getTime();
+    const after = bs.getTime() >= end.getTime();
+    if (!before && !after) continue;
+    const need = bufferMinutes(locOf(b), loc, s);
+    if (need === 0) continue;
+    const gap = Math.round((before ? start.getTime() - be.getTime() : bs.getTime() - end.getTime()) / 60000);
+    if (gap < need) return `Only ${gap} min between this and the ${before ? "previous" : "next"} session, which is at a different location — about ${need} min of travel is needed.`;
+  }
+  return null;
 }
 
 export function canCancel(b: Booking, now: Date, settings: AppSettings, role: Role): string | null {

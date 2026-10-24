@@ -4,6 +4,8 @@ import { GOALS, loadClientFor, openProfile, sealProfile, toProfile, toUser } fro
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, email, int, notFound, readJson, route, str } from "@/lib/server/http";
+import { logCredit } from "@/lib/server/credits";
+import { purgeClientGroups } from "@/lib/server/groups";
 import { bookings, messages, users } from "@/lib/server/schema";
 import { purgeClientTraining } from "@/lib/server/training";
 import type { ClientGoal } from "@/lib/types";
@@ -22,6 +24,7 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   if (!row) throw notFound("Client not found.");
 
   const p = openProfile(row);
+  const before = { credits: p.credits, group: p.groupClassCredits ?? 0 };
   if ("name" in body) p.name = str(body.name, "Name", { max: 100 });
   if ("phone" in body) p.phone = str(body.phone, "Phone", { optional: true, max: 40 });
   if ("email" in body) p.email = email(body.email, "Email", true);
@@ -31,7 +34,12 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   }
   if ("medicalNotes" in body) p.medicalNotes = str(body.medicalNotes, "Medical notes", { optional: true, max: 2000 });
   if ("credits" in body) p.credits = int(body.credits, "Credits", 0, 1000);
+  // Relative changes are safest: attendance may have moved the balance since this browser last looked.
+  if ("creditsDelta" in body) p.credits = Math.max(0, Math.min(1000, p.credits + int(body.creditsDelta, "Credits", -1000, 1000)));
+  if ("groupCreditsDelta" in body) p.groupClassCredits = Math.max(0, Math.min(1000, (p.groupClassCredits ?? 0) + int(body.groupCreditsDelta, "Group class credits", -1000, 1000)));
+  if ("groupClassCredits" in body) p.groupClassCredits = int(body.groupClassCredits, "Group class credits", 0, 1000);
   if ("packageSize" in body) p.packageSize = int(body.packageSize, "Package size", 0, 1000);
+  if (body.setPackageToBalance === true) p.packageSize = p.credits;
   if ("defaultGymId" in body) p.defaultGymId = typeof body.defaultGymId === "string" && body.defaultGymId ? body.defaultGymId.slice(0, 140) : null;
 
   const d = await db();
@@ -45,6 +53,9 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
     .where(and(eq(users.id, id), eq(users.coachId, me.id)))
     .returning();
   if (!updated) throw notFound("Client not found.");
+  // Credit changes made by the coach go in the client's credit log.
+  if (p.credits !== before.credits) await logCredit({ clientId: id, coachId: me.id, pool: "SESSION", kind: "ADJUSTMENT", delta: p.credits - before.credits, sessionType: "1-on-1 PT", label: "Coach manual adjustment", balance: p.credits });
+  if ((p.groupClassCredits ?? 0) !== before.group) await logCredit({ clientId: id, coachId: me.id, pool: "GROUP", kind: "ADJUSTMENT", delta: (p.groupClassCredits ?? 0) - before.group, sessionType: "Group Class", label: "Coach manual adjustment", balance: p.groupClassCredits ?? 0 });
   return NextResponse.json({ user: toUser(updated), profile: toProfile(updated) });
 });
 
@@ -56,6 +67,7 @@ export const DELETE = route<Ctx>(async (req, ctx) => {
   if (!row) throw notFound("Client not found.");
   const d = await db();
   await d.delete(messages).where(eq(messages.thread, `c:${id}`));
+  await purgeClientGroups(id);
   await d.delete(bookings).where(eq(bookings.clientId, id));
   await purgeClientTraining(id);
   await d.delete(users).where(and(eq(users.id, id), eq(users.coachId, me.id)));

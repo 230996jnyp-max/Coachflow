@@ -31,7 +31,8 @@ import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits, reservedCount } from "@/lib/scheduling";
 import { doneWorkouts, formatSet, PR_LABELS, weekStreak, workoutVolume } from "@/lib/stats";
-import { adjustCredits, deleteClient, resetClientPassword, updateClient, useNow } from "@/lib/store";
+import { CreditHistory } from "@/components/attendance/CreditHistory";
+import { adjustCredits, adjustGroupCreditsBy, deleteClient, resetClientPassword, updateClient, useNow } from "@/lib/store";
 import type { ClientGoal } from "@/lib/types";
 import { fmtVolume } from "@/lib/utils";
 
@@ -215,6 +216,7 @@ function Sessions({ clientId }: { clientId: string }) {
           <CalendarPlus size={16} /> Book session
         </Button>
       </div>
+      <CreditHistory clientId={clientId} />
       <BookingList clientId={clientId} filters={["upcoming", "past", "cancelled"]} />
       <TrainerBookModal init={init} onClose={() => setInit(null)} />
     </div>
@@ -238,6 +240,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [topUp, setTopUp] = useState(10);
+  const [groupTopUp, setGroupTopUp] = useState(5);
 
   return (
     <div className="space-y-8">
@@ -322,6 +325,34 @@ function ProfileTab({ clientId }: { clientId: string }) {
               }}
             >
               Add {topUp} credits
+            </Button>
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <SectionTitle>Group class credits</SectionTitle>
+        <Card className="space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-3xl font-bold">{profile.groupClassCredits}</div>
+              <div className="text-xs text-muted">group class credits remaining · {db.groups.filter((g) => g.status === "OPEN" && g.members?.some((m) => m.clientId === clientId && m.status === "CONFIRMED" && !m.attendance)).length} reserved by upcoming classes · taken when marked present</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" aria-label="Remove one group credit" disabled={profile.groupClassCredits < 1} onClick={async () => setActionError(await adjustGroupCreditsBy(clientId, -1))}>
+                <Minus size={16} />
+              </Button>
+              <Button variant="secondary" aria-label="Add one group credit" onClick={async () => setActionError(await adjustGroupCreditsBy(clientId, 1))}>
+                <Plus size={16} />
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <Field label="Add group class credits">
+              <Input type="number" inputMode="numeric" min={1} value={groupTopUp} onChange={(e) => setGroupTopUp(Number(e.target.value))} className="w-32" />
+            </Field>
+            <Button disabled={groupTopUp < 1} onClick={async () => setActionError(await adjustGroupCreditsBy(clientId, groupTopUp))}>
+              Add {groupTopUp} group credits
             </Button>
           </div>
         </Card>
