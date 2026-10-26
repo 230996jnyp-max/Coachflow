@@ -1,3 +1,4 @@
+import { TISSUE_JOINT } from "@/lib/sports";
 import type { MuscleGroup } from "@/lib/types";
 
 /** Stylised front/back body with the worked muscles highlighted (primary = red, secondary = amber). */
@@ -57,6 +58,33 @@ const BACK: Part[] = [
   { id: "b-calf-r", muscles: ["Calves"], shape: el(115, 352, 12, 32) },
 ];
 
+/** Where each joint sits on the figures (the same for left and right). A tendon or ligament highlights the joint it belongs to. */
+const JOINT_POS: Record<string, { front: [number, number][]; back: [number, number][] }> = {
+  Neck: { front: [[100, 60]], back: [[100, 60]] },
+  Shoulder: { front: [[63, 82], [137, 82]], back: [[63, 82], [137, 82]] },
+  Elbow: { front: [[37, 158], [163, 158]], back: [[37, 158], [163, 158]] },
+  Wrist: { front: [[29, 216], [171, 216]], back: [[29, 216], [171, 216]] },
+  Hip: { front: [[84, 204], [116, 204]], back: [[84, 204], [116, 204]] },
+  Knee: { front: [[87, 312], [113, 312]], back: [[87, 328], [113, 328]] },
+  Ankle: { front: [[85, 378], [115, 378]], back: [[85, 378], [115, 378]] },
+  Spine: { front: [], back: [[100, 72], [100, 100], [100, 128], [100, 156], [100, 184]] },
+};
+
+function Markers({ side, joints }: { side: "front" | "back"; joints: string[] }) {
+  return (
+    <g aria-hidden>
+      {joints.flatMap((j) =>
+        (JOINT_POS[j]?.[side] ?? []).map(([x, y], i) => (
+          <g key={`${j}-${i}`}>
+            <circle cx={x} cy={y} r={9} fill="var(--c-accent)" fillOpacity={0.22} stroke="var(--c-accent)" strokeWidth={2} />
+            <circle cx={x} cy={y} r={3} fill="var(--c-accent)" />
+          </g>
+        )),
+      )}
+    </g>
+  );
+}
+
 function roleFor(muscles: MuscleGroup[], primary: MuscleGroup, secondary: MuscleGroup[]): Role {
   if (primary === "Full Body") return "secondary";
   if (primary === "Cardio") return muscles.some((m) => (["Quadriceps", "Hamstrings", "Glutes", "Calves"] as MuscleGroup[]).includes(m) || secondary.includes(m)) ? "secondary" : "none";
@@ -73,7 +101,7 @@ function Shape({ part, role }: { part: Part; role: Role }) {
   return <path d={s.d} {...common} strokeLinejoin="round" />;
 }
 
-function Figure({ parts, primary, secondary, label }: { parts: Part[]; primary: MuscleGroup; secondary: MuscleGroup[]; label: string }) {
+function Figure({ parts, primary, secondary, label, side, joints }: { parts: Part[]; primary: MuscleGroup; secondary: MuscleGroup[]; label: string; side: "front" | "back"; joints: string[] }) {
   return (
     <g>
       {/* body base */}
@@ -88,6 +116,7 @@ function Figure({ parts, primary, secondary, label }: { parts: Part[]; primary: 
       {parts.map((p) => (
         <Shape key={p.id} part={p} role={roleFor(p.muscles, primary, secondary)} />
       ))}
+      <Markers side={side} joints={joints} />
       <text x={100} y={408} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--c-muted)" letterSpacing={1.5}>
         {label}
       </text>
@@ -95,13 +124,15 @@ function Figure({ parts, primary, secondary, label }: { parts: Part[]; primary: 
   );
 }
 
-export function MuscleMap({ primary, secondary, className }: { primary: MuscleGroup; secondary: MuscleGroup[]; className?: string }) {
+export function MuscleMap({ primary, secondary, className, joints = [], tissues = [] }: { primary: MuscleGroup; secondary: MuscleGroup[]; className?: string; joints?: string[]; tissues?: string[] }) {
+  // Joints worked, plus the joint each tendon / ligament belongs to.
+  const marked = [...new Set([...joints, ...tissues.map((t) => TISSUE_JOINT[t]).filter(Boolean)])];
   return (
     <div className={className}>
       <svg viewBox="0 0 420 415" role="img" aria-label={`Muscles worked: ${primary}${secondary.length ? ", also " + secondary.join(", ") : ""}`} className="mx-auto h-auto w-full max-w-sm">
-        <Figure parts={FRONT} primary={primary} secondary={secondary} label="FRONT" />
+        <Figure parts={FRONT} primary={primary} secondary={secondary} label="FRONT" side="front" joints={marked} />
         <g transform="translate(220,0)">
-          <Figure parts={BACK} primary={primary} secondary={secondary} label="BACK" />
+          <Figure parts={BACK} primary={primary} secondary={secondary} label="BACK" side="back" joints={marked} />
         </g>
       </svg>
       <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted">
@@ -111,6 +142,11 @@ export function MuscleMap({ primary, secondary, className }: { primary: MuscleGr
         {secondary.length > 0 && (
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: FILL.secondary }} /> Secondary: <span className="font-semibold text-ink">{secondary.join(", ")}</span>
+          </span>
+        )}
+        {marked.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-accent bg-accent/30" /> Joints &amp; tissues: <span className="font-semibold text-ink">{[...joints, ...tissues].join(", ")}</span>
           </span>
         )}
       </div>

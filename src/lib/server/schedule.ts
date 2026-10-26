@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
+import { cleanSports, BASE_FOCUS } from "@/lib/sports";
 import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
 import { openProfile, sealProfile, type ProfileJson } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
@@ -15,6 +16,9 @@ export interface Rules extends TravelRules {
   allowCustomGym: boolean;
   /** Coach's UTC offset in minutes (Singapore = 480); positions availability windows. */
   utcOffsetMin: number;
+  /** What the coach specialises in, and the sports they added with AI (names). */
+  specialties: string[];
+  sports: string[];
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -27,12 +31,14 @@ export const DEFAULT_RULES: Rules = {
   travelDefaultMin: 30,
   travelParkingMin: 15,
   travelMaxMin: 90,
+  specialties: [],
+  sports: [],
 };
 
 export const OCCUPYING: BookingStatus[] = ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"];
 export const RESERVING: BookingStatus[] = ["PENDING", "CONFIRMED"];
 export const CHARGED: BookingStatus[] = ["COMPLETED", "NO_SHOW"];
-export const FOCUS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
+export const FOCUS: SessionFocus[] = BASE_FOCUS;
 
 export interface Details {
   notes: string;
@@ -84,6 +90,14 @@ export function applyHomeAddress(p: ProfileJson, raw: unknown): void {
 const aad = (id: string) => `booking:${id}`;
 export const sealDetails = (id: string, d: Details) => encryptJson(d, aad(id));
 
+function parseJsonList(s: string | null | undefined): unknown {
+  try {
+    return JSON.parse(s || "[]");
+  } catch {
+    return [];
+  }
+}
+
 export async function rulesFor(coachId: string): Promise<Rules> {
   const d = await db();
   const [r] = await d.select().from(coachSettings).where(eq(coachSettings.coachId, coachId)).limit(1);
@@ -98,6 +112,8 @@ export async function rulesFor(coachId: string): Promise<Rules> {
         travelDefaultMin: r.travelDefaultMin,
         travelParkingMin: r.travelParkingMin,
         travelMaxMin: r.travelMaxMin,
+        specialties: cleanSports(parseJsonList(r.specialties)),
+        sports: cleanSports(parseJsonList(r.sports)),
       }
     : DEFAULT_RULES;
 }

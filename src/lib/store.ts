@@ -33,6 +33,7 @@ import type {
   RoutineTemplate,
   SessionFocus,
   SetType,
+  TrackingSchema,
   UnitSystem,
   User,
   Workout,
@@ -166,6 +167,8 @@ function flushTraining(keepalive: boolean) {
 }
 
 interface TrainingData {
+  /** The coach's own tracking formats by exercise id. */
+  tracking?: Record<string, TrackingSchema>;
   workouts: Workout[];
   ids: string[];
   templates: RoutineTemplate[];
@@ -205,11 +208,13 @@ function applyTraining(data: TrainingData) {
   for (const x of customNow) if (exerciseQ.busy(x.id)) xMap.set(x.id, x);
   const xChanged = xMap.size !== customNow.length || customNow.some((x) => !sameJson(xMap.get(x.id), x));
 
-  if (!changed && !tChanged && !xChanged) return;
+  const trChanged = !sameJson(cur.tracking ?? {}, data.tracking ?? {});
+  if (!changed && !tChanged && !xChanged && !trChanged) return;
   setState({
     ...state,
     db: {
       ...cur,
+      tracking: trChanged ? (data.tracking ?? {}) : cur.tracking,
       workouts: changed ? [...wMap.values()] : cur.workouts,
       templates: tChanged ? [...tMap.values()] : cur.templates,
       exercises: xChanged ? [...SEED_EXERCISES, ...xMap.values()] : cur.exercises,
@@ -321,6 +326,7 @@ async function establishSession(): Promise<boolean> {
       workouts: server ? server.workouts : local.workouts,
       templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
       exercises: server ? [...SEED_EXERCISES, ...server.exercises] : local.exercises,
+      tracking: server?.tracking ?? local.tracking ?? {},
     },
   });
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
@@ -651,6 +657,31 @@ export function addExercise(ex: Omit<Exercise, "id" | "custom">): Exercise {
   return full;
 }
 
+/** The coach sets their own tracking format (set columns + chart metric) for an exercise; their clients get it too. */
+export async function saveTrackingFormat(exerciseId: string, tracking: TrackingSchema): Promise<string | null> {
+  const r = await api<{ tracking: TrackingSchema }>(`/api/training/tracking/${exerciseId}`, { method: "PUT", body: { tracking } });
+  if (!r.ok || !r.data) return r.error ?? "Could not save the tracking format.";
+  mutate((db) => ({ ...db, tracking: { ...(db.tracking ?? {}), [exerciseId]: r.data!.tracking } }));
+  return null;
+}
+
+/** Back to the exercise's default tracking format. */
+export async function resetTrackingFormat(exerciseId: string): Promise<string | null> {
+  const r = await api(`/api/training/tracking/${exerciseId}`, { method: "DELETE" });
+  if (!r.ok) return r.error ?? "Could not reset the tracking format.";
+  mutate((db) => {
+    const { [exerciseId]: _gone, ...rest } = db.tracking ?? {};
+    void _gone;
+    return { ...db, tracking: rest };
+  });
+  return null;
+}
+
+/** Coach: assign what a client trains (single or several focuses). The client's exercise pickers follow it. */
+export async function saveClientFocuses(clientId: string, focuses: string[]): Promise<string | null> {
+  return updateClient(clientId, { profile: { focuses } });
+}
+
 export function saveTemplate(t: RoutineTemplate) {
   mutate((db) => ({
     ...db,
@@ -890,6 +921,8 @@ interface RulesData {
   travelDefaultMin: number;
   travelParkingMin: number;
   travelMaxMin: number;
+  specialties?: string[];
+  sports?: string[];
 }
 
 interface ScheduleData {
@@ -900,7 +933,7 @@ interface ScheduleData {
 }
 
 function applySchedule(data: ScheduleData) {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin } = data.settings;
+  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
   setState({
     ...state,
     db: {
@@ -908,7 +941,7 @@ function applySchedule(data: ScheduleData) {
       gyms: data.gyms,
       slots: data.slots,
       bookings: data.bookings,
-      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin },
+      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
     },
   });
 }
@@ -1237,7 +1270,7 @@ export async function fetchCreditLog(clientId?: string): Promise<{ stats: Attend
 
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
 export function updateSettings(patch: Partial<AppSettings>) {
@@ -1257,6 +1290,8 @@ export function updateSettings(patch: Partial<AppSettings>) {
           travelDefaultMin: s.travelDefaultMin,
           travelParkingMin: s.travelParkingMin,
           travelMaxMin: s.travelMaxMin,
+          specialties: s.specialties ?? [],
+          sports: s.sports ?? [],
           utcOffsetMin: -new Date().getTimezoneOffset(),
         },
       });

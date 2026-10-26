@@ -8,6 +8,7 @@ import { annotatePRs, doneWorkouts, formatSet, PR_LABELS } from "@/lib/stats";
 import { coachEditSet, useLivePolling } from "@/lib/store";
 import type { Exercise, GroupSession, PRKind, UnitSystem, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { cn, fromKg, round, toKg, weightUnit } from "@/lib/utils";
+import { formatCustomSet } from "@/lib/tracking";
 
 /** Number box that saves when you leave it (or press Enter) and shows changes made elsewhere. */
 function EditCell({ label, value, onCommit, decimals = true, disabled }: { label: string; value: number | undefined; onCommit: (v: number | null) => void; decimals?: boolean; disabled?: boolean }) {
@@ -167,6 +168,36 @@ function AttendeeEditor({ g, clientId }: { g: GroupSession; clientId: string }) 
 
 function ExerciseEditor({ we, ex, unit, prMap, disabled, onSave }: { we: WorkoutExercise; ex?: Exercise; unit: UnitSystem; prMap: Map<string, PRKind[]>; disabled: boolean; onSave: (weId: string, setId: string, change: Parameters<typeof coachEditSet>[3]) => void }) {
   if (!ex) return null;
+  if (ex.tracking) {
+    // A sport drill with its own columns: the coach follows the values and can tick sets off; the client enters them.
+    let k = 0;
+    return (
+      <div>
+        <div className="mb-1 text-sm font-bold">{ex.name}</div>
+        <div className="space-y-1">
+          {we.sets.map((s: WorkoutSet) => {
+            if (s.type === "N") k++;
+            return (
+              <div key={s.id} className={cn("flex items-center gap-2 rounded-xl px-1 py-1", s.done && "bg-success/10")}>
+                <div className="flex h-10 w-9 shrink-0 items-center justify-center rounded-lg bg-field text-sm font-bold">{s.type === "N" ? k : s.type}</div>
+                <div className="min-w-0 flex-1 truncate text-sm tabular-nums">{formatCustomSet(s, ex.tracking!)}</div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onSave(we.id, s.id, { done: !s.done })}
+                  aria-label={s.done ? "Mark set incomplete" : "Mark set complete"}
+                  aria-pressed={s.done}
+                  className={cn("flex h-10 w-11 shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50", s.done ? "bg-success text-on-success" : "bg-field text-muted hover:text-ink")}
+                >
+                  <Check size={18} strokeWidth={3} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   const wl = weightUnit(unit).toUpperCase();
   const showW = (v?: number) => (v === undefined ? undefined : round(fromKg(v, unit), 2));
   const head = "text-center text-[10px] font-bold uppercase tracking-wider text-muted";

@@ -11,6 +11,8 @@ export interface Viewer {
   isTrainer: boolean;
   unit: UnitSystem;
   exMap: Map<string, Exercise>;
+  /** The exercise library with the coach's own tracking formats applied. Use this instead of db.exercises. */
+  exercises: Exercise[];
   clients: { user: User; profile: ClientProfile }[];
   /** The app owner (Coach Darsh), when visible to this viewer. */
   owner: User | null;
@@ -23,7 +25,11 @@ export interface Viewer {
 export function useViewer(): Viewer {
   const { ready, db, sessionUserId } = useStore();
   const user = db.users.find((u) => u.id === sessionUserId) ?? null;
-  const exMap = useMemo(() => new Map(db.exercises.map((e) => [e.id, e])), [db.exercises]);
+  const exercises = useMemo(() => {
+    const t = db.tracking ?? {};
+    return Object.keys(t).length ? db.exercises.map((e) => (t[e.id] ? { ...e, tracking: t[e.id] } : e)) : db.exercises;
+  }, [db.exercises, db.tracking]);
+  const exMap = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
   const clients = useMemo(
     () =>
       db.clients
@@ -45,6 +51,7 @@ export function useViewer(): Viewer {
     isTrainer: user?.role === "TRAINER",
     unit: user?.unit ?? "metric",
     exMap,
+    exercises,
     clients,
     owner,
     coaches,

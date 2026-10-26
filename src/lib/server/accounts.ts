@@ -21,6 +21,8 @@ export interface ProfileJson {
   /** Home address for sessions at the client's home (a picked place, or typed text). */
   homePlace?: PlaceInfo;
   homeText?: string;
+  /** Training focuses the coach assigned (sport names). */
+  focuses?: string[];
 }
 
 export const GOALS: ClientGoal[] = ["Hypertrophy", "Fat Loss", "Strength", "Conditioning", "General Fitness"];
@@ -72,6 +74,7 @@ export function toProfile(row: UserRow): ClientProfile {
     groupClassCredits: p.groupClassCredits ?? 0,
     ...(p.homePlace ? { homePlace: p.homePlace } : {}),
     ...(p.homeText ? { homeText: p.homeText } : {}),
+    ...(p.focuses?.length ? { focuses: p.focuses } : {}),
   };
 }
 

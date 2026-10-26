@@ -77,6 +77,7 @@ export function createEmptyDB(): DB {
     users: [],
     clients: [],
     exercises: [...SEED_EXERCISES],
+    tracking: {},
     workouts: [],
     templates: [],
     metrics: [],

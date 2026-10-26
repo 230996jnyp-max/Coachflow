@@ -17,6 +17,7 @@ import type {
   WorkoutSet,
 } from "./types";
 import { epley, fmtClock, fromKg, round, weightUnit } from "./utils";
+import { formatCustomSet } from "./tracking";
 
 export type ExerciseMap = Map<string, Exercise>;
 
@@ -154,6 +155,7 @@ export function findPrevious(
 
 export function formatSet(set: WorkoutSet | undefined, ex: Exercise | undefined, u: UnitSystem): string {
   if (!set || !ex) return "—";
+  if (ex.tracking) return formatCustomSet(set, ex.tracking);
   switch (ex.type) {
     case "WEIGHT_REPS":
     case "WEIGHTED_BODYWEIGHT": {

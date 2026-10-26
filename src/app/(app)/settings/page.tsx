@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { HomeAddressField } from "@/components/HomeAddressField";
+import { SpecialtiesCard } from "@/components/sports/Focus";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
 import { PasswordBanner } from "@/components/PasswordBanner";
@@ -232,6 +233,10 @@ export default function SettingsPage() {
 
       {isTrainer && (
         <>
+          <section>
+            <SectionTitle>Specialties &amp; sports</SectionTitle>
+            <SpecialtiesCard />
+          </section>
           <section>
             <SectionTitle
               action={

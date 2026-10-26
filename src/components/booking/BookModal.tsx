@@ -12,11 +12,12 @@ import { bookingLocation } from "./bookingUi";
 import { gymToBooking, isGymComplete, isHomeValue, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
+import { BASE_FOCUS, focusOptions } from "@/lib/sports";
 import { createBooking, shareSession } from "@/lib/store";
 import type { Booking, PlaceInfo } from "@/lib/types";
 import type { SessionFocus } from "@/lib/types";
 
-export const FOCUS_OPTIONS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
+export const FOCUS_OPTIONS: SessionFocus[] = BASE_FOCUS;
 
 /** Client tap-to-book modal. `start` is the tapped slot. */
 export function BookModal({ start, clientId, initGym, initPlace, onClose }: { start: Date | null; clientId: string; initGym?: string; initPlace?: PlaceInfo | null; onClose: () => void }) {
@@ -131,7 +132,7 @@ function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; c
         </Field>
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
-            {FOCUS_OPTIONS.map((f) => (
+            {focusOptions(db.settings.specialties ?? []).map((f) => (
               <option key={f}>{f}</option>
             ))}
           </Select>

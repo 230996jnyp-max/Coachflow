@@ -1,4 +1,8 @@
 import "server-only";
+import { EQUIPMENT, MUSCLES } from "@/data/exercises";
+import { JOINTS, SUB_CATEGORIES, TISSUES } from "@/lib/sports";
+import { sanitizeTracking } from "@/lib/tracking";
+import type { Equipment, MuscleGroup, TrackingSchema } from "@/lib/types";
 import { buildIndex, matchExercise } from "../exerciseMatch";
 import type { ParsedExercise, ParsedSet, ParsedWorkout } from "../workoutText";
 import { HttpError } from "./http";
@@ -278,4 +282,166 @@ export async function aiReadWorkouts(input: AiReadInput): Promise<ParsedWorkout[
     throw new HttpError(502, "The AI answer couldn't be read.");
   }
   return sanitizeAiWorkouts(parsed, input.library, input.unit);
+}
+
+/* ---------------- Sports: drills for any sport, and custom tracking formats ---------------- */
+export interface GeneratedExercise {
+  name: string;
+  subCategory: string;
+  primary: MuscleGroup;
+  secondary: MuscleGroup[];
+  equipment: Equipment;
+  tracking: TrackingSchema;
+  joints: string[];
+  tissues: string[];
+}
+
+const PRESET_HELP = `hold = Hold time (seconds); hold_side = Hold time + side (Both/Left/Right); reps = Reps; reps_side = Reps + side;
+flow = Rounds + Time (flows, ladders, rope); rounds = Rounds + Round length + Rest (+ total time) for combat / bag / pad work;
+swim = Stroke + Distance (m) + Time + Pace per 100 m; shooting = Spot + Made + Attempted + Shooting %;
+timed = Reps + Time (timed skill drills); interval = Reps + Distance (m) + Time (sprints, runs, sled).`;
+
+const COLUMN_HELP = `A custom tracking format is {"columns":[...],"primary":"<column key>"}. Each column:
+{"key":"snake_case","label":"Short Label","kind":"number"|"duration"|"text"|"select"|"computed",
+ "unit":"optional e.g. m, kg, %","options":["only for select, 2-8 choices"],
+ "agg":"sum"|"max"|"avg"|"last"  (how the sets of one session combine for the progress chart; counts/distances sum, holds max, rest/round times avg),
+ "op":"ratio_pct"|"ratio"|"per100"|"sum"|"avg"|"product","of":["keys of two or more number/duration columns"] (only for computed)}.
+"duration" values are in seconds and shown as mm:ss. computed ops: ratio_pct = of[0]/of[1]*100 (e.g. shooting %); ratio = of[0]/of[1]; per100 = of[0]/of[1]*100 (e.g. pace per 100 m from time and distance);
+sum / avg / product combine 2-4 columns. At most 7 columns. "primary" is the column to chart (a number, duration or computed column).`;
+
+const SPORT_SYSTEM = `You are an expert strength & conditioning and skills coach with deep knowledge of many sports. For the sport or training discipline you are given, design exercises and drills that make athletes BETTER AT THAT SPORT, not just generic gym lifts: technique and skill drills, footwork and agility, sport-specific conditioning, and mobility / injury-prevention work for the joints and tissues that sport stresses.
+
+Return ONLY one JSON object, no commentary:
+{"sport":"<the sport's proper name, 1-4 words>","exercises":[{
+  "name":"<distinctive drill name, max 60 chars>",
+  "subCategory": one of ${JSON.stringify(SUB_CATEGORIES)},
+  "primary": one of ${JSON.stringify(MUSCLES)}   (the main muscle group worked; use "Full Body" or "Cardio" when it fits),
+  "secondary": [muscle groups from the same list],
+  "equipment": one of ${JSON.stringify(EQUIPMENT)}   (pick the closest; "Other" if none fit),
+  "tracking": {"preset":"<preset id>"} OR a custom format,
+  "joints": [from ${JSON.stringify(JOINTS)}]   (0-2: only the joints the drill mainly loads or protects; leave [] for most skill drills),
+  "tissues": [from ${JSON.stringify(TISSUES)}]   (0-1: only for prehab / injury-prevention work aimed at a specific tendon or ligament; otherwise [])
+}]}
+
+Tracking presets (use one whenever it fits the drill): ${PRESET_HELP}
+${COLUMN_HELP}
+Pick the tracking that a coach would actually record for that drill (e.g. shooting drills: made / attempted; swim sets: distance and time; holds: seconds; combat rounds: rounds and round length).
+Cover ALL four sub-categories with a sensible mix. No duplicates and nothing from the EXISTING list. Only real, well-known drills; do not invent equipment the sport does not use.`;
+
+export interface SportInput {
+  sport: string;
+  count: number;
+  existing: string[];
+  subCategory?: string;
+}
+
+function muscleList(v: unknown, not?: string): MuscleGroup[] {
+  return (Array.isArray(v) ? v : []).filter((m): m is MuscleGroup => typeof m === "string" && (MUSCLES as string[]).includes(m) && m !== not).slice(0, 6);
+}
+
+export function sanitizeGeneratedExercises(raw: unknown, sport: string, existing: string[]): { sport: string; exercises: GeneratedExercise[] } {
+  const root = raw as { sport?: unknown; exercises?: unknown };
+  if (!root || !Array.isArray(root.exercises)) throw new HttpError(502, "The AI answer wasn't in the expected format.");
+  const taken = new Set(existing.map((n) => n.toLowerCase().replace(/[^a-z0-9]+/g, "")));
+  const out: GeneratedExercise[] = [];
+  for (const item of root.exercises.slice(0, 40)) {
+    if (!item || typeof item !== "object") continue;
+    const x = item as Record<string, unknown>;
+    const name = typeof x.name === "string" ? x.name.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (!name || taken.has(key)) continue;
+    const t = sanitizeTracking(x.tracking);
+    if (!t.ok) continue;
+    taken.add(key);
+    const primary = (MUSCLES as string[]).includes(x.primary as string) ? (x.primary as MuscleGroup) : "Full Body";
+    out.push({
+      name,
+      subCategory: (SUB_CATEGORIES as readonly string[]).includes(x.subCategory as string) ? (x.subCategory as string) : "Skill & Technique",
+      primary,
+      secondary: muscleList(x.secondary, primary),
+      equipment: (EQUIPMENT as string[]).includes(x.equipment as string) ? (x.equipment as Equipment) : "Other",
+      tracking: t.schema,
+      joints: (Array.isArray(x.joints) ? x.joints : []).filter((j): j is string => typeof j === "string" && (JOINTS as readonly string[]).includes(j)).slice(0, 2),
+      tissues: (Array.isArray(x.tissues) ? x.tissues : []).filter((j): j is string => typeof j === "string" && (TISSUES as readonly string[]).includes(j)).slice(0, 1),
+    });
+  }
+  const name = typeof root.sport === "string" && root.sport.trim() ? root.sport.replace(/\s+/g, " ").trim().slice(0, 50) : sport;
+  if (out.length === 0) throw new HttpError(502, "The AI didn't return any usable exercises. Try again or rephrase the sport.");
+  return { sport: name, exercises: out };
+}
+
+/** Sport-specific drills for any sport (technique, footwork, conditioning, mobility), each with a sensible tracking format. */
+export async function aiSportExercises(input: SportInput): Promise<{ sport: string; exercises: GeneratedExercise[] }> {
+  const content = await groq(
+    {
+      model: TEXT_MODEL,
+      temperature: 0.4,
+      reasoning_effort: "low",
+      max_completion_tokens: 12000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SPORT_SYSTEM },
+        {
+          role: "user",
+          content:
+            `SPORT / DISCIPLINE: ${input.sport}\nHOW MANY: ${input.count}\n` +
+            (input.subCategory ? `FOCUS ON SUB-CATEGORY: ${input.subCategory} (but still add a few from the others)\n` : "") +
+            `EXISTING (do not repeat): ${input.existing.slice(0, 120).join("; ") || "none"}`,
+        },
+      ],
+    },
+    55_000,
+  );
+  let parsed: unknown;
+  try {
+    parsed = jsonFrom(content);
+  } catch {
+    throw new HttpError(502, "The AI answer couldn't be read.");
+  }
+  return sanitizeGeneratedExercises(parsed, input.sport, input.existing);
+}
+
+const TRACKING_SYSTEM = `You turn a personal trainer's plain-English request into a tracking format for ONE exercise: the columns the client fills in for every set, and the single value that is charted in the client's progress.
+
+Return ONLY one JSON object, no commentary:
+{"columns":[...],"primary":"<key of the column to chart>","summary":"<one short sentence saying what will be tracked and charted>"}
+
+${COLUMN_HELP}
+Use exactly the columns the coach asked for (plus a computed column when they ask for a percentage, pace, total or ratio). Choose the chart ("primary") the coach asks for; otherwise the most meaningful value. Preset formats are examples of good designs: ${PRESET_HELP}`;
+
+export interface TrackingInput {
+  exerciseName: string;
+  sport?: string;
+  instruction: string;
+  current?: TrackingSchema;
+}
+
+export async function aiCustomTracking(input: TrackingInput): Promise<{ tracking: TrackingSchema; summary: string }> {
+  const content = await groq(
+    {
+      model: TEXT_MODEL,
+      temperature: 0.2,
+      reasoning_effort: "low",
+      max_completion_tokens: 3000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: TRACKING_SYSTEM },
+        {
+          role: "user",
+          content: `EXERCISE: ${input.exerciseName}\nSPORT: ${input.sport || "general"}\nCURRENT FORMAT: ${input.current ? JSON.stringify(input.current) : "weight x reps (default)"}\n\nCOACH'S REQUEST:\n"""\n${input.instruction.slice(0, 600)}\n"""`,
+        },
+      ],
+    },
+    40_000,
+  );
+  let parsed: unknown;
+  try {
+    parsed = jsonFrom(content);
+  } catch {
+    throw new HttpError(502, "The AI answer couldn't be read.");
+  }
+  const t = sanitizeTracking(parsed);
+  if (!t.ok) throw new HttpError(502, "The AI couldn't build that tracking format. Try describing the columns more simply.");
+  const summary = typeof (parsed as { summary?: unknown }).summary === "string" ? (parsed as { summary: string }).summary.slice(0, 240) : "";
+  return { tracking: t.schema, summary };
 }

@@ -7,7 +7,8 @@ import { db } from "@/lib/server/db";
 import { applyBookingStatus, applyAttendance, clearBookingMark } from "@/lib/server/attendance";
 import { notify, onBookingCancelled, onBookingMoved, whenText } from "@/lib/server/groups";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
-import { FOCUS, hasConflict, loadSchedule, parsePlace, requestLoc, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck } from "@/lib/server/schedule";
+import { focusAllowed } from "@/lib/sports";
+import { hasConflict, loadSchedule, parsePlace, requestLoc, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck } from "@/lib/server/schedule";
 import { isHomeLocation } from "@/lib/gyms";
 import { bookings, groupSessions, gyms } from "@/lib/server/schema";
 import type { BookingStatus, PlaceInfo, SessionFocus } from "@/lib/types";
@@ -80,8 +81,8 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
     const notes = "notes" in body ? str(body.notes, "Comments", { optional: true, max: 500 }) : old.notes;
     let focus = row.focus as SessionFocus;
     if ("focus" in body) {
-      if (!FOCUS.includes(body.focus as SessionFocus)) throw badRequest("Unknown session focus.");
-      focus = body.focus as SessionFocus;
+      if (typeof body.focus !== "string" || !focusAllowed(body.focus, rules.sports)) throw badRequest("Unknown session focus.");
+      focus = body.focus;
     }
 
     if (moved) {

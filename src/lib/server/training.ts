@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES, SEED_EXERCISES } from "@/data/exercises";
 import { PAIN_AREAS, type WorkoutFeedback } from "@/lib/feedback";
+import { JOINTS, SUB_CATEGORIES, TISSUES } from "@/lib/sports";
+import { sanitizeTracking } from "@/lib/tracking";
 import { starterTemplates } from "@/lib/seed";
-import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
+import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, TrackingSchema, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, forbidden } from "./http";
-import { coachSettings, customExercises, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
+import { coachSettings, customExercises, exerciseTracking, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
 
 /*
  * Training data (workouts, routine templates, custom exercises). Each record is stored as one AES-256-GCM blob bound to
@@ -102,6 +104,16 @@ function parseSet(raw: unknown): WorkoutSet {
   if (level !== undefined) s.level = level;
   if (calories !== undefined) s.calories = calories;
   if (pr && pr.length) s.pr = pr;
+  // Values for a sport drill's own columns (numbers, or short text for select / text columns).
+  if (r.custom && typeof r.custom === "object" && !Array.isArray(r.custom)) {
+    const custom: Record<string, number | string> = {};
+    for (const [k, v] of Object.entries(r.custom as Record<string, unknown>).slice(0, 12)) {
+      if (!/^[a-z][a-z0-9_]{0,23}$/.test(k)) continue;
+      if (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 10_000_000) custom[k] = v;
+      else if (typeof v === "string" && v.length <= 60) custom[k] = v;
+    }
+    if (Object.keys(custom).length) s.custom = custom;
+  }
   const coachEdit = parseCoachEdit(r.coachEdit);
   if (coachEdit) s.coachEdit = coachEdit;
   return s;
@@ -206,7 +218,20 @@ export function parseExercise(raw: unknown, ownerId: string): Exercise {
   if (!EQUIPMENT.includes(equipment)) throw badRequest("Unknown equipment.");
   if (!MEASURES.includes(type)) throw badRequest("Unknown measurement type.");
   const secondary = arr(r.secondary, "Secondary muscles", 8).filter((m): m is MuscleGroup => MUSCLES.includes(m as MuscleGroup) && m !== primary);
-  return { id: exId, name: text(r.name, "Name", 100, true), primary, secondary, equipment, type, custom: true, createdBy: ownerId };
+  const ex: Exercise = { id: exId, name: text(r.name, "Name", 100, true), primary, secondary, equipment, type, custom: true, createdBy: ownerId };
+  const discipline = text(r.discipline, "Sport", 50);
+  if (discipline) ex.discipline = discipline;
+  if (typeof r.subCategory === "string" && (SUB_CATEGORIES as readonly string[]).includes(r.subCategory)) ex.subCategory = r.subCategory;
+  const joints = arr(r.joints, "Joints", 10).filter((j): j is string => typeof j === "string" && (JOINTS as readonly string[]).includes(j));
+  const tissues = arr(r.tissues, "Tendons and ligaments", 10).filter((t): t is string => typeof t === "string" && (TISSUES as readonly string[]).includes(t));
+  if (joints.length) ex.joints = [...new Set(joints)];
+  if (tissues.length) ex.tissues = [...new Set(tissues)];
+  if (r.tracking !== undefined && r.tracking !== null) {
+    const t = sanitizeTracking(r.tracking);
+    if (!t.ok) throw badRequest(t.error);
+    ex.tracking = t.schema;
+  }
+  return ex;
 }
 
 /* ---------------- Scope ---------------- */
@@ -256,8 +281,46 @@ export async function customExercisesFor(me: UserRow): Promise<Exercise[]> {
   return rows.map(openExercise).filter(present);
 }
 
+/* ---------------- A coach's own tracking formats ---------------- */
+const aadTr = (coachId: string, exerciseId: string) => `tracking:${coachId}:${exerciseId}`;
+
+/** The coach's tracking formats for exercises (a client gets their coach's). */
+export async function trackingOverrides(me: UserRow): Promise<Record<string, TrackingSchema>> {
+  const coachId = me.role === "CLIENT" ? me.coachId : me.id;
+  if (!coachId) return {};
+  const d = await db();
+  const rows = await d.select().from(exerciseTracking).where(eq(exerciseTracking.coachId, coachId));
+  const out: Record<string, TrackingSchema> = {};
+  for (const r of rows) {
+    try {
+      const t = sanitizeTracking(decryptJson<{ tracking: unknown }>(r.dataEnc, aadTr(coachId, r.exerciseId)).tracking);
+      if (t.ok) out[r.exerciseId] = t.schema;
+    } catch (e) {
+      console.error("Could not decrypt tracking format", r.exerciseId, e);
+    }
+  }
+  return out;
+}
+
+export async function putTracking(me: UserRow, exerciseId: string, raw: unknown): Promise<TrackingSchema> {
+  const exId = id(exerciseId, "Exercise id");
+  const t = sanitizeTracking(raw);
+  if (!t.ok) throw badRequest(t.error);
+  const d = await db();
+  const values = { coachId: me.id, exerciseId: exId, dataEnc: encryptJson({ tracking: t.schema }, aadTr(me.id, exId)), updatedAt: new Date() };
+  await d.insert(exerciseTracking).values(values).onConflictDoUpdate({ target: [exerciseTracking.coachId, exerciseTracking.exerciseId], set: { dataEnc: values.dataEnc, updatedAt: values.updatedAt } });
+  return t.schema;
+}
+
+export async function deleteTracking(me: UserRow, exerciseId: string): Promise<void> {
+  const d = await db();
+  await d.delete(exerciseTracking).where(and(eq(exerciseTracking.coachId, me.id), eq(exerciseTracking.exerciseId, id(exerciseId, "Exercise id"))));
+}
+
 /* ---------------- Reads ---------------- */
 export interface TrainingPayload {
+  /** The coach's own tracking formats by exercise id (applied on top of the library). */
+  tracking: Record<string, TrackingSchema>;
   workouts: Workout[];
   /** Every workout id `me` can see (lets the browser drop ones deleted elsewhere). */
   ids: string[];
@@ -284,6 +347,7 @@ export async function loadTraining(me: UserRow, since?: Date): Promise<TrainingP
   const xRows = await d.select().from(customExercises).where(inArray(customExercises.ownerId, owners));
 
   return {
+    tracking: await trackingOverrides(me),
     workouts: wRows.map(openWorkout).filter(present),
     ids: idRows.map((r) => r.id),
     templates: tRows.map(openTemplate).filter(present),

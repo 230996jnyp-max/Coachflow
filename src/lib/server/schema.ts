@@ -67,6 +67,9 @@ export const coachSettings = pgTable("coach_settings", {
   travelMaxMin: integer("travel_max_min").notNull().default(90),
   /** The coach's starter routines were created once (so a second device or a deleted routine never re-adds them). */
   templatesSeeded: boolean("templates_seeded").notNull().default(false),
+  /** Coaching specialties and the sports the coach added with AI (JSON arrays of names). */
+  specialties: text("specialties").notNull().default("[]"),
+  sports: text("sports").notNull().default("[]"),
 });
 
 export const gyms = pgTable(
@@ -164,6 +167,18 @@ export const customExercises = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("custom_exercises_owner_idx").on(t.ownerId)],
+);
+
+/** A coach's own tracking format for one exercise (set-table columns + the chart metric), applied to the coach and their clients. */
+export const exerciseTracking = pgTable(
+  "exercise_tracking",
+  {
+    coachId: text("coach_id").notNull(),
+    exerciseId: text("exercise_id").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.coachId, t.exerciseId] })],
 );
 
 /**
@@ -277,6 +292,7 @@ export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
+export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
 export type BookingRow = typeof bookings.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 
@@ -392,6 +408,15 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS custom_exercises_owner_idx ON custom_exercises (owner_id)`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS specialties text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS sports text NOT NULL DEFAULT '[]'`,
+  `CREATE TABLE IF NOT EXISTS exercise_tracking (
+    coach_id text NOT NULL,
+    exercise_id text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (coach_id, exercise_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS group_sessions (
     id text PRIMARY KEY,
     coach_id text NOT NULL,

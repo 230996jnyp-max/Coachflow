@@ -1,10 +1,12 @@
 "use client";
 
-import { Check, Plus, Search } from "lucide-react";
+import { Check, Plus, Search, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES } from "@/data/exercises";
 import { useViewer } from "@/lib/hooks";
+import { CORE_SPORTS, disciplineOf, JOINTS, SUB_CATEGORIES, sportLabel, STRENGTH, TISSUES } from "@/lib/sports";
 import { addExercise } from "@/lib/store";
+import { fallbackType, PRESET_LABELS, TRACKING_PRESETS } from "@/lib/tracking";
 import type { Equipment, Exercise, MeasureType, MuscleGroup } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge, Button, Field, Input, Modal, Select } from "./ui";
@@ -22,7 +24,7 @@ export function searchExercises(list: Exercise[], query: string): Exercise[] {
   const tokens = q.split(/\s+/).map((t) => aliases[t] ?? t);
   const scored: { ex: Exercise; score: number }[] = [];
   for (const ex of list) {
-    const hay = `${ex.name} ${ex.primary} ${ex.equipment} ${ex.secondary.join(" ")}`.toLowerCase();
+    const hay = `${ex.name} ${ex.primary} ${ex.equipment} ${ex.secondary.join(" ")} ${ex.discipline ?? ""} ${ex.subCategory ?? ""} ${(ex.joints ?? []).join(" ")} ${(ex.tissues ?? []).join(" ")}`.toLowerCase();
     const name = ex.name.toLowerCase();
     let score = 0;
     let ok = true;
@@ -89,23 +91,69 @@ interface BrowserProps {
   restrictTypes?: MeasureType[];
   /** Tailwind `top-*` classes for the sticky bar (page mode sits below the mobile header). */
   stickyOffset?: string;
+  /** A coach choosing exercises for this client: the client's assigned focuses decide what is shown first. */
+  clientId?: string;
+  /** Coach: open the "add a sport with AI" flow (optionally for the sport being viewed). */
+  onAiSport?: (sport?: string) => void;
 }
 
-export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle, onOpen, restrictTypes, stickyOffset }: BrowserProps) {
+/** Sports in a sensible order: the given ones first, then the built-in ones, then any others by name. */
+function orderSports(present: string[], first: string[]): string[] {
+  const rest = [...CORE_SPORTS, ...present.filter((d) => !(CORE_SPORTS as readonly string[]).includes(d)).sort()].filter((d, i, a) => a.indexOf(d) === i && present.includes(d));
+  return [...first.filter((d) => present.includes(d)), ...rest.filter((d) => !first.includes(d))];
+}
+
+export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle, onOpen, restrictTypes, stickyOffset, clientId, onAiSport }: BrowserProps) {
+  const { db, user, isTrainer } = useViewer();
   const [query, setQuery] = useState("");
   const [muscle, setMuscle] = useState<MuscleGroup | "All">("All");
   const [equipment, setEquipment] = useState<Equipment | "All">("All");
+  const [target, setTarget] = useState("All");
+  const [sub, setSub] = useState("All");
+  const [pill, setPill] = useState("base");
+  const [browseAll, setBrowseAll] = useState(false);
 
-  const results = useMemo(() => {
-    let list = exercises;
-    if (restrictTypes) list = list.filter((e) => restrictTypes.includes(e.type));
-    if (muscle !== "All") list = list.filter((e) => e.primary === muscle);
-    if (equipment !== "All") list = list.filter((e) => e.equipment === equipment);
-    return searchExercises(list, query);
-  }, [exercises, query, muscle, equipment, restrictTypes]);
+  // What to show first. A client sticks strictly to the focus(es) their coach assigned; a coach picking for a client follows
+  // that client's focus (with a way to browse everything); a coach on their own starts from their specialties.
+  const own = user ? db.clients.find((c) => c.id === user.id) : undefined;
+  const forClient = isTrainer ? (clientId ? db.clients.find((c) => c.id === clientId) : undefined) : own;
+  const focuses = forClient?.focuses ?? [];
+  const strict = !isTrainer && focuses.length > 0;
+  const baseSports = focuses.length ? focuses : isTrainer ? (db.settings.specialties ?? []) : [];
+  const baseLabel = strict ? "All my focuses" : focuses.length ? "All assigned focuses" : "My specialties";
+
+  const present = useMemo(() => [...new Set(exercises.map((e) => disciplineOf(e)))], [exercises]);
+  const showEverything = !strict && (baseSports.length === 0 || browseAll);
+  const eff = pill === "base" && baseSports.length === 1 ? baseSports[0] : pill;
+  const sports = showEverything ? orderSports(present, baseSports) : baseSports;
+
+  const inScope = (e: Exercise) => {
+    const d = disciplineOf(e);
+    if (strict && !baseSports.includes(d)) return false;
+    if (eff === "all") return true;
+    if (eff === "base") return baseSports.length ? baseSports.includes(d) : true;
+    return d === eff;
+  };
+  const single = eff !== "all" && eff !== "base" ? eff : null;
+
+  const scoped = exercises.filter(inScope);
+  const subs = single ? [...new Set(scoped.map((e) => e.subCategory).filter((x): x is string => !!x))].sort((a, b) => SUB_CATEGORIES.indexOf(a as (typeof SUB_CATEGORIES)[number]) - SUB_CATEGORIES.indexOf(b as (typeof SUB_CATEGORIES)[number])) : [];
+
+  let list = scoped;
+  if (restrictTypes) list = list.filter((e) => restrictTypes.includes(e.type));
+  if (sub !== "All") list = list.filter((e) => e.subCategory === sub);
+  if (muscle !== "All") list = list.filter((e) => e.primary === muscle);
+  if (equipment !== "All") list = list.filter((e) => e.equipment === equipment);
+  if (target !== "All") list = list.filter((e) => e.joints?.includes(target) || e.tissues?.includes(target));
+  const results = searchExercises(list, query);
 
   const barRef = useRef<HTMLDivElement>(null);
   const hidden = useHideOnScroll(barRef);
+  const choose = (key: string) => {
+    setPill(key);
+    setSub("All");
+  };
+  const pillClass = (on: boolean) => cn("min-h-9 shrink-0 rounded-full border px-3 text-xs font-semibold transition-colors", on ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink");
 
   return (
     <div>
@@ -119,24 +167,59 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
       >
         <div className="relative">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search e.g. incline bench, RDLs, lat pulldown…" className="pl-9" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search e.g. incline bench, knee, jab, mobility…" className="pl-9" />
         </div>
+
+        {/* Sport / focus */}
+        {(baseSports.length > 0 || sports.length > 1) && (
+          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1" aria-label="Sport">
+            {baseSports.length > 1 && (
+              <button onClick={() => choose("base")} className={pillClass(eff === "base")}>
+                {baseLabel}
+              </button>
+            )}
+            {baseSports.length === 0 && (
+              <button onClick={() => choose("all")} className={pillClass(eff === "all" || eff === "base")}>
+                All sports
+              </button>
+            )}
+            {sports.map((s) => (
+              <button key={s} onClick={() => choose(s)} className={pillClass(eff === s)}>
+                {sportLabel(s)}
+              </button>
+            ))}
+            {baseSports.length > 0 && showEverything && (
+              <button onClick={() => choose("all")} className={pillClass(eff === "all")}>
+                All sports
+              </button>
+            )}
+            {baseSports.length > 0 && !strict && !browseAll && (
+              <button onClick={() => setBrowseAll(true)} className="min-h-9 shrink-0 rounded-full border border-dashed border-accent/50 px-3 text-xs font-semibold text-accent hover:bg-accent/10">
+                {isTrainer && !focuses.length ? "+ Show all sports" : "+ Browse all other sports"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {subs.length > 1 && (
+          <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1" aria-label="Type of exercise">
+            {["All", ...subs].map((x) => (
+              <button key={x} onClick={() => setSub(x)} className={cn("min-h-8 shrink-0 rounded-full px-3 text-[11px] font-semibold transition-colors", sub === x ? "bg-accent/20 text-accent" : "bg-field text-muted hover:text-ink")}>
+                {x === "All" ? "All types" : x}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
           {(["All", ...MUSCLES] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMuscle(m)}
-              className={cn(
-                "min-h-9 shrink-0 rounded-full border px-3 text-xs font-semibold transition-colors",
-                muscle === m ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink",
-              )}
-            >
+            <button key={m} onClick={() => setMuscle(m)} className={pillClass(muscle === m)}>
               {m}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={equipment} onChange={(e) => setEquipment(e.target.value as Equipment | "All")} className="h-10 flex-1" aria-label="Filter by equipment">
+        <div className="grid grid-cols-2 gap-2">
+          <Select value={equipment} onChange={(e) => setEquipment(e.target.value as Equipment | "All")} className="h-10" aria-label="Filter by equipment">
             <option value="All">All equipment</option>
             {EQUIPMENT.map((e) => (
               <option key={e} value={e}>
@@ -144,13 +227,35 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
               </option>
             ))}
           </Select>
-          <span className="shrink-0 text-xs text-muted">{results.length} exercises</span>
+          <Select value={target} onChange={(e) => setTarget(e.target.value)} className="h-10" aria-label="Filter by joint, tendon or ligament">
+            <option value="All">All joints &amp; tissues</option>
+            <optgroup label="Joints">
+              {JOINTS.map((j) => (
+                <option key={j}>{j}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Tendons & ligaments">
+              {TISSUES.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </optgroup>
+          </Select>
+        </div>
+        <div className="flex items-center justify-between gap-2 text-xs text-muted">
+          <span>{results.length} exercises</span>
+          {isTrainer && onAiSport && (
+            <button type="button" onClick={() => onAiSport(single ?? undefined)} className="inline-flex items-center gap-1 font-semibold text-accent">
+              <Sparkles size={12} /> {single ? `More ${sportLabel(single)} drills with AI` : "Add a sport with AI"}
+            </button>
+          )}
         </div>
       </div>
 
       <ul className="divide-y divide-line">
         {results.map((ex) => {
           const isSel = selected.includes(ex.id);
+          const d = disciplineOf(ex);
+          const tags = [...(ex.joints ?? []), ...(ex.tissues ?? [])];
           return (
             <li key={ex.id}>
               <button
@@ -172,14 +277,28 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
                   <div className="truncate text-sm font-semibold">{ex.name}</div>
                   <div className="truncate text-xs text-muted">
                     {ex.primary} · {ex.equipment}
+                    {d !== STRENGTH && ` · ${sportLabel(d)}`}
+                    {ex.subCategory && ` · ${ex.subCategory}`}
                   </div>
+                  {tags.length > 0 && <div className="truncate text-[11px] text-accent/80">{tags.join(" · ")}</div>}
                 </div>
                 {ex.custom && <Badge className="border-accent/30 bg-accent/15 text-accent">Custom</Badge>}
               </button>
             </li>
           );
         })}
-        {results.length === 0 && <li className="py-10 text-center text-sm text-muted">No exercises match. Try a different search or create a custom one.</li>}
+        {results.length === 0 && (
+          <li className="py-10 text-center text-sm text-muted">
+            No exercises match. Try a different search or create a custom one.
+            {isTrainer && onAiSport && (
+              <div className="mt-2">
+                <button type="button" onClick={() => onAiSport(single ?? (query.trim().length > 2 ? query.trim() : undefined))} className="font-semibold text-accent">
+                  Search any sport with AI →
+                </button>
+              </div>
+            )}
+          </li>
+        )}
       </ul>
     </div>
   );
@@ -191,13 +310,16 @@ export function ExercisePicker({
   onClose,
   onConfirm,
   confirmLabel = "Add",
+  clientId,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (exerciseIds: string[]) => void;
   confirmLabel?: string;
+  /** The client the workout is for (their assigned focus decides what is shown first). */
+  clientId?: string;
 }) {
-  const { db } = useViewer();
+  const { exercises } = useViewer();
   const [selected, setSelected] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
@@ -232,7 +354,8 @@ export function ExercisePicker({
         }
       >
         <ExerciseBrowser
-          exercises={db.exercises}
+          exercises={exercises}
+          clientId={clientId}
           selectable
           selected={selected}
           onToggle={(ex) => setSelected((s) => (s.includes(ex.id) ? s.filter((x) => x !== ex.id) : [...s, ex.id]))}
@@ -262,6 +385,14 @@ export function CreateExerciseModal({
   const [secondary, setSecondary] = useState<MuscleGroup[]>([]);
   const [equipment, setEquipment] = useState<Equipment>("Barbell");
   const [type, setType] = useState<MeasureType>("WEIGHT_REPS");
+  const { db, user, isTrainer } = useViewer();
+  const own = user ? db.clients.find((c) => c.id === user.id) : undefined;
+  const sportChoices = !isTrainer && own?.focuses?.length ? own.focuses : [...CORE_SPORTS, ...(db.settings.sports ?? [])];
+  const [discipline, setDiscipline] = useState("");
+  const [subCategory, setSubCategory] = useState("");
+  const [preset, setPreset] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const sport = discipline && sportChoices.includes(discipline) ? discipline : sportChoices[0];
 
   const reset = () => {
     setName("");
@@ -269,6 +400,10 @@ export function CreateExerciseModal({
     setPrimary("Chest");
     setEquipment("Barbell");
     setType("WEIGHT_REPS");
+    setDiscipline("");
+    setSubCategory("");
+    setPreset("");
+    setTags([]);
   };
 
   return (
@@ -284,7 +419,19 @@ export function CreateExerciseModal({
           <Button
             disabled={!name.trim()}
             onClick={() => {
-              const ex = addExercise({ name: name.trim(), primary, secondary, equipment, type });
+              const tracking = preset ? structuredClone(TRACKING_PRESETS[preset]) : undefined;
+              const ex = addExercise({
+                name: name.trim(),
+                primary,
+                secondary,
+                equipment,
+                type: tracking ? fallbackType(tracking) : type,
+                ...(sport && sport !== STRENGTH ? { discipline: sport } : {}),
+                ...(subCategory ? { subCategory } : {}),
+                ...(tags.some((t) => (JOINTS as readonly string[]).includes(t)) ? { joints: tags.filter((t) => (JOINTS as readonly string[]).includes(t)) } : {}),
+                ...(tags.some((t) => (TISSUES as readonly string[]).includes(t)) ? { tissues: tags.filter((t) => (TISSUES as readonly string[]).includes(t)) } : {}),
+                ...(tracking ? { tracking } : {}),
+              });
               onCreated?.(ex);
               reset();
               onClose();
@@ -315,15 +462,61 @@ export function CreateExerciseModal({
             </Select>
           </Field>
         </div>
-        <Field label="Measurement type">
-          <Select value={type} onChange={(e) => setType(e.target.value as MeasureType)}>
-            {(Object.keys(MEASURE_LABELS) as MeasureType[]).map((t) => (
-              <option key={t} value={t}>
-                {MEASURE_LABELS[t]}
-              </option>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Sport">
+            <Select value={sport} onChange={(e) => setDiscipline(e.target.value)}>
+              {sportChoices.map((s) => (
+                <option key={s} value={s}>
+                  {sportLabel(s)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Type of exercise">
+            <Select value={subCategory} onChange={(e) => setSubCategory(e.target.value)}>
+              <option value="">Not set</option>
+              {SUB_CATEGORIES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Measurement type">
+            <Select value={type} onChange={(e) => setType(e.target.value as MeasureType)} disabled={!!preset}>
+              {(Object.keys(MEASURE_LABELS) as MeasureType[]).map((t) => (
+                <option key={t} value={t}>
+                  {MEASURE_LABELS[t]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Or a sport format">
+            <Select value={preset} onChange={(e) => setPreset(e.target.value)}>
+              <option value="">Use the measurement type</option>
+              {Object.keys(PRESET_LABELS).map((k) => (
+                <option key={k} value={k}>
+                  {PRESET_LABELS[k]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Joints &amp; connective tissue</div>
+          <div className="flex flex-wrap gap-1.5">
+            {[...JOINTS, ...TISSUES].map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTags((x) => (x.includes(t) ? x.filter((y) => y !== t) : [...x, t]))}
+                className={cn("min-h-9 rounded-full border px-3 text-xs font-semibold", tags.includes(t) ? "border-accent bg-accent/20 text-accent" : "border-line bg-field text-muted")}
+              >
+                {t}
+              </button>
             ))}
-          </Select>
-        </Field>
+          </div>
+        </div>
         <div>
           <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Secondary muscles</div>
           <div className="flex flex-wrap gap-1.5">

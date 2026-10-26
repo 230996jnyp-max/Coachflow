@@ -7,6 +7,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { Button, Field, IconButton, Input, Modal, Toggle } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { saveTemplate } from "@/lib/store";
+import { describeSchema } from "@/lib/tracking";
 import type { RoutineTemplate, TemplateExercise } from "@/lib/types";
 import { fromKg, round, toKg, uid, weightUnit } from "@/lib/utils";
 
@@ -88,7 +89,14 @@ function Editor({ template, onClose }: { template: Partial<RoutineTemplate>; onC
                       </IconButton>
                     </div>
                   </div>
-                  {cardio ? (
+                  {ex?.tracking ? (
+                    <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                      <Field label="Sets">
+                        <NumberInput label="Sets" min={1} max={12} value={it.sets} onChange={(v) => patch(i, { sets: v ?? it.sets })} />
+                      </Field>
+                      <p className="pb-2 text-xs text-muted">Logged as {describeSchema(ex.tracking)}.</p>
+                    </div>
+                  ) : cardio ? (
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <Field label="Minutes">
                         <NumberInput label="Minutes" decimals={2} step={1} allowEmpty value={it.durationSec ? round(it.durationSec / 60, 2) : undefined} onChange={(v) => patch(i, { durationSec: v && v > 0 ? Math.round(v * 60) : undefined })} />

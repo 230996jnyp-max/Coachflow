@@ -8,11 +8,11 @@ import { classesAsBookings, withPartnerSessions } from "@/components/groups/grou
 import { Button, Field, Input, Notice, Select, Textarea, Toggle } from "@/components/ui";
 import { bookingToGymValue, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
+import { focusOptions } from "@/lib/sports";
 import { atTime, buildDaySlots, travelProblem, ymd } from "@/lib/scheduling";
 import { editBooking, useNow } from "@/lib/store";
 import { locOf } from "@/lib/travel";
 import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
-import { FOCUS_OPTIONS } from "./BookModal";
 
 /**
  * Edit one upcoming session: date, time, location, focus and comments in a single form (no delete-and-rebook).
@@ -120,7 +120,7 @@ export function EditSessionForm({ booking: b, onDone, onCancel }: { booking: Boo
       )}
       <Field label="Session focus">
         <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
-          {FOCUS_OPTIONS.map((f) => (
+          {[...new Set([...focusOptions(db.settings.specialties ?? []), b.focus])].map((f) => (
             <option key={f}>{f}</option>
           ))}
         </Select>

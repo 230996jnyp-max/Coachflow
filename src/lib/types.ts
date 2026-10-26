@@ -54,6 +54,8 @@ export interface ClientProfile {
   /** Where the coach trains this client at home (a picked map place, or typed text when maps are unavailable). Private: only the client and their coach see it. */
   homePlace?: PlaceInfo;
   homeText?: string;
+  /** Training focuses the coach assigned (e.g. ["Mobility & Flexibility"]); the exercise pickers follow them. Empty = everything. */
+  focuses?: string[];
 }
 
 export type MuscleGroup =
@@ -89,6 +91,15 @@ export type Equipment =
   | "Trap Bar"
   | "Resistance Band"
   | "Cardio Machine"
+  | "Medicine Ball"
+  | "Boxing Gear"
+  | "Jump Rope"
+  | "Pool"
+  | "Court / Field"
+  | "Yoga Mat"
+  | "Foam Roller"
+  | "Cones / Ladder"
+  | "Sled"
   | "Other";
 
 export type MeasureType =
@@ -97,6 +108,33 @@ export type MeasureType =
   | "WEIGHTED_BODYWEIGHT"
   | "DURATION_DISTANCE"
   | "DURATION_ONLY";
+
+/** One column of a set table for a sport drill (see lib/tracking.ts). */
+export type TrackingKind = "number" | "duration" | "text" | "select" | "computed";
+export type TrackingOp = "ratio_pct" | "ratio" | "per100" | "sum" | "avg" | "product";
+export type TrackingAgg = "sum" | "max" | "avg" | "last";
+
+export interface TrackingColumn {
+  /** Where the value is kept on a set (WorkoutSet.custom[key]). */
+  key: string;
+  label: string;
+  kind: TrackingKind;
+  unit?: string;
+  /** "select" columns: the choices. */
+  options?: string[];
+  /** "computed" columns: how the value is worked out from other columns. */
+  op?: TrackingOp;
+  of?: string[];
+  /** How a session's sets are combined for the progress chart (default: sum). */
+  agg?: TrackingAgg;
+}
+
+/** What to log for an exercise and which value to chart in the client's progress. */
+export interface TrackingSchema {
+  columns: TrackingColumn[];
+  /** Key of the column charted by default. */
+  primary: string;
+}
 
 export interface Exercise {
   id: string;
@@ -107,6 +145,15 @@ export interface Exercise {
   type: MeasureType;
   custom?: boolean;
   createdBy?: string;
+  /** Sport / training discipline (default "Strength & Gym"). */
+  discipline?: string;
+  /** Skill & Technique, Footwork & Agility, Sport Conditioning or Mobility & Prehab. */
+  subCategory?: string;
+  /** Joints and connective tissue (tendons, ligaments) the exercise works on. */
+  joints?: string[];
+  tissues?: string[];
+  /** Set-table columns for this exercise (instead of weight x reps / time / distance). */
+  tracking?: TrackingSchema;
 }
 
 export type SetType = "N" | "W" | "D" | "F";
@@ -123,6 +170,8 @@ export interface WorkoutSet {
   level?: number;
   calories?: number;
   done: boolean;
+  /** Values for a sport drill's own columns (see Exercise.tracking), by column key. */
+  custom?: Record<string, number | string>;
   /** Persisted when the workout is saved so history can show badges. */
   pr?: PRKind[];
   /** Set when the coach changed this set from the group live grid (see CoachEdit). */
@@ -255,12 +304,8 @@ export type BookingStatus =
   | "DECLINED"
   | "NO_SHOW";
 
-export type SessionFocus =
-  | "Upper Body"
-  | "Lower Body"
-  | "Full Body"
-  | "Cardio / HIIT"
-  | "Mobility & Form Check";
+/** The usual five (Upper Body, Lower Body, ...) or one of the coach's sports (e.g. "Boxing"). */
+export type SessionFocus = string;
 
 export interface Booking {
   id: string;
@@ -341,6 +386,10 @@ export interface AppSettings {
   emailInvites?: boolean;
   /** Email a notification when a chat message is sent. */
   emailChat?: boolean;
+  /** The coach's specialties (shown first in their exercise library and session focus lists). */
+  specialties?: string[];
+  /** Sports the coach added with AI, on top of the built-in ones. */
+  sports?: string[];
 }
 
 export type ChatRole = "OWNER" | "COACH" | "CLIENT";
@@ -435,6 +484,8 @@ export interface DB {
   users: User[];
   clients: ClientProfile[];
   exercises: Exercise[];
+  /** The coach's own tracking formats for exercises (by exercise id), applied on top of the library. */
+  tracking: Record<string, TrackingSchema>;
   workouts: Workout[];
   templates: RoutineTemplate[];
   metrics: BodyMetricLog[];

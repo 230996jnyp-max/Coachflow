@@ -3,8 +3,9 @@
 import { Check, Trophy } from "lucide-react";
 import type { Exercise, PRKind, SetType, UnitSystem, WorkoutSet } from "@/lib/types";
 import { formatSet, PR_LABELS } from "@/lib/stats";
+import { computeCol, formatCustomSet, formatValue } from "@/lib/tracking";
 import { cn, fromKg, round, toKg } from "@/lib/utils";
-import { ClockCell, NumberCell } from "./cells";
+import { cellBase, ClockCell, NumberCell } from "./cells";
 
 export const SET_CYCLE: SetType[] = ["N", "W", "D", "F"];
 
@@ -16,6 +17,8 @@ const TYPE_STYLE: Record<SetType, string> = {
 };
 
 export function gridTemplate(ex: Exercise, showRpe: boolean): string {
+  // A sport drill with its own columns: set number, one cell per column (text / choices get more room), done tick.
+  if (ex.tracking) return `36px ${ex.tracking.columns.map((c) => (c.kind === "select" || c.kind === "text" ? "minmax(0,1.5fr)" : "minmax(0,1fr)")).join(" ")} 44px`;
   switch (ex.type) {
     case "WEIGHT_REPS":
     case "WEIGHTED_BODYWEIGHT":
@@ -35,6 +38,22 @@ export function SetHeader({ ex, showRpe, unit, wLabel }: { ex: Exercise; showRpe
   const h = "text-center text-[10px] font-bold uppercase tracking-wider text-muted";
   const kg = ex.type === "WEIGHTED_BODYWEIGHT" ? `+${wLabel}` : wLabel;
   void unit;
+  if (ex.tracking) {
+    return (
+      <div className="grid items-center gap-1.5 px-1 pb-1" style={{ gridTemplateColumns: gridTemplate(ex, showRpe) }}>
+        <div className={h}>Set</div>
+        {ex.tracking.columns.map((c) => (
+          <div key={c.key} className={cn(h, "truncate !text-[9px] !tracking-normal")} title={c.unit ? `${c.label} (${c.unit})` : c.label}>
+            {c.label}
+            {c.unit && c.kind === "number" ? ` ${c.unit}` : ""}
+          </div>
+        ))}
+        <div className={h}>
+          <Check size={14} className="mx-auto" />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="grid items-center gap-1.5 px-1 pb-1" style={{ gridTemplateColumns: gridTemplate(ex, showRpe) }}>
       <div className={h}>Set</div>
@@ -91,6 +110,9 @@ export function SetRow({
   onCycleType: () => void;
   onFillPrev: () => void;
 }) {
+  if (ex.tracking) {
+    return <CustomSetRow set={set} label={label} ex={ex} prev={prev} coachEdited={coachEdited} onChange={onChange} onToggleDone={onToggleDone} onCycleType={onCycleType} onFillPrev={onFillPrev} />;
+  }
   const showW = (v?: number) => (v === undefined ? undefined : round(fromKg(v, unit), 2));
   const prevText = formatSet(prev, ex, unit);
   const grid = gridTemplate(ex, showRpe);
@@ -196,6 +218,98 @@ export function SetRow({
               <Trophy size={11} /> {PR_LABELS[f]} PR
             </span>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A set of a sport drill: one cell per column of the exercise's tracking format (numbers, times, text, choices, calculations). */
+function CustomSetRow({
+  set,
+  label,
+  ex,
+  prev,
+  coachEdited,
+  onChange,
+  onToggleDone,
+  onCycleType,
+  onFillPrev,
+}: {
+  set: WorkoutSet;
+  label: string;
+  ex: Exercise;
+  prev?: WorkoutSet;
+  coachEdited?: boolean;
+  onChange: (patch: Partial<WorkoutSet>) => void;
+  onToggleDone: () => void;
+  onCycleType: () => void;
+  onFillPrev: () => void;
+}) {
+  const tk = ex.tracking!;
+  const setVal = (key: string, v: number | string | undefined) => {
+    const next = { ...(set.custom ?? {}) };
+    if (v === undefined || v === "") delete next[key];
+    else next[key] = v;
+    onChange({ custom: Object.keys(next).length ? next : undefined });
+  };
+  return (
+    <div className={cn("rounded-xl px-1 py-1 transition-colors", set.done && "bg-success/10")}>
+      <div className="grid items-center gap-1.5" style={{ gridTemplateColumns: gridTemplate(ex, false) }}>
+        <button
+          type="button"
+          onClick={onCycleType}
+          aria-label={`Set ${label}, tap to change set type`}
+          title="Tap to cycle: warm-up → normal → drop → failure"
+          className={cn("flex h-11 w-full items-center justify-center rounded-lg text-sm font-bold", TYPE_STYLE[set.type])}
+        >
+          {label}
+        </button>
+        {tk.columns.map((c) => {
+          const raw = set.custom?.[c.key];
+          const prevRaw = prev?.custom?.[c.key];
+          const aria = c.unit ? `${c.label} (${c.unit})` : c.label;
+          if (c.kind === "number")
+            return <NumberCell key={c.key} label={aria} value={typeof raw === "number" ? raw : undefined} onChange={(v) => setVal(c.key, v)} placeholder={typeof prevRaw === "number" ? String(prevRaw) : "0"} done={set.done} />;
+          if (c.kind === "duration") return <ClockCell key={c.key} label={aria} value={typeof raw === "number" ? raw : undefined} onChange={(v) => setVal(c.key, v)} done={set.done} />;
+          if (c.kind === "select")
+            return (
+              <select key={c.key} aria-label={aria} value={typeof raw === "string" ? raw : ""} onChange={(e) => setVal(c.key, e.target.value || undefined)} className={cn(cellBase, "appearance-none px-1 text-xs", set.done && "bg-success/15")}>
+                <option value="">{typeof prevRaw === "string" ? prevRaw : "–"}</option>
+                {c.options?.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            );
+          if (c.kind === "text")
+            return <input key={c.key} aria-label={aria} type="text" value={typeof raw === "string" ? raw : ""} maxLength={40} placeholder={typeof prevRaw === "string" ? prevRaw : "–"} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setVal(c.key, e.target.value)} className={cn(cellBase, "px-1 text-xs", set.done && "bg-success/15")} />;
+          const calc = formatValue(c, computeCol(c, set.custom));
+          return (
+            <div key={c.key} aria-label={aria} className="flex h-11 min-w-0 items-center justify-center truncate rounded-lg bg-accent/10 px-1 text-xs font-bold tabular-nums text-accent">
+              {calc || "–"}
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onToggleDone}
+          aria-label={set.done ? "Mark set incomplete" : "Mark set complete"}
+          aria-pressed={set.done}
+          className={cn("flex h-11 w-11 items-center justify-center rounded-lg transition-colors", set.done ? "bg-success text-on-success" : "bg-field text-muted hover:text-ink")}
+        >
+          <Check size={20} strokeWidth={3} />
+        </button>
+      </div>
+      {prev && (
+        <button type="button" onClick={onFillPrev} className="mt-1 block w-full truncate rounded-md px-1 text-left text-[11px] text-muted hover:text-ink">
+          Previous: {formatCustomSet(prev, tk)} <span className="text-accent">· tap to copy</span>
+        </button>
+      )}
+      {coachEdited && (
+        <div className="mt-1 px-1 pb-1">
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Edited by coach</span>
         </div>
       )}
     </div>

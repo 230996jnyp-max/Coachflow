@@ -26,6 +26,7 @@ import { CredentialsModal, genPassword, GOALS, type Credentials } from "@/compon
 import { ProgressHub } from "@/components/progress/ProgressHub";
 import { GymSelect } from "@/components/GymSelect";
 import { HomeAddressField } from "@/components/HomeAddressField";
+import { FocusPicker } from "@/components/sports/Focus";
 import { NumberInput } from "@/components/NumberInput";
 import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, Notice, SectionTitle, Select, Stat, Tabs, Textarea } from "@/components/ui";
 import { isGymComplete } from "@/lib/gyms";
@@ -277,6 +278,10 @@ function ProfileTab({ clientId }: { clientId: string }) {
               <GymSelect value={gym} onChange={setGym} noneLabel="None / decide later" />
             </Field>
           </div>
+          <Field label="Training focus" hint="What this client trains. Their exercise picker (and yours, when you log for them) follows it.">
+            <div />
+          </Field>
+          <FocusPicker clientId={clientId} />
           <HomeAddressField clientId={clientId} hint="Where you train this client at home. It’s saved as you type and offered as “Home” when booking." />
           <Field label="Medical / injury notes">
             <Textarea value={medical} onChange={(e) => setMedical(e.target.value)} />
