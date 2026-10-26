@@ -4,11 +4,12 @@ import { JOINTS, SUB_CATEGORIES, TISSUES } from "@/lib/sports";
 import { sanitizeTracking } from "@/lib/tracking";
 import type { Equipment, MuscleGroup, TrackingSchema } from "@/lib/types";
 import { buildIndex, matchExercise } from "../exerciseMatch";
+import { groqKeys, orderKeys } from "./aiKeys";
 import type { ParsedExercise, ParsedSet, ParsedWorkout } from "../workoutText";
 import { HttpError } from "./http";
 
 /*
- * AI workout reading via Groq's OpenAI-compatible API (key: GROQ_API_KEY, server only).
+ * AI workout reading via Groq's OpenAI-compatible API (keys: GROQ_API_KEYS and/or GROQ_API_KEY, server only; see aiKeys.ts).
  *  - gpt-oss-120b turns messy notes into structured workouts mapped onto the exercise library.
  *  - qwen3.8-27b (vision) transcribes photos / scanned pages into text first.
  * Everything the model returns is re-validated field by field; if anything fails the caller falls back to the local parser.
@@ -19,7 +20,7 @@ export const TEXT_MODEL = "openai/gpt-oss-120b";
 export const VISION_MODEL = "qwen/qwen3.8-27b";
 const KG_PER_LB = 0.45359237;
 
-export const aiConfigured = () => !!process.env.GROQ_API_KEY;
+export const aiConfigured = () => groqKeys().length > 0;
 
 interface ChatBody {
   model: string;
@@ -27,38 +28,65 @@ interface ChatBody {
   [k: string]: unknown;
 }
 
+// Keys that were rate-limited or rejected are set aside for a while (per server instance).
+const coolUntil = new Map<string, number>();
+let cursor = Math.floor(Math.random() * 1000);
+
 async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) throw new HttpError(503, "AI reading isn't set up.");
-  const send = () =>
+  const keys = groqKeys();
+  if (keys.length === 0) throw new HttpError(503, "AI reading isn't set up.");
+  const send = (key: string) =>
     fetch(GROQ_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
-  let res: Response;
-  try {
-    res = await send();
-    // A short rate-limit pause is worth waiting out once.
-    const wait = res.status === 429 ? Number(res.headers.get("retry-after")) : 0;
-    if (res.status === 429 && wait > 0 && wait <= 12) {
-      await new Promise((r) => setTimeout(r, wait * 1000 + 250));
-      res = await send();
+
+  let sawRateLimit = false;
+  // Up to two passes: if every key is busy, waiting for the soonest one to free up (up to 30 s) beats failing.
+  for (let pass = 0; pass < 2; pass++) {
+    for (const key of orderKeys(keys, coolUntil, Date.now(), cursor++)) {
+      let res: Response;
+      try {
+        res = await send(key);
+      } catch (e) {
+        if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw new HttpError(504, "The AI took too long to answer.");
+        continue; // couldn't reach Groq with this attempt: try the next key
+      }
+      if (res.ok) {
+        const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string } }[] } | null;
+        const content = data?.choices?.[0]?.message?.content;
+        if (!content) throw new HttpError(503, "The AI returned an empty answer.");
+        return content;
+      }
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      if (res.status === 429) {
+        sawRateLimit = true;
+        const wait = Number(res.headers.get("retry-after"));
+        coolUntil.set(key, Date.now() + (wait > 0 ? Math.min(wait, 60) * 1000 : 20_000));
+        continue;
+      }
+      if (res.status === 401 || res.status === 403) {
+        console.error("Groq key rejected", res.status); // never log the key or provider details
+        coolUntil.set(key, Date.now() + 30 * 60_000);
+        continue;
+      }
+      if (res.status >= 500) {
+        coolUntil.set(key, Date.now() + 5_000);
+        continue;
+      }
+      // Any other answer is about the request itself, so another key would not help.
+      console.error("Groq error", res.status, detail.slice(0, 200));
+      throw new HttpError(503, "The AI service is unavailable right now.");
     }
-  } catch (e) {
-    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
-    throw new HttpError(timedOut ? 504 : 503, timedOut ? "The AI took too long to answer." : "Couldn't reach the AI service.");
+    if (pass === 0) {
+      const soonest = Math.min(...keys.map((k) => coolUntil.get(k) ?? 0)) - Date.now();
+      if (!sawRateLimit || soonest > 30_000) break; // Groq frees a key within a minute at most; waiting beats failing
+      await new Promise((r) => setTimeout(r, Math.max(soonest, 0) + 250));
+    }
   }
-  if (!res.ok) {
-    // Never forward provider details (they can include account information).
-    console.error("Groq error", res.status, (await res.text().catch(() => "")).slice(0, 300));
-    throw new HttpError(503, res.status === 429 ? "The AI is busy right now. Try again in a minute." : "The AI service is unavailable right now.");
-  }
-  const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string } }[] } | null;
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new HttpError(503, "The AI returned an empty answer.");
-  return content;
+  throw new HttpError(503, sawRateLimit ? "The AI is busy right now. Try again in a minute." : "The AI service is unavailable right now.");
 }
 
 /* ---------------- Photos and scans -> text ---------------- */

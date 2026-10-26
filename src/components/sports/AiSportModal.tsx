@@ -136,7 +136,7 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
               Cancel
             </Button>
             <Button onClick={generate} disabled={busy || sport.trim().length < 2}>
-              <Sparkles size={15} /> {busy ? "Designing drills… (up to 40 s)" : "Generate drills"}
+              <Sparkles size={15} /> {busy ? "Designing drills…" : "Generate drills"}
             </Button>
           </>
         )
