@@ -8,6 +8,7 @@ import { PendingAttendance } from "@/components/attendance/PendingAttendance";
 import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
+import { FeelingBadge } from "@/components/workout/FeelingCard";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
@@ -148,6 +149,7 @@ export default function TrainerDashboard() {
                     {format(parseISO(w.startedAt), "EEE d MMM, h:mm a")} · {fmtDurationShort(w.durationSec)} · {workoutSetCount(w)} sets
                   </div>
                 </div>
+                <FeelingBadge feedback={w.feedback} />
                 <ChevronRight size={16} className="text-muted" />
               </Card>
             </Link>

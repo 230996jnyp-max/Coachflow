@@ -1,6 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
+import { NumberInput } from "@/components/NumberInput";
 import {
   ArrowDown,
   ArrowUp,
@@ -50,6 +51,7 @@ import {
 } from "@/lib/store";
 import type { Exercise, PRKind, SetType, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { cn, fmtClock, fmtDurationShort, fmtVolume, weightUnit } from "@/lib/utils";
+import { FeelingCard } from "./FeelingCard";
 import { makeRest, RestTimerBar, type RestState } from "./RestTimer";
 import { SET_CYCLE, SetHeader, SetRow } from "./SetRow";
 
@@ -322,14 +324,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
           </Field>
           {!w.liveStartedAt && (
             <Field label="Duration (minutes)" hint="Back-dated logs use a manual duration.">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={w.durationSec ? Math.round(w.durationSec / 60) : ""}
-                onChange={(e) => up((x) => ({ ...x, durationSec: Math.max(0, Number(e.target.value) || 0) * 60 }))}
-                placeholder="60"
-              />
+              <NumberInput label="Duration (min)" min={1} max={1440} allowEmpty placeholder="60" value={w.durationSec ? Math.round(w.durationSec / 60) : undefined} onChange={(v) => up((x) => ({ ...x, durationSec: (v ?? 0) * 60 }))} />
             </Field>
           )}
           <Field label="Session notes">
@@ -486,6 +481,12 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
         })}
       </div>
 
+      {!isActive && (
+        <Card className="mt-4 p-4">
+          <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} />
+        </Card>
+      )}
+
       <div className="mt-4 space-y-2">
         <Button variant="outline" size="lg" className="w-full" onClick={() => setPicker(true)}>
           <Plus size={18} /> Add Exercise
@@ -612,6 +613,9 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
           ) : (
             <Notice>Great work — consistency builds records. No new PRs this time.</Notice>
           )}
+          <div className="border-t border-line pt-4">
+            <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} notes={w.notes} onNotes={(v) => up((x) => ({ ...x, notes: v }))} />
+          </div>
         </div>
       </Modal>
     </div>

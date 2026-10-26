@@ -3,11 +3,12 @@
 import { format, parseISO } from "date-fns";
 import { Badge } from "@/components/ui";
 import { STATUS_LABEL, STATUS_STYLES } from "@/lib/scheduling";
-import { directionsUrl } from "@/lib/gyms";
+import { directionsUrl, isPostalCode } from "@/lib/gyms";
 import type { Booking, GymLocation } from "@/lib/types";
 
 export function gymName(b: Pick<Booking, "gymId" | "customGym">, gyms: GymLocation[]): string {
-  if (b.customGym) return b.customGym;
+  // A location typed as just a postal code reads better with the country: "Singapore 544656".
+  if (b.customGym) return isPostalCode(b.customGym) ? `Singapore ${b.customGym.trim()}` : b.customGym;
   return gyms.find((g) => g.id === b.gymId)?.name ?? "Location TBC";
 }
 

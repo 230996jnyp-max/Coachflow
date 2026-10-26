@@ -12,7 +12,7 @@ import type { GymLocation, PlaceInfo } from "./types";
 export interface CatalogGym {
   key: string;
   label: string;
-  group: "chain" | "place";
+  group: "chain" | "place" | "home";
   /** Brand name used to narrow the Google Maps search to that chain's branches. */
   brand?: string;
   /** When set, the coach types the exact place. */
@@ -29,6 +29,7 @@ export const CATALOG: CatalogGym[] = [
   { key: "jetts", label: "Jetts Fitness (24/7)", group: "chain", brand: "Jetts", place: BRANCH },
   { key: "golds-gym", label: "Gold's Gym", group: "chain", brand: "Gold's Gym", place: BRANCH },
   { key: "private-studio", label: "Private PT studio", group: "chain", place: { label: "Where is the studio?", placeholder: "Studio name or address", required: true } },
+  { key: "home", label: "Home (client's home)", group: "home", place: { label: "Home address", placeholder: "Street, building or 6-digit postal code", required: true } },
   { key: "condo", label: "Condo gym", group: "place", place: { label: "Where is the location?", placeholder: "Condo name, street or postal code", required: false } },
   { key: "park", label: "Park / outdoor", group: "place", place: { label: "Where is the location?", placeholder: "Park name or meeting point", required: false } },
   { key: "other", label: "Others", group: "place", place: { label: "Where is the location?", placeholder: "Gym name, street or 6-digit postal code", required: true } },
@@ -91,7 +92,7 @@ export function gymLabel(value: string | null | undefined, localGyms: GymLocatio
   const p = parseGymValue(value);
   if (!p) return "";
   if (p.kind === "local") return localGyms.find((g) => g.id === p.id)?.name ?? "";
-  if (p.kind === "place") return p.name;
+  if (p.kind === "place") return p.key === "home" ? `Home — ${p.name}` : p.name;
   const c = byKey.get(p.key)!;
   if (c.key === "other") return p.place.trim();
   return p.place.trim() ? `${c.label} — ${p.place.trim()}` : c.label;
@@ -117,15 +118,30 @@ export function gymToBooking(value: string, localGyms: GymLocation[]): { gymId: 
 export function placeForBooking(value: string, picked: PlaceInfo | null): PlaceInfo | null {
   const p = parseGymValue(value);
   if (p?.kind !== "place") return null;
-  if (picked && picked.placeId === p.placeId) return picked;
-  return { placeId: p.placeId, name: p.name, address: p.name };
+  const home = p.key === "home" ? { home: true } : {};
+  if (picked && picked.placeId === p.placeId) return { ...picked, ...home };
+  return { placeId: p.placeId, name: p.name, address: p.name, ...home };
 }
+
+/** Is this picker value the client's home? */
+export function isHomeValue(value: string | null | undefined): boolean {
+  const p = parseGymValue(value);
+  return (p?.kind === "cat" || p?.kind === "place") && p.key === "home";
+}
+
+/** Is this a session at the client's home? (Its address must stay private, so it can't be opened to other clients.) */
+export function isHomeLocation(b: { customGym?: string; place?: { home?: boolean } }): boolean {
+  return b.place?.home === true || /^Home( — |$)/.test(b.customGym ?? "");
+}
+
+/** A 6-digit Singapore postal code typed as the whole location. */
+export const isPostalCode = (t: string | undefined) => /^\d{6}$/.test((t ?? "").trim());
 
 /** Inverse of gymToBooking, for pre-filling a picker from an existing booking. */
 export function bookingToGymValue(b: { gymId: string | null; customGym?: string; place?: PlaceInfo }): string {
   if (b.gymId) return `gym:${b.gymId}`;
   if (b.place) {
-    const brandKey = CATALOG.find((c) => c.brand && b.place!.name.toLowerCase().includes(c.brand.toLowerCase()))?.key ?? "other";
+    const brandKey = b.place.home ? "home" : (CATALOG.find((c) => c.brand && b.place!.name.toLowerCase().includes(c.brand.toLowerCase()))?.key ?? "other");
     return placeValue(brandKey, b.place);
   }
   if (!b.customGym) return "";

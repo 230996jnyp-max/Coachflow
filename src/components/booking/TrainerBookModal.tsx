@@ -4,8 +4,9 @@ import { format } from "date-fns";
 import { CalendarPlus } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Button, Field, Input, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
-import { directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
+import { directionsUrl, gymToBooking, isGymComplete, isHomeValue, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { atTime, availableCredits, travelProblem, ymd } from "@/lib/scheduling";
 import { locOf } from "@/lib/travel";
@@ -122,6 +123,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
               if (p?.defaultGymId) {
                 setGym(p.defaultGymId);
                 setPlace(null);
+              } else if (isHomeValue(gym)) {
+                // A home address belongs to one client.
+                setGym("");
+                setPlace(null);
               }
             }}
           >
@@ -138,11 +143,11 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Start time">
-            <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
+            <TimeSelect value={time} onChange={setTime} />
           </Field>
         </div>
         <Field label="Gym location">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} homeClientId={clientId || undefined} />
         </Field>
         {db.settings.travelEnabled && (problem || waive) && (
           <div className="space-y-1">

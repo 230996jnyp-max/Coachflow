@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, email, int, notFound, readJson, route, str } from "@/lib/server/http";
 import { logCredit } from "@/lib/server/credits";
+import { applyHomeAddress } from "@/lib/server/schedule";
 import { purgeClientGroups } from "@/lib/server/groups";
 import { bookings, messages, users } from "@/lib/server/schema";
 import { purgeClientTraining } from "@/lib/server/training";
@@ -40,6 +41,7 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   if ("groupClassCredits" in body) p.groupClassCredits = int(body.groupClassCredits, "Group class credits", 0, 1000);
   if ("packageSize" in body) p.packageSize = int(body.packageSize, "Package size", 0, 1000);
   if (body.setPackageToBalance === true) p.packageSize = p.credits;
+  if ("homeAddress" in body) applyHomeAddress(p, body.homeAddress);
   if ("defaultGymId" in body) p.defaultGymId = typeof body.defaultGymId === "string" && body.defaultGymId ? body.defaultGymId.slice(0, 140) : null;
 
   const d = await db();

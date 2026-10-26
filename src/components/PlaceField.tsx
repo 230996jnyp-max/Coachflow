@@ -2,6 +2,7 @@
 
 import { LoaderCircle, MapPin, Search, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { isPostalCode } from "@/lib/gyms";
 import { mapsConfigured, newSession, placeDetails, searchBranches, searchPlaces, type Suggestion } from "@/lib/places";
 import type { PlaceInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -190,7 +191,15 @@ export function PlaceField({
             <li>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
+                  // A bare postal code: look up the real address instead of keeping six digits.
+                  if (isPostalCode(typed) && !manual) {
+                    setLoading(true);
+                    const res = await searchPlaces(typed).catch(() => null);
+                    setLoading(false);
+                    const first = res && res.ok ? res.items[0] : undefined;
+                    if (first) return void choose(first);
+                  }
                   onText(typed);
                   setFocused(false);
                 }}

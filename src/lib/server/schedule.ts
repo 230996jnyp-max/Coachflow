@@ -3,7 +3,7 @@ import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
 import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
-import { openProfile, sealProfile } from "./accounts";
+import { openProfile, sealProfile, type ProfileJson } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { attendance, bookings, coachSettings, groupSessions, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
@@ -56,7 +56,29 @@ export function parsePlace(raw: unknown): PlaceInfo | undefined {
     out.lat = r.lat;
     out.lng = r.lng;
   }
+  if (r.home === true) out.home = true;
   return out;
+}
+
+/** Applies a `homeAddress` request value ({ place } | { text } | null) to a client's profile. */
+export function applyHomeAddress(p: ProfileJson, raw: unknown): void {
+  if (raw === null) {
+    delete p.homePlace;
+    delete p.homeText;
+    return;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) throw badRequest("That home address isn't valid.");
+  const r = raw as Record<string, unknown>;
+  const place = parsePlace(r.place);
+  if (place) {
+    p.homePlace = { ...place, home: true };
+    delete p.homeText;
+  } else if (typeof r.text === "string") {
+    const t = r.text.replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!t) throw badRequest("Please enter the home address.");
+    p.homeText = t;
+    delete p.homePlace;
+  } else throw badRequest("That home address isn't valid.");
 }
 
 const aad = (id: string) => `booking:${id}`;

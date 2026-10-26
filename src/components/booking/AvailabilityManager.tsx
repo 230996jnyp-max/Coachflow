@@ -3,6 +3,7 @@
 import { format, parseISO } from "date-fns";
 import { Lock, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Button, Card, Field, IconButton, Input, Notice, SectionTitle } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { ymd } from "@/lib/scheduling";
@@ -89,10 +90,10 @@ export function AvailabilityManager() {
             </div>
             <div className="flex flex-wrap items-end gap-3">
               <Field label="From">
-                <Input type="time" value={start} onChange={(e) => setStart(e.target.value)} className="w-32" />
+                <TimeSelect value={start} onChange={setStart} className="w-40" />
               </Field>
               <Field label="To">
-                <Input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className="w-32" />
+                <TimeSelect value={end} onChange={setEnd} className="w-40" />
               </Field>
               <Button
                 disabled={days.length === 0}
@@ -120,10 +121,10 @@ export function AvailabilityManager() {
               <Input type="date" value={oneDate} onChange={(e) => setOneDate(e.target.value)} className="w-44" />
             </Field>
             <Field label="From">
-              <Input type="time" value={oneStart} onChange={(e) => setOneStart(e.target.value)} className="w-32" />
+              <TimeSelect value={oneStart} onChange={setOneStart} className="w-40" />
             </Field>
             <Field label="To">
-              <Input type="time" value={oneEnd} onChange={(e) => setOneEnd(e.target.value)} className="w-32" />
+              <TimeSelect value={oneEnd} onChange={setOneEnd} className="w-40" />
             </Field>
             <Button
               onClick={() => {
@@ -149,10 +150,10 @@ export function AvailabilityManager() {
               <Input type="date" value={blkDate} onChange={(e) => setBlkDate(e.target.value)} className="w-44" />
             </Field>
             <Field label="From">
-              <Input type="time" value={blkStart} onChange={(e) => setBlkStart(e.target.value)} className="w-32" />
+              <TimeSelect value={blkStart} onChange={setBlkStart} className="w-40" />
             </Field>
             <Field label="To">
-              <Input type="time" value={blkEnd} onChange={(e) => setBlkEnd(e.target.value)} className="w-32" />
+              <TimeSelect value={blkEnd} onChange={setBlkEnd} className="w-40" />
             </Field>
             <Field label="Label">
               <Input value={blkLabel} onChange={(e) => setBlkLabel(e.target.value)} className="w-44" />

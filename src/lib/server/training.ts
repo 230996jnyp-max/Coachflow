@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES, SEED_EXERCISES } from "@/data/exercises";
+import { PAIN_AREAS, type WorkoutFeedback } from "@/lib/feedback";
 import { starterTemplates } from "@/lib/seed";
 import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
@@ -106,6 +107,32 @@ function parseSet(raw: unknown): WorkoutSet {
   return s;
 }
 
+/** Pain / energy (whole numbers 0-10) and the body areas, rebuilt field by field. */
+function parseFeedback(raw: unknown): WorkoutFeedback | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const scale = (v: unknown, name: string) => {
+    const n = num(v, name, 0, 10);
+    return n === undefined ? undefined : Math.round(n);
+  };
+  const out: WorkoutFeedback = {};
+  const pain = scale(r.pain, "Pain");
+  const energy = scale(r.energy, "Energy");
+  if (pain !== undefined) out.pain = pain;
+  if (energy !== undefined) out.energy = energy;
+  const areas = arr(r.areas, "Pain areas", 20).filter((a): a is string => typeof a === "string" && (PAIN_AREAS as readonly string[]).includes(a));
+  if (areas.length && pain) out.areas = [...new Set(areas)];
+  return out.pain !== undefined || out.energy !== undefined ? out : undefined;
+}
+
+/** The pain score saved with a finished workout (so a high score is only reported to the coach once). */
+export async function savedPain(workoutId: string): Promise<number | undefined> {
+  const d = await db();
+  const [row] = await d.select().from(workouts).where(eq(workouts.id, workoutId)).limit(1);
+  if (!row || row.status !== "DONE") return undefined;
+  return openWorkout(row)?.feedback?.pain;
+}
+
 export function parseWorkout(raw: unknown): Workout {
   const r = obj(raw, "Workout");
   const status = r.status === "ACTIVE" ? "ACTIVE" : "DONE";
@@ -129,6 +156,8 @@ export function parseWorkout(raw: unknown): Workout {
     loggedById: id(r.loggedById, "Logged by"),
     exercises,
   };
+  const feedback = parseFeedback(r.feedback);
+  if (feedback) w.feedback = feedback;
   if (r.liveStartedAt) w.liveStartedAt = iso(r.liveStartedAt, "Start time");
   if (typeof r.templateId === "string" && r.templateId) w.templateId = id(r.templateId, "Template");
   if (typeof r.groupId === "string" && r.groupId) w.groupId = id(r.groupId, "Group");

@@ -25,8 +25,11 @@ import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/Tra
 import { CredentialsModal, genPassword, GOALS, type Credentials } from "@/components/clients/ClientForms";
 import { ProgressHub } from "@/components/progress/ProgressHub";
 import { GymSelect } from "@/components/GymSelect";
+import { HomeAddressField } from "@/components/HomeAddressField";
+import { NumberInput } from "@/components/NumberInput";
 import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, Notice, SectionTitle, Select, Stat, Tabs, Textarea } from "@/components/ui";
 import { isGymComplete } from "@/lib/gyms";
+import { FeelingBadge } from "@/components/workout/FeelingCard";
 import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits, reservedCount } from "@/lib/scheduling";
@@ -197,7 +200,10 @@ function Overview({ clientId, onTab }: { clientId: string; onTab: (t: Tab) => vo
                       {format(parseISO(w.startedAt), "EEE d MMM")} · {fmtVolume(workoutVolume(w, exMap), unit)}
                     </div>
                   </div>
-                  <span className="text-xs text-accent">View →</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <FeelingBadge feedback={w.feedback} />
+                    <span className="text-xs text-accent">View →</span>
+                  </span>
                 </Card>
               </Link>
             ))}
@@ -271,6 +277,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
               <GymSelect value={gym} onChange={setGym} noneLabel="None / decide later" />
             </Field>
           </div>
+          <HomeAddressField clientId={clientId} hint="Where you train this client at home. It’s saved as you type and offered as “Home” when booking." />
           <Field label="Medical / injury notes">
             <Textarea value={medical} onChange={(e) => setMedical(e.target.value)} />
           </Field>
@@ -316,7 +323,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
           </div>
           <div className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
             <Field label="Sell a new package (sessions)">
-              <Input type="number" inputMode="numeric" min={1} value={topUp} onChange={(e) => setTopUp(Number(e.target.value))} className="w-32" />
+              <NumberInput label="Sessions to add" min={1} max={1000} value={topUp} onChange={(v) => setTopUp(v ?? topUp)} className="w-40" />
             </Field>
             <Button
               disabled={topUp < 1}
@@ -349,7 +356,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
           </div>
           <div className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
             <Field label="Add group class credits">
-              <Input type="number" inputMode="numeric" min={1} value={groupTopUp} onChange={(e) => setGroupTopUp(Number(e.target.value))} className="w-32" />
+              <NumberInput label="Group credits to add" min={1} max={1000} value={groupTopUp} onChange={(v) => setGroupTopUp(v ?? groupTopUp)} className="w-40" />
             </Field>
             <Button disabled={groupTopUp < 1} onClick={async () => setActionError(await adjustGroupCreditsBy(clientId, groupTopUp))}>
               Add {groupTopUp} group credits

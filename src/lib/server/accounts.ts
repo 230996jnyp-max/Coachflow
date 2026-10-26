@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
-import type { ClientGoal, ClientProfile, UnitSystem, User } from "@/lib/types";
+import type { ClientGoal, ClientProfile, PlaceInfo, UnitSystem, User } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { users, type UserRow } from "./schema";
@@ -18,6 +18,9 @@ export interface ProfileJson {
   startDate: string;
   /** Group-class credits (older profiles do not have the field yet: read it with `?? 0`). */
   groupClassCredits?: number;
+  /** Home address for sessions at the client's home (a picked place, or typed text). */
+  homePlace?: PlaceInfo;
+  homeText?: string;
 }
 
 export const GOALS: ClientGoal[] = ["Hypertrophy", "Fat Loss", "Strength", "Conditioning", "General Fitness"];
@@ -67,6 +70,8 @@ export function toProfile(row: UserRow): ClientProfile {
     startDate: p.startDate,
     coachId: row.coachId ?? "",
     groupClassCredits: p.groupClassCredits ?? 0,
+    ...(p.homePlace ? { homePlace: p.homePlace } : {}),
+    ...(p.homeText ? { homeText: p.homeText } : {}),
   };
 }
 

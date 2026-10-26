@@ -3,6 +3,7 @@
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
+import { NumberInput } from "@/components/NumberInput";
 import { Button, Field, IconButton, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
 import { isGymComplete } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
@@ -120,10 +121,10 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
             </div>
           </Field>
           <Field label="Session package credits">
-            <Input type="number" inputMode="numeric" min={0} value={credits} onChange={(e) => setCredits(Number(e.target.value))} />
+            <NumberInput label="Session package credits" min={0} max={1000} value={credits} onChange={(v) => setCredits(v ?? credits)} />
           </Field>
           <Field label="Group class credits" hint="Used for group classes and partner sessions. Can be changed any time.">
-            <Input type="number" inputMode="numeric" min={0} value={groupCredits} onChange={(e) => setGroupCredits(Number(e.target.value))} />
+            <NumberInput label="Group class credits" min={0} max={1000} value={groupCredits} onChange={(v) => setGroupCredits(v ?? groupCredits)} />
           </Field>
           <Field label="Phone / WhatsApp">
             <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+65 9xxx xxxx" inputMode="tel" />

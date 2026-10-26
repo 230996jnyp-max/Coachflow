@@ -1,3 +1,5 @@
+import type { WorkoutFeedback } from "./feedback";
+
 // Domain models. All weights are stored in kg and all lengths in cm;
 // the UI converts to the viewer's preferred unit system.
 
@@ -49,6 +51,9 @@ export interface ClientProfile {
   coachId: string;
   /** Remaining group-class credits (separate from the 1-on-1 package). Used when a class is completed. */
   groupClassCredits: number;
+  /** Where the coach trains this client at home (a picked map place, or typed text when maps are unavailable). Private: only the client and their coach see it. */
+  homePlace?: PlaceInfo;
+  homeText?: string;
 }
 
 export type MuscleGroup =
@@ -164,6 +169,8 @@ export interface Workout {
   templateId?: string;
   /** Group class / shared session this workout belongs to (every attendee gets their own copy). */
   groupId?: string;
+  /** How the session felt (pain / energy 0-10, where it hurt). Asked when a workout is finished; always optional. */
+  feedback?: WorkoutFeedback;
   exercises: WorkoutExercise[];
 }
 
@@ -313,6 +320,8 @@ export interface PlaceInfo {
   address: string;
   lat?: number;
   lng?: number;
+  /** A client's home (never shown to other clients, so such a session can't be opened to partners). */
+  home?: boolean;
 }
 
 export interface AppSettings {

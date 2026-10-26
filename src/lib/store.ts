@@ -575,6 +575,26 @@ export async function updateClient(id: string, patch: { user?: Partial<User>; pr
   return null;
 }
 
+/** Saves where a client trains at home (their own profile, or the coach editing a client). Private to the client and their coach. */
+export async function saveHomeAddress(clientId: string, home: { place?: PlaceInfo | null; text?: string } | null): Promise<string | null> {
+  const body = { homeAddress: home === null ? null : home.place ? { place: home.place } : { text: home.text ?? "" } };
+  const self = state.sessionUserId === clientId;
+  const r = self ? await api("/api/me", { method: "PATCH", body }) : await api<ClientResponse>(`/api/clients/${clientId}`, { method: "PATCH", body });
+  if (!r.ok) return r.error ?? "Could not save the home address.";
+  mutate((db) => ({
+    ...db,
+    clients: db.clients.map((c) => {
+      if (c.id !== clientId) return c;
+      const { homePlace: _p, homeText: _t, ...rest } = c;
+      void _p;
+      void _t;
+      if (home === null) return rest;
+      return home.place ? { ...rest, homePlace: { ...home.place, home: true } } : { ...rest, homeText: home.text ?? "" };
+    }),
+  }));
+  return null;
+}
+
 export async function resetClientPassword(id: string, password: string): Promise<string | null> {
   const r = await api(`/api/clients/${id}/password`, { body: { password } });
   return r.ok ? null : (r.error ?? "Could not reset the password.");
@@ -1005,6 +1025,18 @@ export async function rescheduleBooking(id: string, start: Date, gymId: string |
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");
+  return null;
+}
+
+/** Changes a session's date/time, place, focus and comments. The coach may do all of it; a client may too, within the notice rules and open slots. */
+export async function editBooking(id: string, patch: { start?: Date; gymId?: string | null; customGym?: string; place?: PlaceInfo | null; focus?: SessionFocus; notes?: string; waiveTravel?: boolean }, role: Role): Promise<string | null> {
+  const r = await api<{ booking: Booking; moved?: boolean }>(`/api/bookings/${id}`, {
+    method: "PATCH",
+    body: { action: "edit", ...patch, start: patch.start?.toISOString(), place: patch.place ?? undefined, waiveTravel: patch.waiveTravel || undefined },
+  });
+  if (!r.ok || !r.data) return r.error ?? "Could not save the changes.";
+  replaceBooking(r.data.booking);
+  if (r.data.moved && state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", role === "CLIENT" ? "TRAINER" : "CLIENT");
   return null;
 }
 

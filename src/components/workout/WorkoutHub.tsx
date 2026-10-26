@@ -5,6 +5,7 @@ import { ChevronRight, ClipboardList, ClipboardPaste, Download, History, Pencil,
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { FeelingBadge } from "@/components/workout/FeelingCard";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, SectionTitle } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { doneWorkouts, workoutSetCount, workoutVolume } from "@/lib/stats";
@@ -162,6 +163,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
                         {w.loggedBy === "TRAINER" && " · by trainer"}
                       </div>
                     </div>
+                    <FeelingBadge feedback={w.feedback} />
                     {prs > 0 && (
                       <Badge className="border-pr/30 bg-pr/15 text-pr">
                         <Trophy size={11} /> {prs}

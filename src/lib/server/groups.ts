@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { SEED_EXERCISES } from "@/data/exercises";
+import { isHomeLocation } from "@/lib/gyms";
 import { findPrevious } from "@/lib/stats";
 import type { AppNotification, Exercise, GroupMember, GroupRequest, GroupSession, MemberStatus, PlaceInfo, TemplateExercise, Workout, WorkoutSet } from "@/lib/types";
 import { openProfile, usersByIds } from "./accounts";
@@ -666,6 +667,7 @@ export async function shareBooking(me: UserRow, bookingId: string, capacity: num
   const [existing] = await d.select().from(groupSessions).where(and(eq(groupSessions.bookingId, bookingId), ne(groupSessions.status, "CANCELLED"))).limit(1);
   if (existing) throw conflict("This session is already open to partners.");
   const bk = toBooking(b);
+  if (isHomeLocation(bk)) throw badRequest("Sessions at home stay private, so they can't be opened to partners.");
   await logCredit({ clientId: me.id, coachId: b.coachId, pool: "GROUP", kind: "RESERVED", delta: 0, sessionType: "Group Class", label: "Partner session", note: "Opened to partners — uses a group credit instead of a 1-on-1 credit" });
   return insertGroup({
     coachId: b.coachId,
