@@ -37,6 +37,7 @@ export function NicheStep() {
   const [ai, setAi] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
 
   // The step replaces whatever page the coach was on, so start at the top.
   useEffect(() => {
@@ -55,13 +56,14 @@ export function NicheStep() {
     setBusy(false);
     if (!ok) return setError("Couldn't save your choice. Check your connection and try again.");
     void ensureNiches(selected); // builds the library and starter routines in the background
-    finishNicheStep();
+    setLeaving(true); // fade out, then the app fades in
+    setTimeout(finishNicheStep, 200);
   };
 
   const cards = [...CORE_SPORTS, ...customs];
 
   return (
-    <div className="pt-safe pb-safe min-h-dvh px-4 py-8">
+    <div className={cn("pt-safe pb-safe min-h-dvh px-4 py-8", leaving ? "fade-out" : "animate-fade-in")}>
       <div className="absolute right-4 top-4">
         <ThemeMenu />
       </div>

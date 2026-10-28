@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { HomeAddressField } from "@/components/HomeAddressField";
+import { UsernameField } from "@/components/UsernameField";
 import { SpecialtiesCard } from "@/components/sports/Focus";
 import { requestNicheStep } from "@/lib/nicheGate";
 import { InstallButton } from "@/components/InstallButton";
@@ -82,6 +83,9 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+          </div>
+          <div className="border-t border-line pt-4">
+            <UsernameField />
           </div>
           <div className="space-y-3 border-t border-line pt-4">
             <div>

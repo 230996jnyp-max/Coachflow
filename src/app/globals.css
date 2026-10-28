@@ -186,3 +186,28 @@ input[type="number"] {
     outline-offset: 8px;
   }
 }
+
+/* Soft hand-over between sign-in, the niche step and the app. Opacity only: a transform would trap fixed-position bars and modals. */
+@keyframes cf-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: cf-fade-in 0.35s ease-out both;
+}
+.fade-out {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+  .fade-out {
+    transition: none;
+  }
+}

@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { GOALS, loadClientFor, openProfile, sealProfile, toProfile, toUser } from "@/lib/server/accounts";
+import { GOALS, loadClientFor, openProfile, parseUsername, sealProfile, setUsername, toProfile, toUser } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, email, int, notFound, readJson, route, str } from "@/lib/server/http";
@@ -24,6 +24,12 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   const { id } = await ctx.params;
   const row = await loadClientFor(me, id);
   if (!row) throw notFound("Client not found.");
+
+  // The coach can rename a client's sign-in (for example when they forget it). Their sessions stay signed in.
+  if ("username" in body) {
+    const username = parseUsername(body.username, false);
+    if (username !== row.username) await setUsername(id, username);
+  }
 
   const p = openProfile(row);
   const before = { credits: p.credits, group: p.groupClassCredits ?? 0 };

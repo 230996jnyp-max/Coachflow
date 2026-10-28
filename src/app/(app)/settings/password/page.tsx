@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, Field, Input, Notice, PageHeader } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
-import { changePassword } from "@/lib/store";
+import { changePassword, changeUsername } from "@/lib/store";
 
 /** After a successful change we show the confirmation briefly, then land on the user's home screen. */
 const REDIRECT_MS = 1000;
@@ -17,6 +17,8 @@ export default function PasswordPage() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  // On the first sign-in the person can also pick their own username (optional: they can keep the one they were given).
+  const [username, setUsername] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -40,6 +42,16 @@ export default function PasswordPage() {
     }
     inFlight.current = true;
     setBusy(true);
+    const wanted = (username ?? user.username).trim().toLowerCase();
+    if (user.mustChangePassword && wanted !== user.username) {
+      const nameErr = await changeUsername(wanted);
+      if (nameErr) {
+        setBusy(false);
+        inFlight.current = false;
+        setError(nameErr);
+        return;
+      }
+    }
     const err = await changePassword(current, next);
     setBusy(false);
     if (err) {
@@ -77,6 +89,11 @@ export default function PasswordPage() {
       <Card className="p-5">
         <form onSubmit={submit} className="space-y-4" aria-busy={busy}>
           <fieldset disabled={busy || done} className="space-y-4">
+            {user.mustChangePassword && (
+              <Field label="Username" hint="Optional: choose your own, or keep this one. You can change it later in Settings.">
+                <Input value={username ?? user.username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={100} />
+              </Field>
+            )}
             <Field label="Current password">
               <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
             </Field>

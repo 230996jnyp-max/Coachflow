@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { openProfile, sealProfile } from "@/lib/server/accounts";
-import { requireUser } from "@/lib/server/auth";
+import { openProfile, parseUsername, sealProfile, setUsername } from "@/lib/server/accounts";
+import { isStaff, requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, forbidden, readJson, route } from "@/lib/server/http";
 import { applyHomeAddress } from "@/lib/server/schedule";
@@ -10,7 +10,7 @@ import { users } from "@/lib/server/schema";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** PATCH { unit?, hasCompletedOnboarding?, themePreference?, homeAddress? } — personal preferences (homeAddress: a client's own home, { place } | { text } | null). */
+/** PATCH { unit?, hasCompletedOnboarding?, themePreference?, homeAddress?, username? } — personal preferences (homeAddress: a client's own home, { place } | { text } | null). */
 export const PATCH = route(async (req) => {
   const body = await readJson(req);
   const me = await requireUser();
@@ -32,6 +32,11 @@ export const PATCH = route(async (req) => {
     const p = openProfile(me);
     applyHomeAddress(p, body.homeAddress);
     set.profileEnc = sealProfile(me.id, p);
+  }
+  if ("username" in body) {
+    const username = parseUsername(body.username, isStaff(me));
+    if (username !== me.username) await setUsername(me.id, username);
+    if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined && set.profileEnc === undefined) return NextResponse.json({ ok: true, username });
   }
   if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined && set.profileEnc === undefined) throw badRequest("Nothing to change.");
   const d = await db();

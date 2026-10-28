@@ -330,25 +330,28 @@ export interface TrainingPayload {
   now: string;
 }
 
-export async function loadTraining(me: UserRow, since?: Date): Promise<TrainingPayload> {
+/** `recentDays`: only send workouts started in the last N days (plus any in progress), so the first screen appears sooner; `ids` still lists every workout. */
+export async function loadTraining(me: UserRow, since?: Date, recentDays?: number): Promise<TrainingPayload> {
   const d = await db();
   const clientIds = await writableClientIds(me);
-
-  const idRows = await d.select({ id: workouts.id }).from(workouts).where(inArray(workouts.clientId, clientIds));
-  const wRows = since
-    ? await d.select().from(workouts).where(and(inArray(workouts.clientId, clientIds), gte(workouts.updatedAt, since)))
-    : await d.select().from(workouts).where(inArray(workouts.clientId, clientIds));
-
-  const tRows = await d
-    .select()
-    .from(templates)
-    .where(me.role === "CLIENT" && me.coachId ? or(eq(templates.ownerId, me.id), and(eq(templates.ownerId, me.coachId), eq(templates.shared, true))) : eq(templates.ownerId, me.id));
-
   const owners = me.role === "CLIENT" ? [me.id, ...(me.coachId ? [me.coachId] : [])] : clientIds;
-  const xRows = await d.select().from(customExercises).where(inArray(customExercises.ownerId, owners));
+  const mine = inArray(workouts.clientId, clientIds);
+  const recent = recentDays ? or(gte(workouts.startedAt, new Date(Date.now() - recentDays * 86_400_000)), eq(workouts.status, "ACTIVE")) : undefined;
+
+  // The queries don't depend on each other, so they run together: over HTTP each one is a round trip to the database.
+  const [idRows, wRows, tRows, xRows, tracking] = await Promise.all([
+    d.select({ id: workouts.id }).from(workouts).where(mine),
+    d.select().from(workouts).where(since ? and(mine, gte(workouts.updatedAt, since)) : recent ? and(mine, recent) : mine),
+    d
+      .select()
+      .from(templates)
+      .where(me.role === "CLIENT" && me.coachId ? or(eq(templates.ownerId, me.id), and(eq(templates.ownerId, me.coachId), eq(templates.shared, true))) : eq(templates.ownerId, me.id)),
+    d.select().from(customExercises).where(inArray(customExercises.ownerId, owners)),
+    trackingOverrides(me),
+  ]);
 
   return {
-    tracking: await trackingOverrides(me),
+    tracking,
     workouts: wRows.map(openWorkout).filter(present),
     ids: idRows.map((r) => r.id),
     templates: tRows.map(openTemplate).filter(present),

@@ -246,14 +246,21 @@ export async function loadGroups(me: UserRow): Promise<GroupsPayload> {
   const coachId = me.role === "CLIENT" ? me.coachId : me.id;
   const empty: GroupsPayload = { groups: [], requests: [], notifications: [], unread: 0 };
   if (!coachId) return empty;
-  await expireRequests(coachId);
   const d = await db();
   const since = new Date(Date.now() - 120 * 86400000);
-  const rows = await d.select().from(groupSessions).where(and(eq(groupSessions.coachId, coachId), gt(groupSessions.endAt, since)));
-  const members = await membersOf(rows.map((r) => r.id));
-  const att = new Map([...(await attendanceFor("GROUP", rows.map((r) => r.id))), ...(await attendanceFor("BOOKING", rows.filter((r) => r.bookingId).map((r) => r.bookingId as string)))]);
+  // The coach's templates only supply class names, so they load alongside the sessions (independent reads run together).
+  const [, rows, tRows] = await Promise.all([
+    expireRequests(coachId),
+    d.select().from(groupSessions).where(and(eq(groupSessions.coachId, coachId), gt(groupSessions.endAt, since))),
+    d.select().from(templates).where(eq(templates.ownerId, coachId)),
+  ]);
+  const [members, attGroup, attBooking] = await Promise.all([
+    membersOf(rows.map((r) => r.id)),
+    attendanceFor("GROUP", rows.map((r) => r.id)),
+    attendanceFor("BOOKING", rows.filter((r) => r.bookingId).map((r) => r.bookingId as string)),
+  ]);
+  const att = new Map([...attGroup, ...attBooking]);
 
-  const tRows = await d.select().from(templates).where(eq(templates.ownerId, coachId));
   const templateNames = new Map<string, string>();
   for (const t of tRows) {
     try {

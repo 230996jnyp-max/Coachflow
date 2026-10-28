@@ -236,6 +236,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
   const found = clients.find((c) => c.user.id === clientId)!;
   const { user, profile } = found;
   const [name, setName] = useState(user.name);
+  const [username, setUsername] = useState(user.username);
   const [phone, setPhone] = useState(profile.phone);
   const [email, setEmail] = useState(profile.email);
   const [goal, setGoal] = useState<ClientGoal>(profile.goal);
@@ -258,8 +259,8 @@ function ProfileTab({ clientId }: { clientId: string }) {
             <Field label="Full name">
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Username">
-              <Input value={user.username} disabled />
+            <Field label="Username" hint="What this client signs in with. Changing it doesn't sign them out.">
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={32} />
             </Field>
             <Field label="Phone / WhatsApp">
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
@@ -288,12 +289,12 @@ function ProfileTab({ clientId }: { clientId: string }) {
           </Field>
           <div className="flex items-center gap-3">
             <Button
-              disabled={!name.trim()}
+              disabled={!name.trim() || username.trim().length < 3}
               onClick={async () => {
                 setActionError(null);
                 if (gym && !isGymComplete(gym)) return setActionError("Please type the place name for the default gym.");
                 const err = await updateClient(clientId, {
-                  user: { name: name.trim() },
+                  user: { name: name.trim(), username: username.trim().toLowerCase() },
                   profile: { phone: phone.trim(), email: email.trim(), goal, defaultGymId: gym || null, medicalNotes: medical.trim() },
                 });
                 if (err) return setActionError(err);

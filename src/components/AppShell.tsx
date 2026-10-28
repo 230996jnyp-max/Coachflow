@@ -110,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const showBanner = activeWorkout && !pathname.startsWith(`/workout/${activeWorkout.id}`);
 
   return (
-    <div className="min-h-dvh bg-bg">
+    <div className="animate-fade-in min-h-dvh bg-bg">
       {/* Desktop / tablet sidebar */}
       <aside
         className={cn(

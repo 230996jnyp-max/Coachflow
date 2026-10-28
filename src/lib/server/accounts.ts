@@ -1,8 +1,9 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { ClientGoal, ClientProfile, PlaceInfo, UnitSystem, User } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
+import { badRequest, conflict, isUniqueViolation, str } from "./http";
 import { users, type UserRow } from "./schema";
 
 /** Everything private about a client, stored encrypted in users.profile_enc. */
@@ -126,4 +127,37 @@ export async function usersByIds(ids: string[]): Promise<UserRow[]> {
   if (ids.length === 0) return [];
   const d = await db();
   return d.select().from(users).where(inArray(users.id, ids));
+}
+
+/**
+ * A username: 3-32 letters, numbers, dots, dashes and underscores. Staff may also keep an email-style one (letters, numbers and
+ * . _ @ + - up to 100), because that is what coaches sign in with today.
+ */
+export function parseUsername(raw: unknown, staff: boolean): string {
+  const u = str(raw, "Username", { min: 3, max: staff ? 100 : 32 }).toLowerCase();
+  if (!(staff ? /^[a-z0-9_.@+-]+$/ : /^[a-z0-9_.-]+$/).test(u)) throw badRequest("Username can only use letters, numbers, dots, dashes and underscores.");
+  return u;
+}
+
+/** Is this name (as a username, or as somebody's sign-in email) already in use by someone else? */
+export async function usernameTaken(username: string, exceptId: string): Promise<boolean> {
+  const d = await db();
+  const rows = await d
+    .select({ id: users.id })
+    .from(users)
+    .where(and(ne(users.id, exceptId), or(eq(users.username, username), sql`lower(${users.email}) = ${username}`)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** Changes a username after checking it is free. Sessions stay signed in; only the sign-in name changes. */
+export async function setUsername(targetId: string, username: string): Promise<void> {
+  if (await usernameTaken(username, targetId)) throw conflict("That username is already taken.");
+  const d = await db();
+  try {
+    await d.update(users).set({ username, updatedAt: new Date() }).where(eq(users.id, targetId));
+  } catch (e) {
+    if (isUniqueViolation(e)) throw conflict("That username is already taken.");
+    throw e;
+  }
 }

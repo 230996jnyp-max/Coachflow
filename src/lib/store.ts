@@ -8,7 +8,7 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
-import { clearActive, isIdleStale, markActive, rememberUsername, setIdleNotice } from "./idle";
+import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
 import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
@@ -70,6 +70,8 @@ let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let cloudSafe = false;
 /** Server time of the last successful training sync (workouts are fetched incrementally from here). */
 let trainingSince: string | undefined;
+/** The first load only brought recent workouts; the next refresh must read everything. */
+let trainingPartial = false;
 /** Set once the first server load finished, so changes made before it are not mistaken for edits. */
 let trainingLoaded = false;
 
@@ -236,7 +238,7 @@ function applyTraining(data: TrainingData) {
 export async function refreshTraining(full = false): Promise<boolean> {
   const forUser = state.sessionUserId;
   if (!forUser) return false;
-  const q = !full && trainingSince ? `?since=${encodeURIComponent(trainingSince)}` : "";
+  const q = !full && !trainingPartial && trainingSince ? `?since=${encodeURIComponent(trainingSince)}` : "";
   const r = await api<TrainingData>(`/api/training${q}`);
   if (state.sessionUserId !== forUser) return false;
   if (r.status === 401) {
@@ -246,6 +248,7 @@ export async function refreshTraining(full = false): Promise<boolean> {
   if (!r.ok || !r.data) return false;
   applyTraining(r.data);
   trainingSince = new Date(Date.parse(r.data.now) - 10_000).toISOString();
+  trainingPartial = false;
   return true;
 }
 
@@ -287,6 +290,10 @@ interface BootstrapData {
 
 /** Loads the session (if any) and this user's device-local data. Returns true when signed in. */
 async function establishSession(): Promise<boolean> {
+  // A device that was active recently (or has just signed in) is almost certainly still signed in, so everything the first screen
+  // needs is requested at once instead of one after another. Recent workouts come first; the full history follows in the background.
+  const likely = readLastActive() !== null && !isIdleStale();
+  const early = likely ? { training: api<TrainingData>("/api/training?recent=1"), schedule: api<ScheduleData>("/api/schedule"), groups: api<GroupsData>("/api/groups") } : null;
   const r = await api<BootstrapData>("/api/bootstrap");
   if (!r.ok || !r.data?.user) {
     // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
@@ -296,6 +303,9 @@ async function establishSession(): Promise<boolean> {
     return false;
   }
   const me = r.data.user;
+  const trainingReq = early?.training ?? api<TrainingData>("/api/training?recent=1");
+  const scheduleReq = early?.schedule ?? api<ScheduleData>("/api/schedule");
+  const groupsReq = early?.groups ?? api<GroupsData>("/api/groups");
   let local: DB | undefined;
   try {
     local = await get<DB>(localKey(me.id));
@@ -310,39 +320,54 @@ async function establishSession(): Promise<boolean> {
   exerciseQ.clear();
   trainingSince = undefined;
   trainingLoaded = false;
+  trainingPartial = false;
   cloudSafe = false;
 
-  const migrated = await migrateLocalData(me, local);
-  const training = await api<TrainingData>("/api/training");
+  // A device that has not uploaded its old local data yet does so first, then reads what the server has.
+  let migrated = true;
+  let training = await trainingReq;
+  try {
+    if (!(await get(`coachflow-cloud-v1:${me.id}`))) {
+      migrated = await migrateLocalData(me, local);
+      training = await api<TrainingData>("/api/training?recent=1");
+    }
+  } catch {
+    migrated = await migrateLocalData(me, local);
+  }
   const serverOk = training.ok && !!training.data;
   cloudSafe = migrated && serverOk;
   const server = training.data;
+  const [sched, grp] = await Promise.all([scheduleReq, groupsReq]);
 
-  setState({
-    ready: true,
-    sessionUserId: me.id,
-    db: {
-      ...local,
-      settings: { ...DEFAULT_SETTINGS, ...local.settings },
-      users: r.data.users,
-      clients: r.data.clients,
-      gyms: [],
-      slots: [],
-      bookings: [],
-      groups: [],
-      groupRequests: [],
-      notifications: [],
-      // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
-      workouts: server ? server.workouts : local.workouts,
-      templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
-      exercises: server ? [...SEED_EXERCISES, ...(server.global ?? []), ...server.exercises] : local.exercises,
-      tracking: server?.tracking ?? local.tracking ?? {},
-    },
-  });
+  const base: DB = {
+    ...local,
+    settings: { ...DEFAULT_SETTINGS, ...local.settings },
+    users: r.data.users,
+    clients: r.data.clients,
+    gyms: [],
+    slots: [],
+    bookings: [],
+    groups: [],
+    groupRequests: [],
+    notifications: [],
+    // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
+    workouts: server ? server.workouts : local.workouts,
+    templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
+    exercises: server ? [...SEED_EXERCISES, ...(server.global ?? []), ...server.exercises] : local.exercises,
+    tracking: server?.tracking ?? local.tracking ?? {},
+  };
+  // The schedule (with the coach's niches) and the classes are in before the app appears, so nothing pops in afterwards.
+  const withSchedule = sched.ok && sched.data ? { ...base, ...scheduleSlice(base, sched.data) } : base;
+  const withGroups = grp.ok && grp.data ? { ...withSchedule, groups: grp.data.groups, groupRequests: grp.data.requests, notifications: grp.data.notifications } : withSchedule;
+  setState({ ready: true, sessionUserId: me.id, db: withGroups });
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
   trainingLoaded = serverOk;
-  await refreshSchedule();
-  await refreshGroups();
+  if (serverOk) {
+    trainingPartial = true;
+    void refreshTraining(true); // the rest of the workout history, quietly
+  }
+  if (!(sched.ok && sched.data)) await refreshSchedule();
+  if (!(grp.ok && grp.data)) await refreshGroups();
   return true;
 }
 
@@ -477,12 +502,13 @@ export function useNow(intervalMs = 30_000): Date {
 export async function login(username: string, password: string): Promise<string | null> {
   const r = await api("/api/auth/login", { body: { username, password } });
   if (!r.ok) return r.error ?? "Login failed.";
+  markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
   if (ok) {
     rememberUsername(username); // only the username is remembered on this device, never the password
-    markActive();
     requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
   }
+  if (!ok) clearActive();
   return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
 }
 
@@ -501,6 +527,16 @@ export async function logout() {
   trainingSince = undefined;
   await api("/api/auth/logout", { method: "POST", body: {} });
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
+}
+
+/** Changes the signed-in person's own username (coaches may also keep signing in with their email). Returns an error message or null. */
+export async function changeUsername(username: string): Promise<string | null> {
+  const r = await api<{ username?: string }>("/api/me", { method: "PATCH", body: { username } });
+  if (!r.ok) return r.error ?? "Could not change the username.";
+  const me = state.sessionUserId;
+  const next = r.data?.username ?? username.trim().toLowerCase();
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === me ? { ...u, username: next } : u)) }));
+  return null;
 }
 
 export async function changePassword(current: string, next: string): Promise<string | null> {
@@ -584,6 +620,7 @@ export async function createClient(input: NewClientInput): Promise<{ ok: true; i
 export async function updateClient(id: string, patch: { user?: Partial<User>; profile?: Partial<ClientProfile> }): Promise<string | null> {
   const body: Record<string, unknown> = { ...(patch.profile ?? {}) };
   if (patch.user?.name !== undefined) body.name = patch.user.name;
+  if (patch.user?.username !== undefined) body.username = patch.user.username;
   delete body.coachId;
   delete body.startDate;
   const r = await api<ClientResponse>(`/api/clients/${id}`, { method: "PATCH", body });
@@ -943,18 +980,19 @@ interface ScheduleData {
   bookings: Booking[];
 }
 
-function applySchedule(data: ScheduleData) {
+/** The parts of the local database that come from the schedule endpoint. */
+function scheduleSlice(db: DB, data: ScheduleData): Pick<DB, "gyms" | "slots" | "bookings" | "settings"> {
   const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
-  setState({
-    ...state,
-    db: {
-      ...state.db,
-      gyms: data.gyms,
-      slots: data.slots,
-      bookings: data.bookings,
-      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
-    },
-  });
+  return {
+    gyms: data.gyms,
+    slots: data.slots,
+    bookings: data.bookings,
+    settings: { ...db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
+  };
+}
+
+function applySchedule(data: ScheduleData) {
+  setState({ ...state, db: { ...state.db, ...scheduleSlice(state.db, data) } });
 }
 
 /** Re-reads the coach's rules, gyms, availability and bookings (a client sees their own coach's, with other clients' sessions shown only as "booked"). */

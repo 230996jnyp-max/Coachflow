@@ -166,23 +166,25 @@ export async function loadSchedule(me: UserRow) {
   const coachId = coachIdFor(me);
   if (!coachId) return { settings: DEFAULT_RULES, gyms: [], slots: [], bookings: [] };
   const d = await db();
-  const rules = await rulesFor(coachId);
-  const gymRows = await d.select().from(gyms).where(eq(gyms.coachId, coachId));
-  const slotRows = await d.select().from(slots).where(eq(slots.coachId, coachId));
   const since = new Date(Date.now() - 120 * 86400000);
-  const rows = await d
-    .select()
-    .from(bookings)
-    .where(and(eq(bookings.coachId, coachId), gt(bookings.endAt, since)));
+  // Independent reads run together (each one is a round trip to the database).
+  const [rules, gymRows, slotRows, rows] = await Promise.all([
+    rulesFor(coachId),
+    d.select().from(gyms).where(eq(gyms.coachId, coachId)),
+    d.select().from(slots).where(eq(slots.coachId, coachId)),
+    d.select().from(bookings).where(and(eq(bookings.coachId, coachId), gt(bookings.endAt, since))),
+  ]);
 
   const list: Booking[] = [];
   const detailIds = rows.filter((r) => me.role !== "CLIENT" || r.clientId === me.id).map((r) => r.id);
   const marks = new Map<string, { mark: string; charged: boolean }>();
   const sharedBy = new Map<string, string>();
   if (detailIds.length) {
-    const recs = await d.select().from(attendance).where(and(eq(attendance.kind, "BOOKING"), inArray(attendance.sessionId, detailIds)));
+    const [recs, shared] = await Promise.all([
+      d.select().from(attendance).where(and(eq(attendance.kind, "BOOKING"), inArray(attendance.sessionId, detailIds))),
+      d.select({ id: groupSessions.id, bookingId: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, detailIds), ne(groupSessions.status, "CANCELLED"))),
+    ]);
     for (const a of recs) marks.set(`${a.sessionId}:${a.clientId}`, a);
-    const shared = await d.select({ id: groupSessions.id, bookingId: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, detailIds), ne(groupSessions.status, "CANCELLED")));
     for (const g of shared) if (g.bookingId) sharedBy.set(g.bookingId, g.id);
   }
   for (const r of rows) {
