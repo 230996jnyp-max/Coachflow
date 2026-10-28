@@ -1,8 +1,8 @@
 import "server-only";
 import { EQUIPMENT, MUSCLES } from "@/data/exercises";
 import { JOINTS, SUB_CATEGORIES, TISSUES } from "@/lib/sports";
-import { sanitizeTracking } from "@/lib/tracking";
-import type { Equipment, MuscleGroup, TrackingSchema } from "@/lib/types";
+import { fallbackType, sanitizeTracking } from "@/lib/tracking";
+import type { Equipment, MeasureType, MuscleGroup, TrackingSchema } from "@/lib/types";
 import { buildIndex, matchExercise } from "../exerciseMatch";
 import { groqKeys, orderKeys } from "./aiKeys";
 import type { ParsedExercise, ParsedSet, ParsedWorkout } from "../workoutText";
@@ -86,7 +86,7 @@ async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
       await new Promise((r) => setTimeout(r, Math.max(soonest, 0) + 250));
     }
   }
-  throw new HttpError(503, sawRateLimit ? "The AI is busy right now. Try again in a minute." : "The AI service is unavailable right now.");
+  throw new HttpError(sawRateLimit ? 429 : 503, sawRateLimit ? "The AI is busy right now. Try again in a minute." : "The AI service is unavailable right now.");
 }
 
 /* ---------------- Photos and scans -> text ---------------- */
@@ -319,10 +319,21 @@ export interface GeneratedExercise {
   primary: MuscleGroup;
   secondary: MuscleGroup[];
   equipment: Equipment;
-  tracking: TrackingSchema;
+  /** Classic measurement (weight x reps, bodyweight reps ...) used when there is no custom set table. */
+  type: MeasureType;
+  /** Custom set-table columns; null for plain lifts that use `type` as it is. */
+  tracking: TrackingSchema | null;
   joints: string[];
   tissues: string[];
 }
+
+const MEASURE_CODES: Record<string, MeasureType> = {
+  WR: "WEIGHT_REPS",
+  BW: "BODYWEIGHT_REPS",
+  WB: "WEIGHTED_BODYWEIGHT",
+  DD: "DURATION_DISTANCE",
+  DO: "DURATION_ONLY",
+};
 
 const PRESET_HELP = `hold = Hold time (seconds); hold_side = Hold time + side (Both/Left/Right); reps = Reps; reps_side = Reps + side;
 flow = Rounds + Time (flows, ladders, rope); rounds = Rounds + Round length + Rest (+ total time) for combat / bag / pad work;
@@ -346,13 +357,14 @@ Return ONLY one JSON object, no commentary:
   "primary": one of ${JSON.stringify(MUSCLES)}   (the main muscle group worked; use "Full Body" or "Cardio" when it fits),
   "secondary": [muscle groups from the same list],
   "equipment": one of ${JSON.stringify(EQUIPMENT)}   (pick the closest; "Other" if none fit),
-  "tracking": {"preset":"<preset id>"} OR a custom format,
+  "tracking": {"preset":"<preset id>"} OR a custom format OR, for ordinary lifts and bodyweight moves, {"measure":"WR"|"BW"|"WB"|"DD"|"DO"}   (WR = weight x reps, BW = bodyweight reps, WB = weighted bodyweight reps, DD = distance + time, DO = time only),
   "joints": [from ${JSON.stringify(JOINTS)}]   (0-2: only the joints the drill mainly loads or protects; leave [] for most skill drills),
   "tissues": [from ${JSON.stringify(TISSUES)}]   (0-1: only for prehab / injury-prevention work aimed at a specific tendon or ligament; otherwise [])
 }]}
 
 Tracking presets (use one whenever it fits the drill): ${PRESET_HELP}
 ${COLUMN_HELP}
+Lifting-style disciplines (powerlifting, weightlifting, calisthenics, strongman) should mostly use {"measure":"WR"} / "BW" / "WB". Vary grips, stances, tempos, ranges of motion, equipment and difficulty levels so the list stays rich without repeating itself.
 Pick the tracking that a coach would actually record for that drill (e.g. shooting drills: made / attempted; swim sets: distance and time; holds: seconds; combat rounds: rounds and round length).
 Cover ALL four sub-categories with a sensible mix. No duplicates and nothing from the EXISTING list. Only real, well-known drills; do not invent equipment the sport does not use.`;
 
@@ -372,23 +384,29 @@ export function sanitizeGeneratedExercises(raw: unknown, sport: string, existing
   if (!root || !Array.isArray(root.exercises)) throw new HttpError(502, "The AI answer wasn't in the expected format.");
   const taken = new Set(existing.map((n) => n.toLowerCase().replace(/[^a-z0-9]+/g, "")));
   const out: GeneratedExercise[] = [];
-  for (const item of root.exercises.slice(0, 40)) {
+  for (const item of root.exercises.slice(0, 100)) {
     if (!item || typeof item !== "object") continue;
     const x = item as Record<string, unknown>;
     const name = typeof x.name === "string" ? x.name.replace(/\s+/g, " ").trim().slice(0, 60) : "";
     const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
     if (!name || taken.has(key)) continue;
-    const t = sanitizeTracking(x.tracking);
-    if (!t.ok) continue;
+    const rawT = x.tracking as { measure?: unknown } | null | undefined;
+    let measure = rawT && typeof rawT === "object" && typeof rawT.measure === "string" ? MEASURE_CODES[rawT.measure.toUpperCase()] : undefined;
+    // A reviewed drill sent back by the app: no custom columns, just its classic measurement.
+    if (!measure && rawT == null && Object.values(MEASURE_CODES).includes(x.type as MeasureType)) measure = x.type as MeasureType;
+    const t = measure ? null : sanitizeTracking(x.tracking);
+    if (!measure && !t?.ok) continue;
     taken.add(key);
     const primary = (MUSCLES as string[]).includes(x.primary as string) ? (x.primary as MuscleGroup) : "Full Body";
+    const schema = t?.ok ? t.schema : null;
     out.push({
       name,
       subCategory: (SUB_CATEGORIES as readonly string[]).includes(x.subCategory as string) ? (x.subCategory as string) : "Skill & Technique",
       primary,
       secondary: muscleList(x.secondary, primary),
       equipment: (EQUIPMENT as string[]).includes(x.equipment as string) ? (x.equipment as Equipment) : "Other",
-      tracking: t.schema,
+      type: measure ?? (schema ? fallbackType(schema) : "WEIGHT_REPS"),
+      tracking: schema,
       joints: (Array.isArray(x.joints) ? x.joints : []).filter((j): j is string => typeof j === "string" && (JOINTS as readonly string[]).includes(j)).slice(0, 2),
       tissues: (Array.isArray(x.tissues) ? x.tissues : []).filter((j): j is string => typeof j === "string" && (TISSUES as readonly string[]).includes(j)).slice(0, 1),
     });
@@ -405,7 +423,7 @@ export async function aiSportExercises(input: SportInput): Promise<{ sport: stri
       model: TEXT_MODEL,
       temperature: 0.4,
       reasoning_effort: "low",
-      max_completion_tokens: 12000,
+      max_completion_tokens: Math.min(12000, 1800 + input.count * 170),
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SPORT_SYSTEM },
@@ -472,4 +490,73 @@ export async function aiCustomTracking(input: TrackingInput): Promise<{ tracking
   if (!t.ok) throw new HttpError(502, "The AI couldn't build that tracking format. Try describing the columns more simply.");
   const summary = typeof (parsed as { summary?: unknown }).summary === "string" ? (parsed as { summary: string }).summary.slice(0, 240) : "";
   return { tracking: t.schema, summary };
+}
+
+/* ---------------- Starter routines for a niche ---------------- */
+export interface GeneratedRoutine {
+  name: string;
+  exercises: { exerciseId: string; sets: number; repMin: number; repMax: number; durationSec?: number }[];
+}
+
+const ROUTINE_SYSTEM = `You are an expert coach designing STARTER WORKOUT ROUTINES for a coach who specialises in one niche. Use ONLY exercises from the AVAILABLE list, copied exactly as written.
+
+Return ONLY one JSON object, no commentary:
+{"routines":[{"name":"<routine name, max 50 chars>","exercises":[{"name":"<exact name from AVAILABLE>","sets":<1-8>,"repMin":<number>,"repMax":<number>,"durationSec":<optional seconds for holds / timed work>}]}]}
+
+Each routine has 5-9 exercises in a sensible order (warm-up / skill, main work, conditioning or accessories, cool-down where it fits) and a distinct purpose, e.g. a push day vs a pull day, or a 60-minute flow vs a hip opener. For drills that are held or timed use repMin and repMax 0 and set durationSec. Otherwise give a realistic rep range.`;
+
+/** 3-5 ready-to-use routines built only from real library exercises. `library` is name -> id. */
+export async function aiNicheRoutines(niche: string, library: { id: string; name: string }[], count: number): Promise<GeneratedRoutine[]> {
+  const content = await groq(
+    {
+      model: TEXT_MODEL,
+      temperature: 0.5,
+      reasoning_effort: "low",
+      max_completion_tokens: 6000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: ROUTINE_SYSTEM },
+        { role: "user", content: ["NICHE: " + niche, "HOW MANY ROUTINES: " + count, "AVAILABLE:", ...library.map((e) => e.name)].join(String.fromCharCode(10)) },
+      ],
+    },
+    55_000,
+  );
+  let parsed: unknown;
+  try {
+    parsed = jsonFrom(content);
+  } catch {
+    throw new HttpError(502, "The AI answer couldn't be read.");
+  }
+  return sanitizeRoutines(parsed, library);
+}
+
+export function sanitizeRoutines(raw: unknown, library: { id: string; name: string }[]): GeneratedRoutine[] {
+  const root = raw as { routines?: unknown };
+  if (!root || !Array.isArray(root.routines)) throw new HttpError(502, "The AI answer wasn't in the expected format.");
+  const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const byName = new Map(library.map((e) => [norm(e.name), e.id]));
+  const out: GeneratedRoutine[] = [];
+  for (const item of root.routines.slice(0, 8)) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as { name?: unknown; exercises?: unknown };
+    const name = typeof r.name === "string" ? r.name.replace(/\s+/g, " ").trim().slice(0, 50) : "";
+    if (!name || !Array.isArray(r.exercises)) continue;
+    const seen = new Set<string>();
+    const exercises: GeneratedRoutine["exercises"] = [];
+    for (const e of r.exercises.slice(0, 12)) {
+      if (!e || typeof e !== "object") continue;
+      const x = e as Record<string, unknown>;
+      const exId = typeof x.name === "string" ? byName.get(norm(x.name)) : undefined;
+      if (!exId || seen.has(exId)) continue;
+      seen.add(exId);
+      const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d);
+      const repMin = num(x.repMin, 0, 200, 0);
+      const repMax = Math.max(repMin, num(x.repMax, 0, 200, repMin));
+      const durationSec = num(x.durationSec, 0, 7200, 0);
+      exercises.push({ exerciseId: exId, sets: num(x.sets, 1, 8, 3), repMin, repMax, ...(durationSec > 0 ? { durationSec } : {}) });
+    }
+    if (exercises.length >= 4 && !out.some((o) => norm(o.name) === norm(name))) out.push({ name, exercises });
+  }
+  if (out.length === 0) throw new HttpError(502, "The AI didn't return usable routines.");
+  return out.slice(0, 5);
 }

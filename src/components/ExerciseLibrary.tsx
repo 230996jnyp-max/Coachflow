@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES } from "@/data/exercises";
 import { useViewer } from "@/lib/hooks";
 import { CORE_SPORTS, disciplineOf, JOINTS, SUB_CATEGORIES, sportLabel, STRENGTH, TISSUES } from "@/lib/sports";
-import { addExercise } from "@/lib/store";
+import { addExercise, loadAllNicheExercises } from "@/lib/store";
 import { fallbackType, PRESET_LABELS, TRACKING_PRESETS } from "@/lib/tracking";
 import type { Equipment, Exercise, MeasureType, MuscleGroup } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -120,7 +120,7 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
   const focuses = forClient?.focuses ?? [];
   const strict = !isTrainer && focuses.length > 0;
   const baseSports = focuses.length ? focuses : isTrainer ? (db.settings.specialties ?? []) : [];
-  const baseLabel = strict ? "All my focuses" : focuses.length ? "All assigned focuses" : "My specialties";
+  const baseLabel = strict ? "All my focuses" : focuses.length ? "All assigned focuses" : "★ My niches";
 
   const present = useMemo(() => [...new Set(exercises.map((e) => disciplineOf(e)))], [exercises]);
   const showEverything = !strict && (baseSports.length === 0 || browseAll);
@@ -152,6 +152,7 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
   const choose = (key: string) => {
     setPill(key);
     setSub("All");
+    if (key === "all") void loadAllNicheExercises(); // other niches' shared drills load on demand
   };
   const pillClass = (on: boolean) => cn("min-h-9 shrink-0 rounded-full border px-3 text-xs font-semibold transition-colors", on ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink");
 
@@ -185,6 +186,7 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
             )}
             {sports.map((s) => (
               <button key={s} onClick={() => choose(s)} className={pillClass(eff === s)}>
+                {isTrainer && !focuses.length && s === baseSports[0] ? "★ " : ""}
                 {sportLabel(s)}
               </button>
             ))}
@@ -194,7 +196,12 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
               </button>
             )}
             {baseSports.length > 0 && !strict && !browseAll && (
-              <button onClick={() => setBrowseAll(true)} className="min-h-9 shrink-0 rounded-full border border-dashed border-accent/50 px-3 text-xs font-semibold text-accent hover:bg-accent/10">
+              <button
+                onClick={() => {
+                  setBrowseAll(true);
+                  void loadAllNicheExercises();
+                }}
+                className="min-h-9 shrink-0 rounded-full border border-dashed border-accent/50 px-3 text-xs font-semibold text-accent hover:bg-accent/10">
                 {isTrainer && !focuses.length ? "+ Show all sports" : "+ Browse all other sports"}
               </button>
             )}

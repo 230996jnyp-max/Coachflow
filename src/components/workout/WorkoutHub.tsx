@@ -11,7 +11,8 @@ import { useViewer } from "@/lib/hooks";
 import { doneWorkouts, workoutSetCount, workoutVolume } from "@/lib/stats";
 import { deleteTemplate, startWorkout } from "@/lib/store";
 import type { RoutineTemplate } from "@/lib/types";
-import { fmtDurationShort, fmtVolume } from "@/lib/utils";
+import { sportLabel } from "@/lib/sports";
+import { cn, fmtDurationShort, fmtVolume } from "@/lib/utils";
 import { ExportWorkoutModal, type ExportPreset } from "./ExportWorkoutModal";
 import { ImportWorkoutModal } from "./ImportWorkoutModal";
 import { TemplateEditor } from "./TemplateEditor";
@@ -22,15 +23,17 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
   const [editing, setEditing] = useState<Partial<RoutineTemplate> | null>(null);
   const [del, setDel] = useState<RoutineTemplate | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [allNiches, setAllNiches] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState<ExportPreset | null>(null);
 
   const history = useMemo(() => doneWorkouts(db.workouts, clientId).reverse(), [db.workouts, clientId]);
-  const templates = useMemo(
-    () =>
-      db.templates.filter((t) => (isTrainer ? true : t.shared || t.ownerId === user?.id)).sort((a, b) => a.name.localeCompare(b.name)),
-    [db.templates, isTrainer, user?.id],
-  );
+  // A coach sees the routines for their own niches first; the rest are one tap away.
+  const myNiches = isTrainer ? (db.settings.specialties ?? []) : [];
+  const visible = db.templates.filter((t) => (isTrainer ? true : t.shared || t.ownerId === user?.id));
+  const inMyNiche = (t: RoutineTemplate) => myNiches.length === 0 || !t.niche || myNiches.includes(t.niche);
+  const otherNiche = visible.filter((t) => !inMyNiche(t)).length;
+  const templates = visible.filter((t) => allNiches || inMyNiche(t)).sort((a, b) => a.name.localeCompare(b.name));
   const active = db.workouts.find((w) => w.status === "ACTIVE" && w.clientId === clientId);
 
   if (!user) return null;
@@ -94,6 +97,16 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
         >
           Routine templates
         </SectionTitle>
+        {isTrainer && otherNiche > 0 && (
+          <div className="mb-3 flex gap-1.5">
+            <button type="button" onClick={() => setAllNiches(false)} className={cn("min-h-9 rounded-full border px-3 text-xs font-semibold", !allNiches ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink")}>
+              ★ My niches
+            </button>
+            <button type="button" onClick={() => setAllNiches(true)} className={cn("min-h-9 rounded-full border px-3 text-xs font-semibold", allNiches ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink")}>
+              All niche templates ({visible.length})
+            </button>
+          </div>
+        )}
         {templates.length === 0 ? (
           <EmptyState icon={<ClipboardList size={28} />} title="No templates yet" hint="Save a routine to start future workouts in one tap." />
         ) : (
@@ -105,6 +118,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate font-bold">{t.name}</div>
+                      {t.niche && isTrainer && <div className="truncate text-[11px] font-semibold text-accent">{sportLabel(t.niche)}</div>}
                       <div className="mt-0.5 text-xs text-muted">
                         {t.exercises.length} exercises · {t.exercises.reduce((n, e) => n + e.sets, 0)} sets
                       </div>

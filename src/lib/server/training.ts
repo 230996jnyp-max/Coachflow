@@ -203,6 +203,7 @@ export function parseTemplate(raw: unknown, ownerId: string): RoutineTemplate {
     name: text(r.name, "Name", 120, true),
     shared: r.shared === true,
     ...(r.starter === true ? { starter: true } : {}),
+    ...(text(r.niche, "Niche", 50) ? { niche: text(r.niche, "Niche", 50) } : {}),
     exercises: arr(r.exercises, "Exercises", 80).map(parseTemplateExercise),
   };
 }

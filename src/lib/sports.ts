@@ -1,10 +1,12 @@
 /** Sports, training disciplines, sub-categories and the joints / connective tissue tags. Shared by the app and the server. */
 
 export const STRENGTH = "Strength & Gym";
+export const POWERLIFTING = "Powerlifting & Maximal Strength";
 
 /** The disciplines every coach starts with. A coach can add any other sport with AI. */
 export const CORE_SPORTS = [
   STRENGTH,
+  POWERLIFTING,
   "Mobility & Flexibility",
   "Yoga & Mindful Movement",
   "Boxing & Combat Conditioning",
@@ -15,6 +17,7 @@ export const CORE_SPORTS = [
 
 const SHORT: Record<string, string> = {
   [STRENGTH]: "Strength",
+  [POWERLIFTING]: "Powerlifting",
   "Mobility & Flexibility": "Mobility",
   "Yoga & Mindful Movement": "Yoga",
   "Boxing & Combat Conditioning": "Boxing",

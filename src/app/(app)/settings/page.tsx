@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { HomeAddressField } from "@/components/HomeAddressField";
 import { SpecialtiesCard } from "@/components/sports/Focus";
+import { requestNicheStep } from "@/lib/nicheGate";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
 import { PasswordBanner } from "@/components/PasswordBanner";
@@ -236,6 +237,9 @@ export default function SettingsPage() {
           <section>
             <SectionTitle>Specialties &amp; sports</SectionTitle>
             <SpecialtiesCard />
+            <Button variant="secondary" className="mt-3" onClick={requestNicheStep}>
+              Change my niche
+            </Button>
           </section>
           <section>
             <SectionTitle

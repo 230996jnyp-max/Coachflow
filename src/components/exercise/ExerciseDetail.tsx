@@ -9,6 +9,7 @@ import { SchemaPreview, TrackingEditorModal } from "@/components/sports/Tracking
 import { Badge, Button, Card, Modal, Select, Segmented } from "@/components/ui";
 import { axisProps, C, ChartBox, tooltipStyle } from "@/components/progress/chartKit";
 import { MEASURE_LABELS } from "@/data/exercises";
+import { hideSharedExercise } from "@/lib/store";
 import { useViewer } from "@/lib/hooks";
 import { mediaImage, useExerciseMedia, type MediaEntry } from "@/lib/exerciseMedia";
 import { disciplineOf, sportLabel, STRENGTH } from "@/lib/sports";
@@ -174,6 +175,18 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
             {!exercise.tracking && isTrainer && (
               <Button size="sm" variant="secondary" onClick={() => setCustomizing(true)}>
                 <Sparkles size={14} /> Customize tracking with AI
+              </Button>
+            )}
+            {exercise.global && isTrainer && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void hideSharedExercise(exercise.id);
+                  onClose();
+                }}
+              >
+                Hide from my library
               </Button>
             )}
             {/* Exercises without a photo already show the muscle diagram in the media area above. */}

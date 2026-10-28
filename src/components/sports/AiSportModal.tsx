@@ -5,9 +5,10 @@ import { useMemo, useState } from "react";
 import { Badge, Button, Field, Input, Modal, Notice, Select, Toggle } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { CORE_SPORTS, SUB_CATEGORIES, sportLabel } from "@/lib/sports";
-import { addExercise, api, updateSettings } from "@/lib/store";
-import { describeSchema, fallbackType } from "@/lib/tracking";
-import type { Equipment, MuscleGroup, TrackingSchema } from "@/lib/types";
+import { addExercise, api, refreshTraining, updateSettings } from "@/lib/store";
+import { MEASURE_LABELS } from "@/data/exercises";
+import { describeSchema } from "@/lib/tracking";
+import type { Equipment, MeasureType, MuscleGroup, TrackingSchema } from "@/lib/types";
 
 interface Generated {
   name: string;
@@ -15,7 +16,8 @@ interface Generated {
   primary: MuscleGroup;
   secondary: MuscleGroup[];
   equipment: Equipment;
-  tracking: TrackingSchema;
+  type: MeasureType;
+  tracking: TrackingSchema | null;
   joints: string[];
   tissues: string[];
 }
@@ -34,11 +36,14 @@ export function canonicalSport(name: string, added: string[]): string {
  * sport-specific drills with a sensible tracking format. The coach ticks (and can rename) the ones to keep, then saves them
  * and the sport in one tap. Nothing is saved before that.
  */
-export function AiSportModal({ open, onClose, initialSport = "" }: { open: boolean; onClose: () => void; initialSport?: string }) {
-  return open ? <Flow key={initialSport} onClose={onClose} initialSport={initialSport} /> : null;
+export function AiSportModal({ open, onClose, initialSport = "", shared = true, onSaved }: { open: boolean; onClose: () => void; initialSport?: string; shared?: boolean; onSaved?: (niche: string) => void }) {
+  return open ? <Flow key={initialSport} onClose={onClose} initialSport={initialSport} shared={shared} onSaved={onSaved} /> : null;
 }
 
-function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: string }) {
+/** The emphasis of each of the parallel requests that make up a new niche's first batch (~60 drills). */
+const FIRST_BATCH = ["Skill & Technique", "Sport Conditioning", "Mobility & Prehab"];
+
+function Flow({ onClose, initialSport, shared, onSaved }: { onClose: () => void; initialSport: string; shared?: boolean; onSaved?: (niche: string) => void }) {
   const { db } = useViewer();
   const added = db.settings.sports ?? [];
   const [sport, setSport] = useState(initialSport);
@@ -56,11 +61,29 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
     setBusy(true);
     setError(null);
     const existing = db.exercises.filter((e) => (e.discipline ?? "").toLowerCase().includes(sport.trim().toLowerCase())).map((e) => e.name);
-    const r = await api<{ sport: string; exercises: Generated[] }>("/api/ai/sport-exercises", { body: { sport: sport.trim(), count, subCategory: sub || undefined, existing: existing.slice(0, 60) } });
+    const ask = (n: number, emphasis?: string) => api<{ sport: string; exercises: Generated[] }>("/api/ai/sport-exercises", { body: { sport: sport.trim(), count: n, subCategory: emphasis || undefined, existing: existing.slice(0, 60) } });
+    // A brand-new niche for the shared library starts with ~60 drills: three focused requests at once.
+    const replies = shared ? await Promise.all(FIRST_BATCH.map((e) => ask(20, e))) : [await ask(count, sub)];
+    // The AI has a per-minute limit; if some requests were turned away, give them one more go a moment later.
+    if (shared && replies.some((r) => !r.ok)) {
+      await new Promise((r) => setTimeout(r, 15000));
+      for (let i = 0; i < replies.length; i++) if (!replies[i].ok) replies[i] = await ask(20, FIRST_BATCH[i]);
+    }
     setBusy(false);
-    if (!r.ok || !r.data) return setError(r.error ?? "The AI couldn't do that right now. Try again in a moment.");
-    setResult({ sport: canonicalSport(r.data.sport || sport, added), list: r.data.exercises });
-    setPicked(new Set(r.data.exercises.map((_, i) => i)));
+    const good = replies.filter((x) => x.ok && x.data);
+    if (good.length === 0) return setError(replies[0].error ?? "The AI couldn't do that right now. Try again in a moment.");
+    const seen = new Set<string>();
+    const list: Generated[] = [];
+    for (const g of good) {
+      for (const ex of g.data!.exercises) {
+        const key = ex.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        list.push(ex);
+      }
+    }
+    setResult({ sport: canonicalSport(good[0].data!.sport || sport, added), list });
+    setPicked(new Set(list.map((_, i) => i)));
     setNames({});
   };
 
@@ -73,33 +96,43 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
     return [...map.entries()].sort((a, b) => SUB_CATEGORIES.indexOf(a[0] as (typeof SUB_CATEGORIES)[number]) - SUB_CATEGORIES.indexOf(b[0] as (typeof SUB_CATEGORIES)[number]));
   }, [result]);
 
-  const save = () => {
+  const save = async () => {
     if (!result) return;
     const discipline = result.sport;
+    const chosen = result.list.map((ex, i) => ({ ex, i })).filter(({ i }) => picked.has(i)).map(({ ex, i }) => ({ ...ex, name: (names[i] ?? ex.name).trim() })).filter((ex) => ex.name);
     let n = 0;
-    result.list.forEach((ex, i) => {
-      if (!picked.has(i)) return;
-      const name = (names[i] ?? ex.name).trim();
-      if (!name) return;
-      addExercise({
-        name,
-        primary: ex.primary,
-        secondary: ex.secondary,
-        equipment: ex.equipment,
-        type: fallbackType(ex.tracking),
-        discipline,
-        subCategory: ex.subCategory,
-        ...(ex.joints.length ? { joints: ex.joints } : {}),
-        ...(ex.tissues.length ? { tissues: ex.tissues } : {}),
-        tracking: ex.tracking,
-      });
-      n++;
-    });
-    const isCore = (CORE_SPORTS as readonly string[]).includes(discipline);
-    const sports = isCore || added.includes(discipline) ? added : [...added, discipline];
+    let niche = discipline;
+    if (shared) {
+      setBusy(true);
+      const r = await api<{ niche: string; added: number }>("/api/niche/save", { body: { niche: discipline, exercises: chosen } });
+      setBusy(false);
+      if (!r.ok || !r.data) return setError(r.error ?? "Couldn't save these drills. Try again.");
+      n = r.data.added;
+      niche = r.data.niche;
+      await refreshTraining();
+    } else {
+      for (const ex of chosen) {
+        addExercise({
+          name: ex.name,
+          primary: ex.primary,
+          secondary: ex.secondary,
+          equipment: ex.equipment,
+          type: ex.type,
+          discipline,
+          subCategory: ex.subCategory,
+          ...(ex.joints.length ? { joints: ex.joints } : {}),
+          ...(ex.tissues.length ? { tissues: ex.tissues } : {}),
+          ...(ex.tracking ? { tracking: ex.tracking } : {}),
+        });
+        n++;
+      }
+    }
+    const isCore = (CORE_SPORTS as readonly string[]).includes(niche);
+    const sports = isCore || added.includes(niche) ? added : [...added, niche];
     const specialties = db.settings.specialties ?? [];
-    updateSettings({ sports, ...(special && !specialties.includes(discipline) ? { specialties: [...specialties, discipline] } : {}) });
-    setDone(`${n} exercise${n === 1 ? "" : "s"} added to ${sportLabel(discipline)}.`);
+    updateSettings({ sports, ...(special && !specialties.includes(niche) ? { specialties: [...specialties, niche] } : {}) });
+    setDone(`${n} exercise${n === 1 ? "" : "s"} added to ${sportLabel(niche)}.`);
+    onSaved?.(niche);
   };
 
   if (done) {
@@ -108,7 +141,7 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
         <div className="flex flex-col items-center gap-3 py-6 text-center">
           <Check size={44} className="rounded-full bg-success/15 p-2.5 text-success" />
           <div className="text-lg font-bold">{done}</div>
-          <p className="text-sm text-muted">They are in your Exercise Library under this sport, and your clients can use them when you assign the focus.</p>
+          <p className="text-sm text-muted">{shared ? "They are in your Exercise Library under this niche, and the library keeps growing in the background." : "They are in your Exercise Library under this sport, and your clients can use them when you assign the focus."}</p>
         </div>
       </Modal>
     );
@@ -126,7 +159,7 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
             <Button variant="secondary" onClick={() => setResult(null)}>
               ← Back
             </Button>
-            <Button onClick={save} disabled={picked.size === 0}>
+            <Button onClick={() => void save()} disabled={picked.size === 0 || busy}>
               Save {picked.size} exercise{picked.size === 1 ? "" : "s"} & sport
             </Button>
           </>
@@ -155,7 +188,7 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className={shared ? "hidden" : "grid grid-cols-2 gap-3"}>
             <Field label="How many drills">
               <Select value={count} onChange={(e) => setCount(Number(e.target.value))}>
                 {[10, 15, 20, 24].map((n) => (
@@ -220,7 +253,7 @@ function Flow({ onClose, initialSport }: { onClose: () => void; initialSport: st
                               </Badge>
                             ))}
                           </div>
-                          <div className="text-xs text-muted">Tracks: {describeSchema(ex.tracking)}</div>
+                          <div className="text-xs text-muted">Tracks: {ex.tracking ? describeSchema(ex.tracking) : MEASURE_LABELS[ex.type]}</div>
                         </div>
                       </div>
                     </li>

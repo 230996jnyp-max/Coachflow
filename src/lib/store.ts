@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { requestNicheStep } from "./nicheGate";
 import { del, get, set } from "idb-keyval";
 import { parseISO } from "date-fns";
 import { SEED_EXERCISES } from "@/data/exercises";
@@ -173,6 +174,9 @@ interface TrainingData {
   ids: string[];
   templates: RoutineTemplate[];
   exercises: Exercise[];
+  /** Shared niche drills; every one on a full load, only the new ones after that. */
+  global?: Exercise[];
+  globalFull?: boolean;
   now: string;
 }
 
@@ -208,8 +212,14 @@ function applyTraining(data: TrainingData) {
   for (const x of customNow) if (exerciseQ.busy(x.id)) xMap.set(x.id, x);
   const xChanged = xMap.size !== customNow.length || customNow.some((x) => !sameJson(xMap.get(x.id), x));
 
+  // Shared niche drills: a full load replaces them, later loads only add the new ones.
+  const sharedNow = cur.exercises.filter((e) => e.global);
+  const gMap = new Map((data.globalFull ? [] : sharedNow).map((e) => [e.id, e]));
+  for (const g of data.global ?? []) gMap.set(g.id, g);
+  const gChanged = gMap.size !== sharedNow.length || sharedNow.some((e) => !gMap.has(e.id));
+
   const trChanged = !sameJson(cur.tracking ?? {}, data.tracking ?? {});
-  if (!changed && !tChanged && !xChanged && !trChanged) return;
+  if (!changed && !tChanged && !xChanged && !trChanged && !gChanged) return;
   setState({
     ...state,
     db: {
@@ -217,7 +227,7 @@ function applyTraining(data: TrainingData) {
       tracking: trChanged ? (data.tracking ?? {}) : cur.tracking,
       workouts: changed ? [...wMap.values()] : cur.workouts,
       templates: tChanged ? [...tMap.values()] : cur.templates,
-      exercises: xChanged ? [...SEED_EXERCISES, ...xMap.values()] : cur.exercises,
+      exercises: xChanged || gChanged ? [...SEED_EXERCISES, ...gMap.values(), ...xMap.values()] : cur.exercises,
     },
   });
 }
@@ -325,7 +335,7 @@ async function establishSession(): Promise<boolean> {
       // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
       workouts: server ? server.workouts : local.workouts,
       templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
-      exercises: server ? [...SEED_EXERCISES, ...server.exercises] : local.exercises,
+      exercises: server ? [...SEED_EXERCISES, ...(server.global ?? []), ...server.exercises] : local.exercises,
       tracking: server?.tracking ?? local.tracking ?? {},
     },
   });
@@ -471,6 +481,7 @@ export async function login(username: string, password: string): Promise<string 
   if (ok) {
     rememberUsername(username); // only the username is remembered on this device, never the password
     markActive();
+    requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
   }
   return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
 }
@@ -1273,28 +1284,56 @@ let rulesTimer: ReturnType<typeof setTimeout> | undefined;
 const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
+function pushRules() {
+  const s = state.db.settings;
+  return api("/api/schedule/settings", {
+    method: "PUT",
+    body: {
+      sessionMinutes: s.sessionMinutes,
+      noticeHours: s.noticeHours,
+      autoConfirm: s.autoConfirm,
+      allowCustomGym: s.allowCustomGym,
+      travelEnabled: s.travelEnabled,
+      travelDefaultMin: s.travelDefaultMin,
+      travelParkingMin: s.travelParkingMin,
+      travelMaxMin: s.travelMaxMin,
+      specialties: s.specialties ?? [],
+      sports: s.sports ?? [],
+      utcOffsetMin: -new Date().getTimezoneOffset(),
+    },
+  });
+}
+
 export function updateSettings(patch: Partial<AppSettings>) {
   mutate((db) => ({ ...db, settings: { ...db.settings, ...patch } }));
   if (RULE_KEYS.some((k) => k in patch)) {
     if (rulesTimer) clearTimeout(rulesTimer);
-    rulesTimer = setTimeout(() => {
-      const s = state.db.settings;
-      void api("/api/schedule/settings", {
-        method: "PUT",
-        body: {
-          sessionMinutes: s.sessionMinutes,
-          noticeHours: s.noticeHours,
-          autoConfirm: s.autoConfirm,
-          allowCustomGym: s.allowCustomGym,
-          travelEnabled: s.travelEnabled,
-          travelDefaultMin: s.travelDefaultMin,
-          travelParkingMin: s.travelParkingMin,
-          travelMaxMin: s.travelMaxMin,
-          specialties: s.specialties ?? [],
-          sports: s.sports ?? [],
-          utcOffsetMin: -new Date().getTimezoneOffset(),
-        },
-      });
-    }, 600);
+    rulesTimer = setTimeout(() => void pushRules(), 600);
   }
+}
+
+/** Saves settings to the server right away (the niche step needs the server to know the niches before it loads their drills). */
+export async function updateSettingsNow(patch: Partial<AppSettings>): Promise<boolean> {
+  mutate((db) => ({ ...db, settings: { ...db.settings, ...patch } }));
+  if (rulesTimer) clearTimeout(rulesTimer);
+  return (await pushRules()).ok;
+}
+
+/** Browsing other niches: pulls in every shared drill (not just the coach's own niches). */
+export async function loadAllNicheExercises(): Promise<void> {
+  const r = await api<{ exercises: Exercise[] }>("/api/training/global");
+  if (!r.ok || !r.data) return;
+  const have = new Set(state.db.exercises.map((e) => e.id));
+  const fresh = r.data.exercises.filter((e) => !have.has(e.id));
+  if (fresh.length === 0) return;
+  const custom = state.db.exercises.filter((e) => e.custom);
+  const rest = state.db.exercises.filter((e) => !e.custom);
+  setState({ ...state, db: { ...state.db, exercises: [...rest, ...fresh, ...custom] } });
+}
+
+/** Hides a shared-library drill for this coach (and their clients). Custom exercises are deleted instead. */
+export async function hideSharedExercise(id: string, hide = true): Promise<void> {
+  if (hide) setState({ ...state, db: { ...state.db, exercises: state.db.exercises.filter((e) => e.id !== id) } });
+  await api("/api/training/hidden", { method: "PUT", body: { id, hide } });
+  if (!hide) await refreshTraining(true);
 }

@@ -144,6 +144,8 @@ export interface Exercise {
   equipment: Equipment;
   type: MeasureType;
   custom?: boolean;
+  /** From the shared niche library (built up by AI for everyone working in that niche). */
+  global?: boolean;
   createdBy?: string;
   /** Sport / training discipline (default "Strength & Gym"). */
   discipline?: string;
@@ -245,6 +247,8 @@ export interface RoutineTemplate {
   shared: boolean;
   /** One of the built-in starter routines (never edited). Editing a starter turns it into the coach's own routine. */
   starter?: boolean;
+  /** The niche this routine was made for (e.g. "Yoga & Mindful Movement"); none for routines that suit everyone. */
+  niche?: string;
   exercises: TemplateExercise[];
 }
 

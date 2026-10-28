@@ -5,6 +5,7 @@ import { useState } from "react";
 import { CreateExerciseModal, ExerciseBrowser } from "@/components/ExerciseLibrary";
 import { ExerciseDetailModal } from "@/components/exercise/ExerciseDetail";
 import { AiSportModal } from "@/components/sports/AiSportModal";
+import { SeedPill } from "@/components/sports/NicheStep";
 import { Button, Card, PageHeader } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import type { Exercise } from "@/lib/types";
@@ -33,6 +34,7 @@ export default function ExercisesPage() {
           </div>
         }
       />
+      {isTrainer && <SeedPill className="mb-3" />}
       <Card className="p-4">
         <ExerciseBrowser exercises={exercises} onOpen={setOpen} onAiSport={(sport) => setAi({ sport: sport ?? "" })} stickyOffset="top-[calc(3.5rem+env(safe-area-inset-top))] md:top-0" />
       </Card>

@@ -70,6 +70,47 @@ export const coachSettings = pgTable("coach_settings", {
   /** Coaching specialties and the sports the coach added with AI (JSON arrays of names). */
   specialties: text("specialties").notNull().default("[]"),
   sports: text("sports").notNull().default("[]"),
+  /** Niches whose starter routines were already copied to this coach (so a deleted routine never comes back), and the shared-library drills the coach hid (JSON arrays). */
+  nicheTemplates: text("niche_templates").notNull().default("[]"),
+  hiddenExercises: text("hidden_exercises").notNull().default("[]"),
+});
+
+/**
+ * The shared exercise library: drills generated for a niche (Yoga, Powerlifting, Muay Thai ...) that every coach working in that
+ * niche can use. Nothing personal is stored, so it is plain JSON. Deduplicated by niche + normalised name.
+ */
+export const globalExercises = pgTable(
+  "global_exercises",
+  {
+    id: text("id").primaryKey(),
+    niche: text("niche").notNull(),
+    nameKey: text("name_key").notNull(),
+    data: text("data").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("global_exercises_niche_idx").on(t.niche)],
+);
+
+/** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
+export const globalTemplates = pgTable(
+  "global_templates",
+  {
+    id: text("id").primaryKey(),
+    niche: text("niche").notNull(),
+    data: text("data").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("global_templates_niche_idx").on(t.niche)],
+);
+
+/** Progress of the background library builder for a niche (a short lock stops two coaches building the same niche at once). */
+export const nicheSeed = pgTable("niche_seed", {
+  niche: text("niche").primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  /** Batches in a row that added (almost) nothing new; the builder stops at 2. */
+  stale: integer("stale").notNull().default(0),
+  batches: integer("batches").notNull().default(0),
+  done: boolean("done").notNull().default(false),
 });
 
 export const gyms = pgTable(
@@ -410,6 +451,31 @@ export const DDL = [
   `CREATE INDEX IF NOT EXISTS custom_exercises_owner_idx ON custom_exercises (owner_id)`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS specialties text NOT NULL DEFAULT '[]'`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS sports text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS niche_templates text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS hidden_exercises text NOT NULL DEFAULT '[]'`,
+  `CREATE TABLE IF NOT EXISTS global_exercises (
+    id text PRIMARY KEY,
+    niche text NOT NULL,
+    name_key text NOT NULL,
+    data text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (niche, name_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS global_exercises_niche_idx ON global_exercises (niche)`,
+  `CREATE TABLE IF NOT EXISTS global_templates (
+    id text PRIMARY KEY,
+    niche text NOT NULL,
+    data text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS global_templates_niche_idx ON global_templates (niche)`,
+  `CREATE TABLE IF NOT EXISTS niche_seed (
+    niche text PRIMARY KEY,
+    locked_until timestamptz,
+    stale integer NOT NULL DEFAULT 0,
+    batches integer NOT NULL DEFAULT 0,
+    done boolean NOT NULL DEFAULT false
+  )`,
   `CREATE TABLE IF NOT EXISTS exercise_tracking (
     coach_id text NOT NULL,
     exercise_id text NOT NULL,
