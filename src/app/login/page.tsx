@@ -2,6 +2,7 @@
 
 import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Dumbbell, Eye, EyeOff, LogIn } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { InstallButton } from "@/components/InstallButton";
@@ -135,6 +136,12 @@ export default function LoginPage() {
             </Button>
             <p className="text-center text-xs text-muted">
               Accounts are created by your coach. Ask them for your username and temporary password.
+            </p>
+            <p className="border-t border-line pt-4 text-center text-sm text-muted">
+              Are you a coach?{" "}
+              <Link href="/signup" className="font-semibold text-accent hover:underline">
+                Sign Up / Request a Coach Account
+              </Link>
             </p>
           </form>
         </Card>

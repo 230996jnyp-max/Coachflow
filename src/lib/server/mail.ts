@@ -28,6 +28,8 @@ function throttled(): boolean {
 }
 
 export interface MailInput {
+  /** Overrides the default sender (Gmail only delivers from the signed-in address, so only the display name can differ). */
+  from?: string;
   to: string;
   subject: string;
   text: string;
@@ -54,7 +56,9 @@ async function writeOutbox(entry: unknown) {
 
 export async function sendMail(input: MailInput): Promise<MailResult> {
   if (throttled()) return { status: "failed", to: input.to, error: "Email rate limit reached (300/hour)." };
-  const from = process.env.MAIL_FROM || (process.env.SMTP_USER ? `CoachFlow <${process.env.SMTP_USER}>` : "CoachFlow <no-reply@coachflow.local>");
+  // Local test mode only: an address starting with "mailfail" behaves like an undeliverable email, so failure handling can be tested.
+  if (process.env.LOCAL_PGLITE === "1" && !process.env.VERCEL && input.to.toLowerCase().startsWith("mailfail")) return { status: "failed", to: input.to, error: "Test: delivery refused." };
+  const from = input.from || process.env.MAIL_FROM || (process.env.SMTP_USER ? `CoachFlow <${process.env.SMTP_USER}>` : "CoachFlow <no-reply@coachflow.local>");
   const message = {
     from,
     to: input.to,

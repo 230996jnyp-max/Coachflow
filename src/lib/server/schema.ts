@@ -91,6 +91,30 @@ export const globalExercises = pgTable(
   (t) => [index("global_exercises_niche_idx").on(t.niche)],
 );
 
+/**
+ * Coach sign-up requests from the public form. The owner approves (a coach account is created and the login is emailed) or declines.
+ * The phone number is personal data, so it is stored encrypted; `ip_hash` only exists to limit how often one network can ask.
+ */
+export const coachSignupRequests = pgTable(
+  "coach_signup_requests",
+  {
+    id: text("id").primaryKey(),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    phoneEnc: text("phone_enc").notNull(),
+    /** PENDING | APPROVED | REJECTED */
+    status: text("status").notNull().default("PENDING"),
+    ipHash: text("ip_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: text("reviewed_by"),
+    /** The coach account created on approval. */
+    coachId: text("coach_id"),
+  },
+  (t) => [index("coach_signup_status_idx").on(t.status, t.createdAt)],
+);
+export type CoachSignupRow = typeof coachSignupRequests.$inferSelect;
+
 /** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
 export const globalTemplates = pgTable(
   "global_templates",
@@ -462,6 +486,20 @@ export const DDL = [
     UNIQUE (niche, name_key)
   )`,
   `CREATE INDEX IF NOT EXISTS global_exercises_niche_idx ON global_exercises (niche)`,
+  `CREATE TABLE IF NOT EXISTS coach_signup_requests (
+    id text PRIMARY KEY,
+    full_name text NOT NULL,
+    email text NOT NULL,
+    phone_enc text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    ip_hash text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    reviewed_at timestamptz,
+    reviewed_by text,
+    coach_id text
+  )`,
+  `CREATE INDEX IF NOT EXISTS coach_signup_status_idx ON coach_signup_requests (status, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS coach_signup_pending_email ON coach_signup_requests (email) WHERE status = 'PENDING'`,
   `CREATE TABLE IF NOT EXISTS global_templates (
     id text PRIMARY KEY,
     niche text NOT NULL,

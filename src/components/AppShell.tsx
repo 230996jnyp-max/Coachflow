@@ -1,6 +1,7 @@
 "use client";
 
 import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
+import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   CalendarDays,
@@ -92,6 +93,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
   const nicheStep = useNicheStepPending();
+  const pendingCoaches = usePendingCoachRequests();
+  const isOwner = !!user?.isOwner;
+  // The owner sees how many coach sign-up requests are waiting (a badge on Admin), refreshed every minute.
+  useEffect(() => {
+    if (!isOwner) return;
+    void refreshPendingCount();
+    const t = setInterval(() => void refreshPendingCount(), 60_000);
+    return () => clearInterval(t);
+  }, [isOwner]);
 
   useEffect(() => {
     if (!ready) return;
@@ -140,6 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="relative">
                 {n.icon}
                 {n.href === "/messages" && unread > 0 && <Badge count={unread} />}
+                {n.href === "/admin" && pendingCoaches > 0 && <Badge count={pendingCoaches} />}
               </span>
               {!collapsed && n.label}
             </Link>
