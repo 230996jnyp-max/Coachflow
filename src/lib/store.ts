@@ -739,6 +739,11 @@ export function saveTemplate(t: RoutineTemplate) {
   }));
 }
 
+/** A client saved imported routines: tells their coach (how many and the names, never the contents). */
+export function notifyRoutineImport(titles: string[], exercises: number) {
+  void api("/api/notify/import", { body: { titles, exercises } });
+}
+
 export function deleteTemplate(id: string) {
   mutate((db) => ({ ...db, templates: db.templates.filter((t) => t.id !== id) }));
 }
@@ -905,6 +910,7 @@ export function logCompletedWorkouts(inputs: CompletedWorkoutInput[]): string[] 
         notes: inp.notes ?? "",
         loggedBy: me.role,
         loggedById: me.id,
+        imported: true,
         exercises: inp.exercises.map((e) => ({
           id: uid("we"),
           exerciseId: e.exerciseId,

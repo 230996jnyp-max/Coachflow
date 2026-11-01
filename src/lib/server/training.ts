@@ -21,7 +21,7 @@ import { coachSettings, customExercises, exerciseTracking, templates, users, wor
 const ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SEED_IDS = new Set(SEED_EXERCISES.map((e) => e.id));
 const SET_TYPES: SetType[] = ["N", "W", "D", "F"];
-const PR_KINDS: PRKind[] = ["WEIGHT", "E1RM", "VOLUME", "REPS", "TIME", "DISTANCE"];
+const PR_KINDS: PRKind[] = ["WEIGHT", "E1RM", "VOLUME", "REPS", "TIME", "DISTANCE", "HOLD", "ROUNDS", "ROUND_TIME", "PACE", "ACCURACY", "MAKES", "METRIC"];
 const MEASURES = Object.keys(MEASURE_LABELS) as MeasureType[];
 
 const aadW = (id: string) => `workout:${id}`;
@@ -145,6 +145,14 @@ export async function savedPain(workoutId: string): Promise<number | undefined> 
   return openWorkout(row)?.feedback?.pain;
 }
 
+/** A saved workout's status and pain score before it is replaced (to see what changed with this save). */
+export async function savedState(workoutId: string): Promise<{ status: string; pain: number | undefined } | null> {
+  const d = await db();
+  const [row] = await d.select().from(workouts).where(eq(workouts.id, workoutId)).limit(1);
+  if (!row) return null;
+  return { status: row.status, pain: row.status === "DONE" ? openWorkout(row)?.feedback?.pain : undefined };
+}
+
 export function parseWorkout(raw: unknown): Workout {
   const r = obj(raw, "Workout");
   const status = r.status === "ACTIVE" ? "ACTIVE" : "DONE";
@@ -170,6 +178,7 @@ export function parseWorkout(raw: unknown): Workout {
   };
   const feedback = parseFeedback(r.feedback);
   if (feedback) w.feedback = feedback;
+  if (r.imported === true) w.imported = true;
   if (r.liveStartedAt) w.liveStartedAt = iso(r.liveStartedAt, "Start time");
   if (typeof r.templateId === "string" && r.templateId) w.templateId = id(r.templateId, "Template");
   if (typeof r.groupId === "string" && r.groupId) w.groupId = id(r.groupId, "Group");

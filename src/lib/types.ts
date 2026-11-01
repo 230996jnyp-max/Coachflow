@@ -159,7 +159,7 @@ export interface Exercise {
 }
 
 export type SetType = "N" | "W" | "D" | "F";
-export type PRKind = "WEIGHT" | "E1RM" | "VOLUME" | "REPS" | "TIME" | "DISTANCE";
+export type PRKind = "WEIGHT" | "E1RM" | "VOLUME" | "REPS" | "TIME" | "DISTANCE" | "HOLD" | "ROUNDS" | "ROUND_TIME" | "PACE" | "ACCURACY" | "MAKES" | "METRIC";
 
 export interface WorkoutSet {
   id: string;
@@ -222,6 +222,8 @@ export interface Workout {
   groupId?: string;
   /** How the session felt (pain / energy 0-10, where it hurt). Asked when a workout is finished; always optional. */
   feedback?: WorkoutFeedback;
+  /** Brought in with the AI / text importer (a person's own notes), rather than logged live. */
+  imported?: boolean;
   exercises: WorkoutExercise[];
 }
 

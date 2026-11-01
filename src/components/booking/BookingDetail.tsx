@@ -1,7 +1,7 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
-import { Check, Clock, MapPin, MessageSquare, Pencil, Target, X } from "lucide-react";
+import { format, isSameDay, parseISO } from "date-fns";
+import { Check, Clock, MapPin, MessageSquare, Pencil, Share2, Target, X } from "lucide-react";
 import { useState } from "react";
 import { Avatar, Button, Field, Modal, Notice, Select } from "@/components/ui";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
@@ -11,6 +11,8 @@ import { canCancel } from "@/lib/scheduling";
 import { cancelBookingAs, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
 import Link from "next/link";
 import { RollCallPanel } from "@/components/attendance/Attendance";
+import { CoachEyeCard } from "@/components/workout/CoachEyeCard";
+import { RecapModal } from "@/components/workout/RecapModal";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
 import { EditSessionForm } from "./EditSessionForm";
@@ -25,6 +27,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const now = useNow(30_000);
   const b = db.bookings.find((x) => x.id === bookingId);
   const [editing, setEditing] = useState(false);
+  const [recapOpen, setRecapOpen] = useState(false);
   const [groupSize, setGroupSize] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,6 +40,8 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const cancelErr = canCancel(b, now, db.settings, isTrainer ? "TRAINER" : "CLIENT");
   const active = b.status === "PENDING" || b.status === "CONFIRMED";
   const charged = b.status === "COMPLETED" || b.status === "NO_SHOW";
+  // Once the session is marked present, the workout done that day can be shared as a recap.
+  const dayWorkout = b.status === "COMPLETED" ? db.workouts.find((w) => w.clientId === b.clientId && w.status === "DONE" && isSameDay(parseISO(w.startedAt), parseISO(b.start))) : undefined;
 
   return (
     <Modal open onClose={onClose} title="Session details" footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
@@ -64,6 +69,17 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           <Line icon={<Target size={16} />}>{b.focus}</Line>
           {b.notes && <Line icon={<MessageSquare size={16} />}>{b.notes}</Line>}
         </div>
+
+        {isTrainer && (active || b.status === "COMPLETED") && <CoachEyeCard clientId={b.clientId} />}
+
+        {dayWorkout && (
+          <>
+            <Button variant="secondary" className="w-full" onClick={() => setRecapOpen(true)}>
+              <Share2 size={16} /> Session recap
+            </Button>
+            <RecapModal workoutId={dayWorkout.id} open={recapOpen} onClose={() => setRecapOpen(false)} />
+          </>
+        )}
 
         {b.place && <MiniMap place={b.place} href={directionsUrl({ place: b.place })} />}
 

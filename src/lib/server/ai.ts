@@ -560,3 +560,30 @@ export function sanitizeRoutines(raw: unknown, library: { id: string; name: stri
   if (out.length === 0) throw new HttpError(502, "The AI didn't return usable routines.");
   return out.slice(0, 5);
 }
+
+/* ---------------- Short plain-English notes ---------------- */
+const NOTE_SYSTEM = `You write ONE short, friendly sentence (at most 28 words) for a gym coaching app, in plain English, using ONLY the facts you are given. Never invent numbers, never mention names, never give medical advice or diagnose anything. If the facts are thin, say something encouraging and generic. Return just the sentence, no quotes.`;
+
+/** One short sentence explaining a suggestion or summarising a client, from a compact fact sheet. Never throws on a busy AI: returns null. */
+export async function aiShortNote(kind: "why" | "eye", facts: string): Promise<string | null> {
+  try {
+    const content = await groq(
+      {
+        model: TEXT_MODEL,
+        temperature: 0.3,
+        reasoning_effort: "low",
+        max_completion_tokens: 400,
+        messages: [
+          { role: "system", content: NOTE_SYSTEM },
+          { role: "user", content: `${kind === "why" ? "Explain why this training target is suggested today, to the person training." : "Give the coach a one-line heads-up about this client before the session."}
+FACTS: ${facts.slice(0, 1200)}` },
+        ],
+      },
+      20_000,
+    );
+    const text = content.replace(/\s+/g, " ").replace(/^["']|["']$/g, "").trim();
+    return text.length >= 8 ? text.slice(0, 240) : null;
+  } catch {
+    return null;
+  }
+}

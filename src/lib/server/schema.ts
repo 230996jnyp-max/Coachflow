@@ -115,6 +115,25 @@ export const coachSignupRequests = pgTable(
 );
 export type CoachSignupRow = typeof coachSignupRequests.$inferSelect;
 
+/** How many AI calls a person made today, by kind (limits protect the shared free AI quota). */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    userId: text("user_id").notNull(),
+    day: text("day").notNull(),
+    kind: text("kind").notNull(),
+    n: integer("n").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day, t.kind] })],
+);
+
+/** Short AI-written sentences (why a target was suggested, a client brief), kept so each is only written once. */
+export const aiNotes = pgTable("ai_notes", {
+  key: text("key").primaryKey(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
 export const globalTemplates = pgTable(
   "global_templates",
@@ -500,6 +519,18 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS coach_signup_status_idx ON coach_signup_requests (status, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS coach_signup_pending_email ON coach_signup_requests (email) WHERE status = 'PENDING'`,
+  `CREATE TABLE IF NOT EXISTS ai_usage (
+    user_id text NOT NULL,
+    day text NOT NULL,
+    kind text NOT NULL,
+    n integer NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day, kind)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ai_notes (
+    key text PRIMARY KEY,
+    text text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS global_templates (
     id text PRIMARY KEY,
     niche text NOT NULL,

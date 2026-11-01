@@ -90,6 +90,8 @@ export function SetRow({
   repHint,
   prFlags,
   coachEdited,
+  suggest,
+  onApplySuggest,
   onChange,
   onToggleDone,
   onCycleType,
@@ -105,13 +107,16 @@ export function SetRow({
   prFlags?: PRKind[];
   /** The coach changed this set from the live group grid. */
   coachEdited?: boolean;
+  /** "Suggested today" for this set (tap to fill it in). */
+  suggest?: { text: string; deload: boolean };
+  onApplySuggest?: () => void;
   onChange: (patch: Partial<WorkoutSet>) => void;
   onToggleDone: () => void;
   onCycleType: () => void;
   onFillPrev: () => void;
 }) {
   if (ex.tracking) {
-    return <CustomSetRow set={set} label={label} ex={ex} prev={prev} coachEdited={coachEdited} onChange={onChange} onToggleDone={onToggleDone} onCycleType={onCycleType} onFillPrev={onFillPrev} />;
+    return <CustomSetRow set={set} label={label} ex={ex} prev={prev} coachEdited={coachEdited} suggest={suggest} onApplySuggest={onApplySuggest} onChange={onChange} onToggleDone={onToggleDone} onCycleType={onCycleType} onFillPrev={onFillPrev} />;
   }
   const showW = (v?: number) => (v === undefined ? undefined : round(fromKg(v, unit), 2));
   const prevText = formatSet(prev, ex, unit);
@@ -190,6 +195,17 @@ export function SetRow({
         </button>
       </div>
 
+      {suggest && !set.done && (
+        <button
+          type="button"
+          onClick={onApplySuggest}
+          aria-label={`Use the suggested target: ${suggest.text}`}
+          className={cn("mt-1 inline-flex min-h-8 max-w-full items-center gap-1 truncate rounded-full px-2.5 py-1 text-[11px] font-bold", suggest.deload ? "bg-pr/15 text-pr" : "bg-accent/15 text-accent")}
+        >
+          {suggest.deload ? "⚡ " : ""}Suggested: {suggest.text}
+        </button>
+      )}
+
       {cardio && (
         <div className="mt-1 flex items-center gap-2 px-1 text-xs text-muted sm:hidden">
           <span>Prev: {prevText}</span>
@@ -231,6 +247,8 @@ function CustomSetRow({
   ex,
   prev,
   coachEdited,
+  suggest,
+  onApplySuggest,
   onChange,
   onToggleDone,
   onCycleType,
@@ -241,6 +259,8 @@ function CustomSetRow({
   ex: Exercise;
   prev?: WorkoutSet;
   coachEdited?: boolean;
+  suggest?: { text: string; deload: boolean };
+  onApplySuggest?: () => void;
   onChange: (patch: Partial<WorkoutSet>) => void;
   onToggleDone: () => void;
   onCycleType: () => void;
@@ -302,6 +322,16 @@ function CustomSetRow({
           <Check size={20} strokeWidth={3} />
         </button>
       </div>
+      {suggest && !set.done && (
+        <button
+          type="button"
+          onClick={onApplySuggest}
+          aria-label={`Use the suggested target: ${suggest.text}`}
+          className={cn("mt-1 inline-flex min-h-8 max-w-full items-center gap-1 truncate rounded-full px-2.5 py-1 text-[11px] font-bold", suggest.deload ? "bg-pr/15 text-pr" : "bg-accent/15 text-accent")}
+        >
+          {suggest.deload ? "⚡ " : ""}Suggested: {suggest.text}
+        </button>
+      )}
       {prev && (
         <button type="button" onClick={onFillPrev} className="mt-1 block w-full truncate rounded-md px-1 text-left text-[11px] text-muted hover:text-ink">
           Previous: {formatCustomSet(prev, tk)} <span className="text-accent">· tap to copy</span>

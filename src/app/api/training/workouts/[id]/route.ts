@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { badRequest, readJson, route } from "@/lib/server/http";
+import { announceWorkout } from "@/lib/server/clientActivity";
 import { alertOnPain } from "@/lib/server/feedback";
-import { patchWorkoutSet, putWorkout, removeWorkout, savedPain } from "@/lib/server/training";
+import { patchWorkoutSet, putWorkout, removeWorkout, savedState } from "@/lib/server/training";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +17,14 @@ export const PUT = route<Ctx>(async (req, ctx) => {
   const { id } = await ctx.params;
   const w = body.workout as { id?: unknown } | undefined;
   if (!w || w.id !== id) throw badRequest("Workout does not match the address.");
-  const before = await savedPain(id);
+  const before = await savedState(id);
   const saved = await putWorkout(me, w);
-  await alertOnPain(me, saved, before);
+  await alertOnPain(me, saved, before?.pain);
+  // A client's workout turning "done" for the first time tells their coach (never for one the coach logged, never twice).
+  if (me.role === "CLIENT" && saved.status === "DONE" && before?.status !== "DONE") {
+    const origin = process.env.APP_URL || new URL(req.url).origin;
+    after(() => announceWorkout(me, saved, origin)); // after the response, so saving stays quick
+  }
   return NextResponse.json({ ok: true });
 });
 

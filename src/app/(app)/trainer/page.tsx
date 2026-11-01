@@ -5,6 +5,7 @@ import { AlertTriangle, Check, ChevronRight, UserCheck, UserX, X } from "lucide-
 import Link from "next/link";
 import { useState } from "react";
 import { PendingAttendance } from "@/components/attendance/PendingAttendance";
+import { ClientActivityBanner } from "@/components/ClientActivityBanner";
 import { SpecialtiesCard } from "@/components/sports/Focus";
 import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
@@ -53,6 +54,8 @@ export default function TrainerDashboard() {
         <Stat label="Next 7 days" value={week.length} sub="booked sessions" />
         <Stat label="Pending requests" value={pending.length} tone={pending.length ? "pr" : undefined} />
       </div>
+
+      <ClientActivityBanner />
 
       <PendingAttendance />
 
