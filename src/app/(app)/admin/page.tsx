@@ -4,9 +4,11 @@ import { format, parseISO } from "date-fns";
 import { Check, Copy, KeyRound, Megaphone, MessageSquare, Plus, Power, ShieldCheck, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { PendingApprovals } from "@/components/admin/PendingApprovals";
 import { BroadcastModal } from "@/components/chat/BroadcastModal";
 import { RoleBadge } from "@/components/chat/RoleBadge";
 import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, Modal, Notice, PageHeader, SectionTitle, Stat } from "@/components/ui";
+import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
 import { coachThread, requestThread } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
 import { api } from "@/lib/store";
@@ -46,6 +48,8 @@ export default function AdminPage() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [toggle, setToggle] = useState<CoachRow | null>(null);
   const [reset, setReset] = useState<CoachRow | null>(null);
+  const [tab, setTab] = useState<"coaches" | "pending">("coaches");
+  const pending = usePendingCoachRequests();
 
   const load = useCallback(async () => {
     const r = await api<Roster>("/api/admin/coaches");
@@ -53,6 +57,10 @@ export default function AdminPage() {
       setRoster(r.data);
       setError(null);
     } else setError(r.error ?? "Could not load coaches.");
+  }, []);
+
+  useEffect(() => {
+    void refreshPendingCount();
   }, []);
 
   useEffect(() => {
@@ -93,6 +101,30 @@ export default function AdminPage() {
 
       {error && <Notice tone="error">{error}</Notice>}
 
+      <div role="tablist" aria-label="Administrator sections" className="flex gap-1.5">
+        {(
+          [
+            ["coaches", "Coaches"],
+            ["pending", "Pending Approvals"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition-colors ${tab === key ? "border-accent bg-accent text-on-accent" : "border-line bg-field text-muted hover:text-ink"}`}
+          >
+            {label}
+            {key === "pending" && pending > 0 && <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${tab === key ? "bg-on-accent text-accent" : "bg-danger text-white"}`}>{pending}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab === "pending" && <PendingApprovals onApproved={() => void load()} />}
+
+      {tab === "coaches" && (
+      <>
       <div className="grid grid-cols-3 gap-3">
         <Stat label="Coaches" value={roster?.totals.coaches ?? "—"} tone="accent" sub="including you" />
         <Stat label="Active" value={roster?.totals.activeCoaches ?? "—"} tone="success" />
@@ -148,6 +180,8 @@ export default function AdminPage() {
           })}
         </div>
       </section>
+      </>
+      )}
 
       <AddCoachModal
         open={adding}

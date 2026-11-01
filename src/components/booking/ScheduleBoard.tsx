@@ -125,7 +125,7 @@ export function ScheduleBoard({ mode, clientId }: { mode: "client" | "trainer"; 
       {mode === "client" && db.settings.travelEnabled && (
         <Card className="mb-4 space-y-2 p-4">
           <Field label="Training at" hint={locReady && travel ? "Times your coach can't reach from another gym are greyed out." : "Pick where you'll train — your coach travels between gyms, so available times depend on it."}>
-            <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} place={place} onPlace={setPlace} />
+            <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} place={place} onPlace={setPlace} homeClientId={clientId} />
           </Field>
         </Card>
       )}

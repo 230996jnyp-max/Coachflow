@@ -1,5 +1,8 @@
 "use client";
 
+import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
+import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
+import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   CalendarDays,
   ChevronsLeft,
@@ -89,6 +92,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
+  const nicheStep = useNicheStepPending();
+  const pendingCoaches = usePendingCoachRequests();
+  const isOwner = !!user?.isOwner;
+  // The owner sees how many coach sign-up requests are waiting (a badge on Admin), refreshed every minute.
+  useEffect(() => {
+    if (!isOwner) return;
+    void refreshPendingCount();
+    const t = setInterval(() => void refreshPendingCount(), 60_000);
+    return () => clearInterval(t);
+  }, [isOwner]);
 
   useEffect(() => {
     if (!ready) return;
@@ -98,6 +111,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [ready, user, forbidden, mustChange, isTrainer, router]);
 
   if (!ready || !user || forbidden || mustChange) return <Splash />;
+  // Right after sign-in (and after the set-your-password screen), a coach chooses their niche before reaching the dashboard.
+  if (isTrainer && nicheStep && !user.mustChangePassword) return <NicheStep />;
 
   const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : CLIENT_NAV;
   const active = (href: string) => pathname === href || pathname.startsWith(href + "/");
@@ -105,7 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const showBanner = activeWorkout && !pathname.startsWith(`/workout/${activeWorkout.id}`);
 
   return (
-    <div className="min-h-dvh bg-bg">
+    <div className="animate-fade-in min-h-dvh bg-bg">
       {/* Desktop / tablet sidebar */}
       <aside
         className={cn(
@@ -135,6 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="relative">
                 {n.icon}
                 {n.href === "/messages" && unread > 0 && <Badge count={unread} />}
+                {n.href === "/admin" && pendingCoaches > 0 && <Badge count={pendingCoaches} />}
               </span>
               {!collapsed && n.label}
             </Link>
@@ -215,6 +231,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className={cn("pb-28 md:pb-10", collapsed ? "md:pl-[72px]" : "md:pl-64")}>
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-8 md:py-8">{children}</div>
+        <NicheSeeder />
       </main>
 
       <ChatSync userId={user.id} threads={threads} />

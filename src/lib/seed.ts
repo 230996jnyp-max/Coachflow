@@ -1,4 +1,5 @@
 import { SEED_EXERCISES, exerciseId } from "@/data/exercises";
+import { STRENGTH } from "./sports";
 import type { AppSettings, DB, RoutineTemplate } from "./types";
 
 /** Bump when the shape of the locally stored (per-device) data changes. */
@@ -25,6 +26,7 @@ function tpl(id: string, name: string, items: [string, number, number, number][]
     ownerId: "system",
     name,
     shared: true,
+    niche: STRENGTH,
     exercises: items.map(([n, sets, repMin, repMax]) => ({ exerciseId: exerciseId(n), sets, repMin, repMax })),
   };
 }
@@ -77,6 +79,7 @@ export function createEmptyDB(): DB {
     users: [],
     clients: [],
     exercises: [...SEED_EXERCISES],
+    tracking: {},
     workouts: [],
     templates: [],
     metrics: [],

@@ -3,9 +3,11 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ExercisePicker } from "@/components/ExerciseLibrary";
+import { NumberInput } from "@/components/NumberInput";
 import { Button, Field, IconButton, Input, Modal, Toggle } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { saveTemplate } from "@/lib/store";
+import { describeSchema } from "@/lib/tracking";
 import type { RoutineTemplate, TemplateExercise } from "@/lib/types";
 import { fromKg, round, toKg, uid, weightUnit } from "@/lib/utils";
 
@@ -87,42 +89,35 @@ function Editor({ template, onClose }: { template: Partial<RoutineTemplate>; onC
                       </IconButton>
                     </div>
                   </div>
-                  {cardio ? (
+                  {ex?.tracking ? (
+                    <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                      <Field label="Sets">
+                        <NumberInput label="Sets" min={1} max={12} value={it.sets} onChange={(v) => patch(i, { sets: v ?? it.sets })} />
+                      </Field>
+                      <p className="pb-2 text-xs text-muted">Logged as {describeSchema(ex.tracking)}.</p>
+                    </div>
+                  ) : cardio ? (
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <Field label="Minutes">
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          value={it.durationSec ? round(it.durationSec / 60, 2) : ""}
-                          onChange={(e) => patch(i, { durationSec: Number(e.target.value) > 0 ? Math.round(Number(e.target.value) * 60) : undefined })}
-                          className="h-10"
-                        />
+                        <NumberInput label="Minutes" decimals={2} step={1} allowEmpty value={it.durationSec ? round(it.durationSec / 60, 2) : undefined} onChange={(v) => patch(i, { durationSec: v && v > 0 ? Math.round(v * 60) : undefined })} />
                       </Field>
                       <Field label="Km">
-                        <Input type="number" inputMode="decimal" min={0} value={it.distanceKm ?? ""} onChange={(e) => patch(i, { distanceKm: Number(e.target.value) > 0 ? Number(e.target.value) : undefined })} className="h-10" />
+                        <NumberInput label="Km" decimals={2} step={0.5} allowEmpty value={it.distanceKm} onChange={(v) => patch(i, { distanceKm: v && v > 0 ? v : undefined })} />
                       </Field>
                     </div>
                   ) : (
-                    <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className="mt-2 grid grid-cols-2 gap-2">
                       <Field label="Sets">
-                        <Input type="number" inputMode="numeric" min={1} max={12} value={it.sets} onChange={(e) => patch(i, { sets: Math.max(1, Number(e.target.value) || 1) })} className="h-10" />
-                      </Field>
-                      <Field label="Min reps">
-                        <Input type="number" inputMode="numeric" min={0} value={it.repMin} onChange={(e) => patch(i, { repMin: Math.max(0, Number(e.target.value) || 0) })} className="h-10" />
-                      </Field>
-                      <Field label="Max reps">
-                        <Input type="number" inputMode="numeric" min={0} value={it.repMax} onChange={(e) => patch(i, { repMax: Math.max(0, Number(e.target.value) || 0) })} className="h-10" />
+                        <NumberInput label="Sets" min={1} max={12} value={it.sets} onChange={(v) => patch(i, { sets: v ?? it.sets })} />
                       </Field>
                       <Field label={`Weight (${weightUnit(unit)})`}>
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          value={it.weight ? round(fromKg(it.weight, unit), 1) : ""}
-                          onChange={(e) => patch(i, { weight: Number(e.target.value) > 0 ? Math.round(toKg(Number(e.target.value), unit) * 100) / 100 : undefined })}
-                          className="h-10"
-                        />
+                        <NumberInput label="Weight" decimals={1} step={2.5} allowEmpty placeholder="Optional" value={it.weight ? round(fromKg(it.weight, unit), 1) : undefined} onChange={(v) => patch(i, { weight: v && v > 0 ? Math.round(toKg(v, unit) * 100) / 100 : undefined })} />
+                      </Field>
+                      <Field label="Min reps">
+                        <NumberInput label="Min reps" value={it.repMin} onChange={(v) => patch(i, { repMin: v ?? it.repMin })} />
+                      </Field>
+                      <Field label="Max reps">
+                        <NumberInput label="Max reps" value={it.repMax} onChange={(v) => patch(i, { repMax: v ?? it.repMax })} />
                       </Field>
                     </div>
                   )}
@@ -130,8 +125,8 @@ function Editor({ template, onClose }: { template: Partial<RoutineTemplate>; onC
                     value={it.notes ?? ""}
                     maxLength={500}
                     onChange={(e) => patch(i, { notes: e.target.value || undefined })}
-                    placeholder="Notes (tempo, rest, cues…)"
-                    aria-label="Exercise notes"
+                    placeholder="Note (tempo, rest, cues…)"
+                    aria-label="Exercise note"
                     className="mt-2 h-10 text-sm"
                   />
                 </div>

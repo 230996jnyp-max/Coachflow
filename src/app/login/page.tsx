@@ -2,6 +2,7 @@
 
 import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Dumbbell, Eye, EyeOff, LogIn } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { InstallButton } from "@/components/InstallButton";
@@ -19,12 +20,26 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set when this form signed the person in: the card fades out as the next screen fades in, instead of flashing a loader.
+  const [submitted, setSubmitted] = useState(false);
+  const [fading, setFading] = useState(false);
   const [idleNotice, setIdleNotice] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (ready && user) router.replace(isTrainer ? "/trainer" : "/home");
-  }, [ready, user, isTrainer, router]);
+    if (!(ready && user)) return;
+    const to = isTrainer ? "/trainer" : "/home";
+    if (!submitted) {
+      router.replace(to);
+      return;
+    }
+    const a = setTimeout(() => setFading(true), 0);
+    const b = setTimeout(() => router.replace(to), 220);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, [ready, user, isTrainer, router, submitted]);
 
   // When the form first appears: fill in this device's last username (never a password), keep the password empty and focused,
   // and explain an inactivity sign-out. Storage is browser-only, so this runs after mount.
@@ -40,17 +55,21 @@ export default function LoginPage() {
     });
   }, [ready, user]);
 
-  if (!ready || user) return <Splash />;
+  if (!ready || (user && !submitted)) return <Splash />;
 
   const attempt = async (u: string, p: string) => {
     setBusy(true);
+    setSubmitted(true);
     const err = await login(u, p);
-    setBusy(false);
-    if (err) setError(err);
+    if (err) {
+      setBusy(false);
+      setSubmitted(false);
+      setError(err);
+    }
   };
 
   return (
-    <div className="pt-safe pb-safe flex min-h-dvh items-center justify-center px-4 py-10">
+    <div className={`pt-safe pb-safe flex min-h-dvh items-center justify-center px-4 py-10 ${fading ? "fade-out" : ""}`}>
       <div className="absolute right-4 top-4">
         <ThemeMenu />
       </div>
@@ -117,6 +136,12 @@ export default function LoginPage() {
             </Button>
             <p className="text-center text-xs text-muted">
               Accounts are created by your coach. Ask them for your username and temporary password.
+            </p>
+            <p className="border-t border-line pt-4 text-center text-sm text-muted">
+              Are you a coach?{" "}
+              <Link href="/signup" className="font-semibold text-accent hover:underline">
+                Sign Up / Request a Coach Account
+              </Link>
             </p>
           </form>
         </Card>

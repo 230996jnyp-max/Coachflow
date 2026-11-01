@@ -1,4 +1,7 @@
+import { JOINTS, STRENGTH, TISSUES } from "@/lib/sports";
+import { TRACKING_PRESETS } from "@/lib/tracking";
 import type { Equipment, Exercise, MeasureType, MuscleGroup } from "@/lib/types";
+import { SPORT_SEEDS } from "./sportExercises";
 
 export const MUSCLES: MuscleGroup[] = [
   "Chest",
@@ -34,6 +37,15 @@ export const EQUIPMENT: Equipment[] = [
   "Trap Bar",
   "Resistance Band",
   "Cardio Machine",
+  "Medicine Ball",
+  "Boxing Gear",
+  "Jump Rope",
+  "Pool",
+  "Court / Field",
+  "Yoga Mat",
+  "Foam Roller",
+  "Cones / Ladder",
+  "Sled",
   "Other",
 ];
 
@@ -461,9 +473,38 @@ function build(): Exercise[] {
           : [],
         equipment: equipment as Equipment,
         type: TYPE_CODE[code || "WR"] ?? "WEIGHT_REPS",
+        discipline: primary === "Cardio" ? "Endurance & Conditioning" : STRENGTH,
       });
     }
   });
+  // Sport drills, technique work and mobility / physio exercises (see sportExercises.ts).
+  for (const group of SPORT_SEEDS) {
+    for (const line of group.lines) {
+      const [name, primary, equipment, secondary = "", tracking = "WR", sub = "", tags = ""] = line.split("|");
+      const id = exerciseId(name);
+      if (seen.has(id) || !MUSCLES.includes(primary as MuscleGroup) || !EQUIPMENT.includes(equipment as Equipment)) continue;
+      seen.add(id);
+      const preset = TRACKING_PRESETS[tracking];
+      const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+      const ex: Exercise = {
+        id,
+        name,
+        primary: primary as MuscleGroup,
+        secondary: secondary.split(",").filter((m) => MUSCLES.includes(m as MuscleGroup) && m !== primary) as MuscleGroup[],
+        equipment: equipment as Equipment,
+        // Sport drills keep a classic type as a fallback; their own columns come from `tracking`.
+        type: preset ? (preset.columns.find((c) => c.key === preset.primary)?.kind === "duration" ? "DURATION_ONLY" : "BODYWEIGHT_REPS") : (TYPE_CODE[tracking] ?? "WEIGHT_REPS"),
+        discipline: group.discipline,
+      };
+      if (sub) ex.subCategory = sub;
+      const joints = tagList.filter((t) => (JOINTS as readonly string[]).includes(t));
+      const tissues = tagList.filter((t) => (TISSUES as readonly string[]).includes(t));
+      if (joints.length) ex.joints = joints;
+      if (tissues.length) ex.tissues = tissues;
+      if (preset) ex.tracking = structuredClone(preset);
+      out.push(ex);
+    }
+  }
   return out;
 }
 

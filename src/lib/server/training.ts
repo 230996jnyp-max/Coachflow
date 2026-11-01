@@ -2,12 +2,15 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { EQUIPMENT, MEASURE_LABELS, MUSCLES, SEED_EXERCISES } from "@/data/exercises";
+import { PAIN_AREAS, type WorkoutFeedback } from "@/lib/feedback";
+import { JOINTS, SUB_CATEGORIES, TISSUES } from "@/lib/sports";
+import { sanitizeTracking } from "@/lib/tracking";
 import { starterTemplates } from "@/lib/seed";
-import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
+import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleGroup, PRKind, RoutineTemplate, SetType, TemplateExercise, TrackingSchema, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, forbidden } from "./http";
-import { coachSettings, customExercises, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
+import { coachSettings, customExercises, exerciseTracking, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
 
 /*
  * Training data (workouts, routine templates, custom exercises). Each record is stored as one AES-256-GCM blob bound to
@@ -101,9 +104,45 @@ function parseSet(raw: unknown): WorkoutSet {
   if (level !== undefined) s.level = level;
   if (calories !== undefined) s.calories = calories;
   if (pr && pr.length) s.pr = pr;
+  // Values for a sport drill's own columns (numbers, or short text for select / text columns).
+  if (r.custom && typeof r.custom === "object" && !Array.isArray(r.custom)) {
+    const custom: Record<string, number | string> = {};
+    for (const [k, v] of Object.entries(r.custom as Record<string, unknown>).slice(0, 12)) {
+      if (!/^[a-z][a-z0-9_]{0,23}$/.test(k)) continue;
+      if (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 10_000_000) custom[k] = v;
+      else if (typeof v === "string" && v.length <= 60) custom[k] = v;
+    }
+    if (Object.keys(custom).length) s.custom = custom;
+  }
   const coachEdit = parseCoachEdit(r.coachEdit);
   if (coachEdit) s.coachEdit = coachEdit;
   return s;
+}
+
+/** Pain / energy (whole numbers 0-10) and the body areas, rebuilt field by field. */
+function parseFeedback(raw: unknown): WorkoutFeedback | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const scale = (v: unknown, name: string) => {
+    const n = num(v, name, 0, 10);
+    return n === undefined ? undefined : Math.round(n);
+  };
+  const out: WorkoutFeedback = {};
+  const pain = scale(r.pain, "Pain");
+  const energy = scale(r.energy, "Energy");
+  if (pain !== undefined) out.pain = pain;
+  if (energy !== undefined) out.energy = energy;
+  const areas = arr(r.areas, "Pain areas", 20).filter((a): a is string => typeof a === "string" && (PAIN_AREAS as readonly string[]).includes(a));
+  if (areas.length && pain) out.areas = [...new Set(areas)];
+  return out.pain !== undefined || out.energy !== undefined ? out : undefined;
+}
+
+/** The pain score saved with a finished workout (so a high score is only reported to the coach once). */
+export async function savedPain(workoutId: string): Promise<number | undefined> {
+  const d = await db();
+  const [row] = await d.select().from(workouts).where(eq(workouts.id, workoutId)).limit(1);
+  if (!row || row.status !== "DONE") return undefined;
+  return openWorkout(row)?.feedback?.pain;
 }
 
 export function parseWorkout(raw: unknown): Workout {
@@ -129,6 +168,8 @@ export function parseWorkout(raw: unknown): Workout {
     loggedById: id(r.loggedById, "Logged by"),
     exercises,
   };
+  const feedback = parseFeedback(r.feedback);
+  if (feedback) w.feedback = feedback;
   if (r.liveStartedAt) w.liveStartedAt = iso(r.liveStartedAt, "Start time");
   if (typeof r.templateId === "string" && r.templateId) w.templateId = id(r.templateId, "Template");
   if (typeof r.groupId === "string" && r.groupId) w.groupId = id(r.groupId, "Group");
@@ -162,6 +203,7 @@ export function parseTemplate(raw: unknown, ownerId: string): RoutineTemplate {
     name: text(r.name, "Name", 120, true),
     shared: r.shared === true,
     ...(r.starter === true ? { starter: true } : {}),
+    ...(text(r.niche, "Niche", 50) ? { niche: text(r.niche, "Niche", 50) } : {}),
     exercises: arr(r.exercises, "Exercises", 80).map(parseTemplateExercise),
   };
 }
@@ -177,7 +219,20 @@ export function parseExercise(raw: unknown, ownerId: string): Exercise {
   if (!EQUIPMENT.includes(equipment)) throw badRequest("Unknown equipment.");
   if (!MEASURES.includes(type)) throw badRequest("Unknown measurement type.");
   const secondary = arr(r.secondary, "Secondary muscles", 8).filter((m): m is MuscleGroup => MUSCLES.includes(m as MuscleGroup) && m !== primary);
-  return { id: exId, name: text(r.name, "Name", 100, true), primary, secondary, equipment, type, custom: true, createdBy: ownerId };
+  const ex: Exercise = { id: exId, name: text(r.name, "Name", 100, true), primary, secondary, equipment, type, custom: true, createdBy: ownerId };
+  const discipline = text(r.discipline, "Sport", 50);
+  if (discipline) ex.discipline = discipline;
+  if (typeof r.subCategory === "string" && (SUB_CATEGORIES as readonly string[]).includes(r.subCategory)) ex.subCategory = r.subCategory;
+  const joints = arr(r.joints, "Joints", 10).filter((j): j is string => typeof j === "string" && (JOINTS as readonly string[]).includes(j));
+  const tissues = arr(r.tissues, "Tendons and ligaments", 10).filter((t): t is string => typeof t === "string" && (TISSUES as readonly string[]).includes(t));
+  if (joints.length) ex.joints = [...new Set(joints)];
+  if (tissues.length) ex.tissues = [...new Set(tissues)];
+  if (r.tracking !== undefined && r.tracking !== null) {
+    const t = sanitizeTracking(r.tracking);
+    if (!t.ok) throw badRequest(t.error);
+    ex.tracking = t.schema;
+  }
+  return ex;
 }
 
 /* ---------------- Scope ---------------- */
@@ -227,8 +282,46 @@ export async function customExercisesFor(me: UserRow): Promise<Exercise[]> {
   return rows.map(openExercise).filter(present);
 }
 
+/* ---------------- A coach's own tracking formats ---------------- */
+const aadTr = (coachId: string, exerciseId: string) => `tracking:${coachId}:${exerciseId}`;
+
+/** The coach's tracking formats for exercises (a client gets their coach's). */
+export async function trackingOverrides(me: UserRow): Promise<Record<string, TrackingSchema>> {
+  const coachId = me.role === "CLIENT" ? me.coachId : me.id;
+  if (!coachId) return {};
+  const d = await db();
+  const rows = await d.select().from(exerciseTracking).where(eq(exerciseTracking.coachId, coachId));
+  const out: Record<string, TrackingSchema> = {};
+  for (const r of rows) {
+    try {
+      const t = sanitizeTracking(decryptJson<{ tracking: unknown }>(r.dataEnc, aadTr(coachId, r.exerciseId)).tracking);
+      if (t.ok) out[r.exerciseId] = t.schema;
+    } catch (e) {
+      console.error("Could not decrypt tracking format", r.exerciseId, e);
+    }
+  }
+  return out;
+}
+
+export async function putTracking(me: UserRow, exerciseId: string, raw: unknown): Promise<TrackingSchema> {
+  const exId = id(exerciseId, "Exercise id");
+  const t = sanitizeTracking(raw);
+  if (!t.ok) throw badRequest(t.error);
+  const d = await db();
+  const values = { coachId: me.id, exerciseId: exId, dataEnc: encryptJson({ tracking: t.schema }, aadTr(me.id, exId)), updatedAt: new Date() };
+  await d.insert(exerciseTracking).values(values).onConflictDoUpdate({ target: [exerciseTracking.coachId, exerciseTracking.exerciseId], set: { dataEnc: values.dataEnc, updatedAt: values.updatedAt } });
+  return t.schema;
+}
+
+export async function deleteTracking(me: UserRow, exerciseId: string): Promise<void> {
+  const d = await db();
+  await d.delete(exerciseTracking).where(and(eq(exerciseTracking.coachId, me.id), eq(exerciseTracking.exerciseId, id(exerciseId, "Exercise id"))));
+}
+
 /* ---------------- Reads ---------------- */
 export interface TrainingPayload {
+  /** The coach's own tracking formats by exercise id (applied on top of the library). */
+  tracking: Record<string, TrackingSchema>;
   workouts: Workout[];
   /** Every workout id `me` can see (lets the browser drop ones deleted elsewhere). */
   ids: string[];
@@ -237,24 +330,28 @@ export interface TrainingPayload {
   now: string;
 }
 
-export async function loadTraining(me: UserRow, since?: Date): Promise<TrainingPayload> {
+/** `recentDays`: only send workouts started in the last N days (plus any in progress), so the first screen appears sooner; `ids` still lists every workout. */
+export async function loadTraining(me: UserRow, since?: Date, recentDays?: number): Promise<TrainingPayload> {
   const d = await db();
   const clientIds = await writableClientIds(me);
-
-  const idRows = await d.select({ id: workouts.id }).from(workouts).where(inArray(workouts.clientId, clientIds));
-  const wRows = since
-    ? await d.select().from(workouts).where(and(inArray(workouts.clientId, clientIds), gte(workouts.updatedAt, since)))
-    : await d.select().from(workouts).where(inArray(workouts.clientId, clientIds));
-
-  const tRows = await d
-    .select()
-    .from(templates)
-    .where(me.role === "CLIENT" && me.coachId ? or(eq(templates.ownerId, me.id), and(eq(templates.ownerId, me.coachId), eq(templates.shared, true))) : eq(templates.ownerId, me.id));
-
   const owners = me.role === "CLIENT" ? [me.id, ...(me.coachId ? [me.coachId] : [])] : clientIds;
-  const xRows = await d.select().from(customExercises).where(inArray(customExercises.ownerId, owners));
+  const mine = inArray(workouts.clientId, clientIds);
+  const recent = recentDays ? or(gte(workouts.startedAt, new Date(Date.now() - recentDays * 86_400_000)), eq(workouts.status, "ACTIVE")) : undefined;
+
+  // The queries don't depend on each other, so they run together: over HTTP each one is a round trip to the database.
+  const [idRows, wRows, tRows, xRows, tracking] = await Promise.all([
+    d.select({ id: workouts.id }).from(workouts).where(mine),
+    d.select().from(workouts).where(since ? and(mine, gte(workouts.updatedAt, since)) : recent ? and(mine, recent) : mine),
+    d
+      .select()
+      .from(templates)
+      .where(me.role === "CLIENT" && me.coachId ? or(eq(templates.ownerId, me.id), and(eq(templates.ownerId, me.coachId), eq(templates.shared, true))) : eq(templates.ownerId, me.id)),
+    d.select().from(customExercises).where(inArray(customExercises.ownerId, owners)),
+    trackingOverrides(me),
+  ]);
 
   return {
+    tracking,
     workouts: wRows.map(openWorkout).filter(present),
     ids: idRows.map((r) => r.id),
     templates: tRows.map(openTemplate).filter(present),

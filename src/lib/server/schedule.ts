@@ -2,8 +2,9 @@ import "server-only";
 import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import type { AvailabilitySlot, Booking, BookingStatus, GymLocation, PlaceInfo, Role, SessionFocus } from "@/lib/types";
 import { badRequest } from "./http";
+import { cleanSports, BASE_FOCUS } from "@/lib/sports";
 import { bufferMinutes, locOf, sameLocation, type LocRef, type TravelNeighbor, type TravelRules } from "@/lib/travel";
-import { openProfile, sealProfile } from "./accounts";
+import { openProfile, sealProfile, type ProfileJson } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { attendance, bookings, coachSettings, groupSessions, gyms, slots, users, type BookingRow, type UserRow } from "./schema";
@@ -15,6 +16,9 @@ export interface Rules extends TravelRules {
   allowCustomGym: boolean;
   /** Coach's UTC offset in minutes (Singapore = 480); positions availability windows. */
   utcOffsetMin: number;
+  /** What the coach specialises in, and the sports they added with AI (names). */
+  specialties: string[];
+  sports: string[];
 }
 
 export const DEFAULT_RULES: Rules = {
@@ -27,12 +31,14 @@ export const DEFAULT_RULES: Rules = {
   travelDefaultMin: 30,
   travelParkingMin: 15,
   travelMaxMin: 90,
+  specialties: [],
+  sports: [],
 };
 
 export const OCCUPYING: BookingStatus[] = ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"];
 export const RESERVING: BookingStatus[] = ["PENDING", "CONFIRMED"];
 export const CHARGED: BookingStatus[] = ["COMPLETED", "NO_SHOW"];
-export const FOCUS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
+export const FOCUS: SessionFocus[] = BASE_FOCUS;
 
 export interface Details {
   notes: string;
@@ -56,11 +62,41 @@ export function parsePlace(raw: unknown): PlaceInfo | undefined {
     out.lat = r.lat;
     out.lng = r.lng;
   }
+  if (r.home === true) out.home = true;
   return out;
+}
+
+/** Applies a `homeAddress` request value ({ place } | { text } | null) to a client's profile. */
+export function applyHomeAddress(p: ProfileJson, raw: unknown): void {
+  if (raw === null) {
+    delete p.homePlace;
+    delete p.homeText;
+    return;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) throw badRequest("That home address isn't valid.");
+  const r = raw as Record<string, unknown>;
+  const place = parsePlace(r.place);
+  if (place) {
+    p.homePlace = { ...place, home: true };
+    delete p.homeText;
+  } else if (typeof r.text === "string") {
+    const t = r.text.replace(/\s+/g, " ").trim().slice(0, 140);
+    if (!t) throw badRequest("Please enter the home address.");
+    p.homeText = t;
+    delete p.homePlace;
+  } else throw badRequest("That home address isn't valid.");
 }
 
 const aad = (id: string) => `booking:${id}`;
 export const sealDetails = (id: string, d: Details) => encryptJson(d, aad(id));
+
+function parseJsonList(s: string | null | undefined): unknown {
+  try {
+    return JSON.parse(s || "[]");
+  } catch {
+    return [];
+  }
+}
 
 export async function rulesFor(coachId: string): Promise<Rules> {
   const d = await db();
@@ -76,6 +112,8 @@ export async function rulesFor(coachId: string): Promise<Rules> {
         travelDefaultMin: r.travelDefaultMin,
         travelParkingMin: r.travelParkingMin,
         travelMaxMin: r.travelMaxMin,
+        specialties: cleanSports(parseJsonList(r.specialties)),
+        sports: cleanSports(parseJsonList(r.sports)),
       }
     : DEFAULT_RULES;
 }
@@ -128,23 +166,25 @@ export async function loadSchedule(me: UserRow) {
   const coachId = coachIdFor(me);
   if (!coachId) return { settings: DEFAULT_RULES, gyms: [], slots: [], bookings: [] };
   const d = await db();
-  const rules = await rulesFor(coachId);
-  const gymRows = await d.select().from(gyms).where(eq(gyms.coachId, coachId));
-  const slotRows = await d.select().from(slots).where(eq(slots.coachId, coachId));
   const since = new Date(Date.now() - 120 * 86400000);
-  const rows = await d
-    .select()
-    .from(bookings)
-    .where(and(eq(bookings.coachId, coachId), gt(bookings.endAt, since)));
+  // Independent reads run together (each one is a round trip to the database).
+  const [rules, gymRows, slotRows, rows] = await Promise.all([
+    rulesFor(coachId),
+    d.select().from(gyms).where(eq(gyms.coachId, coachId)),
+    d.select().from(slots).where(eq(slots.coachId, coachId)),
+    d.select().from(bookings).where(and(eq(bookings.coachId, coachId), gt(bookings.endAt, since))),
+  ]);
 
   const list: Booking[] = [];
   const detailIds = rows.filter((r) => me.role !== "CLIENT" || r.clientId === me.id).map((r) => r.id);
   const marks = new Map<string, { mark: string; charged: boolean }>();
   const sharedBy = new Map<string, string>();
   if (detailIds.length) {
-    const recs = await d.select().from(attendance).where(and(eq(attendance.kind, "BOOKING"), inArray(attendance.sessionId, detailIds)));
+    const [recs, shared] = await Promise.all([
+      d.select().from(attendance).where(and(eq(attendance.kind, "BOOKING"), inArray(attendance.sessionId, detailIds))),
+      d.select({ id: groupSessions.id, bookingId: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, detailIds), ne(groupSessions.status, "CANCELLED"))),
+    ]);
     for (const a of recs) marks.set(`${a.sessionId}:${a.clientId}`, a);
-    const shared = await d.select({ id: groupSessions.id, bookingId: groupSessions.bookingId }).from(groupSessions).where(and(inArray(groupSessions.bookingId, detailIds), ne(groupSessions.status, "CANCELLED")));
     for (const g of shared) if (g.bookingId) sharedBy.set(g.bookingId, g.id);
   }
   for (const r of rows) {

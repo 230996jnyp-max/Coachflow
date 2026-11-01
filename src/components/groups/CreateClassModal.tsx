@@ -3,6 +3,8 @@
 import { format } from "date-fns";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
+import { NumberInput } from "@/components/NumberInput";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Button, Field, Input, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
 import { gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
@@ -111,15 +113,15 @@ function Form({ onClose, initialDate }: { onClose: () => void; initialDate?: Dat
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Start time">
-            <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
+            <TimeSelect value={time} onChange={setTime} />
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Length (min)">
-            <Input type="number" inputMode="numeric" min={15} max={300} step={5} value={minutes} onChange={(e) => setMinutes(Number(e.target.value) || 0)} />
+            <NumberInput label="Length (min)" compact min={15} max={300} step={5} value={minutes} onChange={(v) => setMinutes(v ?? minutes)} />
           </Field>
           <Field label="Max spots" hint="2 – 30">
-            <Input type="number" inputMode="numeric" min={2} max={30} value={capacity} onChange={(e) => setCapacity(Math.round(Number(e.target.value)) || 0)} />
+            <NumberInput label="Max spots" compact min={2} max={30} value={capacity} onChange={(v) => setCapacity(v ?? capacity)} />
           </Field>
           <Field label="Repeat weekly">
             <Select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))}>

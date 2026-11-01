@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { requestNicheStep } from "./nicheGate";
 import { del, get, set } from "idb-keyval";
 import { parseISO } from "date-fns";
 import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
-import { clearActive, isIdleStale, markActive, rememberUsername, setIdleNotice } from "./idle";
+import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
 import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
@@ -33,6 +34,7 @@ import type {
   RoutineTemplate,
   SessionFocus,
   SetType,
+  TrackingSchema,
   UnitSystem,
   User,
   Workout,
@@ -68,6 +70,8 @@ let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let cloudSafe = false;
 /** Server time of the last successful training sync (workouts are fetched incrementally from here). */
 let trainingSince: string | undefined;
+/** The first load only brought recent workouts; the next refresh must read everything. */
+let trainingPartial = false;
 /** Set once the first server load finished, so changes made before it are not mistaken for edits. */
 let trainingLoaded = false;
 
@@ -166,10 +170,15 @@ function flushTraining(keepalive: boolean) {
 }
 
 interface TrainingData {
+  /** The coach's own tracking formats by exercise id. */
+  tracking?: Record<string, TrackingSchema>;
   workouts: Workout[];
   ids: string[];
   templates: RoutineTemplate[];
   exercises: Exercise[];
+  /** Shared niche drills; every one on a full load, only the new ones after that. */
+  global?: Exercise[];
+  globalFull?: boolean;
   now: string;
 }
 
@@ -205,14 +214,22 @@ function applyTraining(data: TrainingData) {
   for (const x of customNow) if (exerciseQ.busy(x.id)) xMap.set(x.id, x);
   const xChanged = xMap.size !== customNow.length || customNow.some((x) => !sameJson(xMap.get(x.id), x));
 
-  if (!changed && !tChanged && !xChanged) return;
+  // Shared niche drills: a full load replaces them, later loads only add the new ones.
+  const sharedNow = cur.exercises.filter((e) => e.global);
+  const gMap = new Map((data.globalFull ? [] : sharedNow).map((e) => [e.id, e]));
+  for (const g of data.global ?? []) gMap.set(g.id, g);
+  const gChanged = gMap.size !== sharedNow.length || sharedNow.some((e) => !gMap.has(e.id));
+
+  const trChanged = !sameJson(cur.tracking ?? {}, data.tracking ?? {});
+  if (!changed && !tChanged && !xChanged && !trChanged && !gChanged) return;
   setState({
     ...state,
     db: {
       ...cur,
+      tracking: trChanged ? (data.tracking ?? {}) : cur.tracking,
       workouts: changed ? [...wMap.values()] : cur.workouts,
       templates: tChanged ? [...tMap.values()] : cur.templates,
-      exercises: xChanged ? [...SEED_EXERCISES, ...xMap.values()] : cur.exercises,
+      exercises: xChanged || gChanged ? [...SEED_EXERCISES, ...gMap.values(), ...xMap.values()] : cur.exercises,
     },
   });
 }
@@ -221,7 +238,7 @@ function applyTraining(data: TrainingData) {
 export async function refreshTraining(full = false): Promise<boolean> {
   const forUser = state.sessionUserId;
   if (!forUser) return false;
-  const q = !full && trainingSince ? `?since=${encodeURIComponent(trainingSince)}` : "";
+  const q = !full && !trainingPartial && trainingSince ? `?since=${encodeURIComponent(trainingSince)}` : "";
   const r = await api<TrainingData>(`/api/training${q}`);
   if (state.sessionUserId !== forUser) return false;
   if (r.status === 401) {
@@ -231,6 +248,7 @@ export async function refreshTraining(full = false): Promise<boolean> {
   if (!r.ok || !r.data) return false;
   applyTraining(r.data);
   trainingSince = new Date(Date.parse(r.data.now) - 10_000).toISOString();
+  trainingPartial = false;
   return true;
 }
 
@@ -272,6 +290,10 @@ interface BootstrapData {
 
 /** Loads the session (if any) and this user's device-local data. Returns true when signed in. */
 async function establishSession(): Promise<boolean> {
+  // A device that was active recently (or has just signed in) is almost certainly still signed in, so everything the first screen
+  // needs is requested at once instead of one after another. Recent workouts come first; the full history follows in the background.
+  const likely = readLastActive() !== null && !isIdleStale();
+  const early = likely ? { training: api<TrainingData>("/api/training?recent=1"), schedule: api<ScheduleData>("/api/schedule"), groups: api<GroupsData>("/api/groups") } : null;
   const r = await api<BootstrapData>("/api/bootstrap");
   if (!r.ok || !r.data?.user) {
     // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
@@ -281,6 +303,9 @@ async function establishSession(): Promise<boolean> {
     return false;
   }
   const me = r.data.user;
+  const trainingReq = early?.training ?? api<TrainingData>("/api/training?recent=1");
+  const scheduleReq = early?.schedule ?? api<ScheduleData>("/api/schedule");
+  const groupsReq = early?.groups ?? api<GroupsData>("/api/groups");
   let local: DB | undefined;
   try {
     local = await get<DB>(localKey(me.id));
@@ -295,38 +320,54 @@ async function establishSession(): Promise<boolean> {
   exerciseQ.clear();
   trainingSince = undefined;
   trainingLoaded = false;
+  trainingPartial = false;
   cloudSafe = false;
 
-  const migrated = await migrateLocalData(me, local);
-  const training = await api<TrainingData>("/api/training");
+  // A device that has not uploaded its old local data yet does so first, then reads what the server has.
+  let migrated = true;
+  let training = await trainingReq;
+  try {
+    if (!(await get(`coachflow-cloud-v1:${me.id}`))) {
+      migrated = await migrateLocalData(me, local);
+      training = await api<TrainingData>("/api/training?recent=1");
+    }
+  } catch {
+    migrated = await migrateLocalData(me, local);
+  }
   const serverOk = training.ok && !!training.data;
   cloudSafe = migrated && serverOk;
   const server = training.data;
+  const [sched, grp] = await Promise.all([scheduleReq, groupsReq]);
 
-  setState({
-    ready: true,
-    sessionUserId: me.id,
-    db: {
-      ...local,
-      settings: { ...DEFAULT_SETTINGS, ...local.settings },
-      users: r.data.users,
-      clients: r.data.clients,
-      gyms: [],
-      slots: [],
-      bookings: [],
-      groups: [],
-      groupRequests: [],
-      notifications: [],
-      // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
-      workouts: server ? server.workouts : local.workouts,
-      templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
-      exercises: server ? [...SEED_EXERCISES, ...server.exercises] : local.exercises,
-    },
-  });
+  const base: DB = {
+    ...local,
+    settings: { ...DEFAULT_SETTINGS, ...local.settings },
+    users: r.data.users,
+    clients: r.data.clients,
+    gyms: [],
+    slots: [],
+    bookings: [],
+    groups: [],
+    groupRequests: [],
+    notifications: [],
+    // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
+    workouts: server ? server.workouts : local.workouts,
+    templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
+    exercises: server ? [...SEED_EXERCISES, ...(server.global ?? []), ...server.exercises] : local.exercises,
+    tracking: server?.tracking ?? local.tracking ?? {},
+  };
+  // The schedule (with the coach's niches) and the classes are in before the app appears, so nothing pops in afterwards.
+  const withSchedule = sched.ok && sched.data ? { ...base, ...scheduleSlice(base, sched.data) } : base;
+  const withGroups = grp.ok && grp.data ? { ...withSchedule, groups: grp.data.groups, groupRequests: grp.data.requests, notifications: grp.data.notifications } : withSchedule;
+  setState({ ready: true, sessionUserId: me.id, db: withGroups });
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
   trainingLoaded = serverOk;
-  await refreshSchedule();
-  await refreshGroups();
+  if (serverOk) {
+    trainingPartial = true;
+    void refreshTraining(true); // the rest of the workout history, quietly
+  }
+  if (!(sched.ok && sched.data)) await refreshSchedule();
+  if (!(grp.ok && grp.data)) await refreshGroups();
   return true;
 }
 
@@ -461,11 +502,13 @@ export function useNow(intervalMs = 30_000): Date {
 export async function login(username: string, password: string): Promise<string | null> {
   const r = await api("/api/auth/login", { body: { username, password } });
   if (!r.ok) return r.error ?? "Login failed.";
+  markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
   if (ok) {
     rememberUsername(username); // only the username is remembered on this device, never the password
-    markActive();
+    requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
   }
+  if (!ok) clearActive();
   return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
 }
 
@@ -484,6 +527,16 @@ export async function logout() {
   trainingSince = undefined;
   await api("/api/auth/logout", { method: "POST", body: {} });
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
+}
+
+/** Changes the signed-in person's own username (coaches may also keep signing in with their email). Returns an error message or null. */
+export async function changeUsername(username: string): Promise<string | null> {
+  const r = await api<{ username?: string }>("/api/me", { method: "PATCH", body: { username } });
+  if (!r.ok) return r.error ?? "Could not change the username.";
+  const me = state.sessionUserId;
+  const next = r.data?.username ?? username.trim().toLowerCase();
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === me ? { ...u, username: next } : u)) }));
+  return null;
 }
 
 export async function changePassword(current: string, next: string): Promise<string | null> {
@@ -567,11 +620,32 @@ export async function createClient(input: NewClientInput): Promise<{ ok: true; i
 export async function updateClient(id: string, patch: { user?: Partial<User>; profile?: Partial<ClientProfile> }): Promise<string | null> {
   const body: Record<string, unknown> = { ...(patch.profile ?? {}) };
   if (patch.user?.name !== undefined) body.name = patch.user.name;
+  if (patch.user?.username !== undefined) body.username = patch.user.username;
   delete body.coachId;
   delete body.startDate;
   const r = await api<ClientResponse>(`/api/clients/${id}`, { method: "PATCH", body });
   if (!r.ok || !r.data) return r.error ?? "Could not save changes.";
   applyClient(r.data);
+  return null;
+}
+
+/** Saves where a client trains at home (their own profile, or the coach editing a client). Private to the client and their coach. */
+export async function saveHomeAddress(clientId: string, home: { place?: PlaceInfo | null; text?: string } | null): Promise<string | null> {
+  const body = { homeAddress: home === null ? null : home.place ? { place: home.place } : { text: home.text ?? "" } };
+  const self = state.sessionUserId === clientId;
+  const r = self ? await api("/api/me", { method: "PATCH", body }) : await api<ClientResponse>(`/api/clients/${clientId}`, { method: "PATCH", body });
+  if (!r.ok) return r.error ?? "Could not save the home address.";
+  mutate((db) => ({
+    ...db,
+    clients: db.clients.map((c) => {
+      if (c.id !== clientId) return c;
+      const { homePlace: _p, homeText: _t, ...rest } = c;
+      void _p;
+      void _t;
+      if (home === null) return rest;
+      return home.place ? { ...rest, homePlace: { ...home.place, home: true } } : { ...rest, homeText: home.text ?? "" };
+    }),
+  }));
   return null;
 }
 
@@ -629,6 +703,31 @@ export function addExercise(ex: Omit<Exercise, "id" | "custom">): Exercise {
   const full: Exercise = { ...ex, id: uid("ex"), custom: true, createdBy: state.sessionUserId ?? undefined };
   mutate((db) => ({ ...db, exercises: [...db.exercises, full] }));
   return full;
+}
+
+/** The coach sets their own tracking format (set columns + chart metric) for an exercise; their clients get it too. */
+export async function saveTrackingFormat(exerciseId: string, tracking: TrackingSchema): Promise<string | null> {
+  const r = await api<{ tracking: TrackingSchema }>(`/api/training/tracking/${exerciseId}`, { method: "PUT", body: { tracking } });
+  if (!r.ok || !r.data) return r.error ?? "Could not save the tracking format.";
+  mutate((db) => ({ ...db, tracking: { ...(db.tracking ?? {}), [exerciseId]: r.data!.tracking } }));
+  return null;
+}
+
+/** Back to the exercise's default tracking format. */
+export async function resetTrackingFormat(exerciseId: string): Promise<string | null> {
+  const r = await api(`/api/training/tracking/${exerciseId}`, { method: "DELETE" });
+  if (!r.ok) return r.error ?? "Could not reset the tracking format.";
+  mutate((db) => {
+    const { [exerciseId]: _gone, ...rest } = db.tracking ?? {};
+    void _gone;
+    return { ...db, tracking: rest };
+  });
+  return null;
+}
+
+/** Coach: assign what a client trains (single or several focuses). The client's exercise pickers follow it. */
+export async function saveClientFocuses(clientId: string, focuses: string[]): Promise<string | null> {
+  return updateClient(clientId, { profile: { focuses } });
 }
 
 export function saveTemplate(t: RoutineTemplate) {
@@ -870,6 +969,8 @@ interface RulesData {
   travelDefaultMin: number;
   travelParkingMin: number;
   travelMaxMin: number;
+  specialties?: string[];
+  sports?: string[];
 }
 
 interface ScheduleData {
@@ -879,18 +980,19 @@ interface ScheduleData {
   bookings: Booking[];
 }
 
+/** The parts of the local database that come from the schedule endpoint. */
+function scheduleSlice(db: DB, data: ScheduleData): Pick<DB, "gyms" | "slots" | "bookings" | "settings"> {
+  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
+  return {
+    gyms: data.gyms,
+    slots: data.slots,
+    bookings: data.bookings,
+    settings: { ...db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
+  };
+}
+
 function applySchedule(data: ScheduleData) {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin } = data.settings;
-  setState({
-    ...state,
-    db: {
-      ...state.db,
-      gyms: data.gyms,
-      slots: data.slots,
-      bookings: data.bookings,
-      settings: { ...state.db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin },
-    },
-  });
+  setState({ ...state, db: { ...state.db, ...scheduleSlice(state.db, data) } });
 }
 
 /** Re-reads the coach's rules, gyms, availability and bookings (a client sees their own coach's, with other clients' sessions shown only as "booked"). */
@@ -1005,6 +1107,18 @@ export async function rescheduleBooking(id: string, start: Date, gymId: string |
   if (!r.ok || !r.data) return r.error ?? "Could not reschedule.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", "CLIENT");
+  return null;
+}
+
+/** Changes a session's date/time, place, focus and comments. The coach may do all of it; a client may too, within the notice rules and open slots. */
+export async function editBooking(id: string, patch: { start?: Date; gymId?: string | null; customGym?: string; place?: PlaceInfo | null; focus?: SessionFocus; notes?: string; waiveTravel?: boolean }, role: Role): Promise<string | null> {
+  const r = await api<{ booking: Booking; moved?: boolean }>(`/api/bookings/${id}`, {
+    method: "PATCH",
+    body: { action: "edit", ...patch, start: patch.start?.toISOString(), place: patch.place ?? undefined, waiveTravel: patch.waiveTravel || undefined },
+  });
+  if (!r.ok || !r.data) return r.error ?? "Could not save the changes.";
+  replaceBooking(r.data.booking);
+  if (r.data.moved && state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "REQUEST", role === "CLIENT" ? "TRAINER" : "CLIENT");
   return null;
 }
 
@@ -1205,29 +1319,59 @@ export async function fetchCreditLog(clientId?: string): Promise<{ stats: Attend
 
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
+function pushRules() {
+  const s = state.db.settings;
+  return api("/api/schedule/settings", {
+    method: "PUT",
+    body: {
+      sessionMinutes: s.sessionMinutes,
+      noticeHours: s.noticeHours,
+      autoConfirm: s.autoConfirm,
+      allowCustomGym: s.allowCustomGym,
+      travelEnabled: s.travelEnabled,
+      travelDefaultMin: s.travelDefaultMin,
+      travelParkingMin: s.travelParkingMin,
+      travelMaxMin: s.travelMaxMin,
+      specialties: s.specialties ?? [],
+      sports: s.sports ?? [],
+      utcOffsetMin: -new Date().getTimezoneOffset(),
+    },
+  });
+}
+
 export function updateSettings(patch: Partial<AppSettings>) {
   mutate((db) => ({ ...db, settings: { ...db.settings, ...patch } }));
   if (RULE_KEYS.some((k) => k in patch)) {
     if (rulesTimer) clearTimeout(rulesTimer);
-    rulesTimer = setTimeout(() => {
-      const s = state.db.settings;
-      void api("/api/schedule/settings", {
-        method: "PUT",
-        body: {
-          sessionMinutes: s.sessionMinutes,
-          noticeHours: s.noticeHours,
-          autoConfirm: s.autoConfirm,
-          allowCustomGym: s.allowCustomGym,
-          travelEnabled: s.travelEnabled,
-          travelDefaultMin: s.travelDefaultMin,
-          travelParkingMin: s.travelParkingMin,
-          travelMaxMin: s.travelMaxMin,
-          utcOffsetMin: -new Date().getTimezoneOffset(),
-        },
-      });
-    }, 600);
+    rulesTimer = setTimeout(() => void pushRules(), 600);
   }
+}
+
+/** Saves settings to the server right away (the niche step needs the server to know the niches before it loads their drills). */
+export async function updateSettingsNow(patch: Partial<AppSettings>): Promise<boolean> {
+  mutate((db) => ({ ...db, settings: { ...db.settings, ...patch } }));
+  if (rulesTimer) clearTimeout(rulesTimer);
+  return (await pushRules()).ok;
+}
+
+/** Browsing other niches: pulls in every shared drill (not just the coach's own niches). */
+export async function loadAllNicheExercises(): Promise<void> {
+  const r = await api<{ exercises: Exercise[] }>("/api/training/global");
+  if (!r.ok || !r.data) return;
+  const have = new Set(state.db.exercises.map((e) => e.id));
+  const fresh = r.data.exercises.filter((e) => !have.has(e.id));
+  if (fresh.length === 0) return;
+  const custom = state.db.exercises.filter((e) => e.custom);
+  const rest = state.db.exercises.filter((e) => !e.custom);
+  setState({ ...state, db: { ...state.db, exercises: [...rest, ...fresh, ...custom] } });
+}
+
+/** Hides a shared-library drill for this coach (and their clients). Custom exercises are deleted instead. */
+export async function hideSharedExercise(id: string, hide = true): Promise<void> {
+  if (hide) setState({ ...state, db: { ...state.db, exercises: state.db.exercises.filter((e) => e.id !== id) } });
+  await api("/api/training/hidden", { method: "PUT", body: { id, hide } });
+  if (!hide) await refreshTraining(true);
 }

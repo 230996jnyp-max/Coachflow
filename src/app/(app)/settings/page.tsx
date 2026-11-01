@@ -6,9 +6,14 @@ import { Bell, Compass, KeyRound, LogOut, Mail, MapPin, Pencil, Plus, ShieldChec
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { HomeAddressField } from "@/components/HomeAddressField";
+import { UsernameField } from "@/components/UsernameField";
+import { SpecialtiesCard } from "@/components/sports/Focus";
+import { requestNicheStep } from "@/lib/nicheGate";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
 import { PasswordBanner } from "@/components/PasswordBanner";
+import { NumberInput } from "@/components/NumberInput";
 import {
   Avatar,
   Badge,
@@ -79,6 +84,9 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
+          <div className="border-t border-line pt-4">
+            <UsernameField />
+          </div>
           <div className="space-y-3 border-t border-line pt-4">
             <div>
               <div className="text-sm font-semibold">Theme</div>
@@ -109,6 +117,11 @@ export default function SettingsPage() {
               ]}
             />
           </div>
+          {!isTrainer && (
+            <div className="border-t border-line pt-4">
+              <HomeAddressField clientId={user.id} label="Home address (for sessions at home)" hint="Your coach travels here when a session is at home. Only you and your coach can see it." />
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 border-t border-line pt-4">
             <Link href="/settings/password">
               <Button variant="secondary">
@@ -226,6 +239,13 @@ export default function SettingsPage() {
       {isTrainer && (
         <>
           <section>
+            <SectionTitle>Specialties &amp; sports</SectionTitle>
+            <SpecialtiesCard />
+            <Button variant="secondary" className="mt-3" onClick={requestNicheStep}>
+              Change my niche
+            </Button>
+          </section>
+          <section>
             <SectionTitle
               action={
                 <Button size="sm" onClick={() => setGymModal({ name: "", address: "", active: true })}>
@@ -270,33 +290,13 @@ export default function SettingsPage() {
                   <Input value={s.brandName} onChange={(e) => updateSettings({ brandName: e.target.value })} />
                 </Field>
                 <Field label="Session length (minutes)">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={15}
-                    step={15}
-                    value={s.sessionMinutes}
-                    onChange={(e) => updateSettings({ sessionMinutes: Math.max(15, Number(e.target.value) || 60) })}
-                  />
+                  <NumberInput commitOnBlur label="Session length (minutes)" min={15} max={480} step={15} value={s.sessionMinutes} onChange={(v) => updateSettings({ sessionMinutes: v ?? s.sessionMinutes })} />
                 </Field>
                 <Field label="Minimum notice (hours)" hint="Clients can’t book or cancel inside this window.">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    value={s.noticeHours}
-                    onChange={(e) => updateSettings({ noticeHours: Math.max(0, Number(e.target.value) || 0) })}
-                  />
+                  <NumberInput commitOnBlur label="Minimum notice (hours)" min={0} max={720} value={s.noticeHours} onChange={(v) => updateSettings({ noticeHours: v ?? s.noticeHours })} />
                 </Field>
                 <Field label="Default rest timer (seconds)">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={15}
-                    step={15}
-                    value={s.restSeconds}
-                    onChange={(e) => updateSettings({ restSeconds: Math.max(15, Number(e.target.value) || 90) })}
-                  />
+                  <NumberInput commitOnBlur label="Default rest timer (seconds)" min={15} max={600} step={15} value={s.restSeconds} onChange={(v) => updateSettings({ restSeconds: v ?? s.restSeconds })} />
                 </Field>
               </div>
               <Toggle
@@ -321,34 +321,13 @@ export default function SettingsPage() {
                 {s.travelEnabled && (
                   <div className="grid gap-4 sm:grid-cols-3">
                     <Field label="Default buffer (min)" hint="Used when a location has no map position.">
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step={5}
-                        value={s.travelDefaultMin}
-                        onChange={(e) => updateSettings({ travelDefaultMin: Math.max(0, Math.min(240, Number(e.target.value) || 0)) })}
-                      />
+                      <NumberInput commitOnBlur label="Default buffer (min)" min={0} max={240} step={5} value={s.travelDefaultMin} onChange={(v) => updateSettings({ travelDefaultMin: v ?? s.travelDefaultMin })} />
                     </Field>
                     <Field label="Parking / walk (min)" hint="Added to the estimated drive.">
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step={5}
-                        value={s.travelParkingMin}
-                        onChange={(e) => updateSettings({ travelParkingMin: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })}
-                      />
+                      <NumberInput commitOnBlur label="Parking / walk (min)" min={0} max={120} step={5} value={s.travelParkingMin} onChange={(v) => updateSettings({ travelParkingMin: v ?? s.travelParkingMin })} />
                     </Field>
                     <Field label="Longest buffer (min)" hint="No buffer is ever longer than this.">
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step={5}
-                        value={s.travelMaxMin}
-                        onChange={(e) => updateSettings({ travelMaxMin: Math.max(0, Math.min(240, Number(e.target.value) || 0)) })}
-                      />
+                      <NumberInput commitOnBlur label="Longest buffer (min)" min={0} max={240} step={5} value={s.travelMaxMin} onChange={(v) => updateSettings({ travelMaxMin: v ?? s.travelMaxMin })} />
                     </Field>
                   </div>
                 )}

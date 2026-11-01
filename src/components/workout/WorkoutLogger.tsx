@@ -1,6 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
+import { NumberInput } from "@/components/NumberInput";
 import {
   ArrowDown,
   ArrowUp,
@@ -11,6 +12,7 @@ import {
   MoreHorizontal,
   NotebookPen,
   Plus,
+  Sparkles,
   Trash2,
   Trophy,
   X,
@@ -21,6 +23,8 @@ import { useMemo, useState } from "react";
 import { ExercisePicker } from "@/components/ExerciseLibrary";
 import { ExerciseDetailModal } from "@/components/exercise/ExerciseDetail";
 import { GymSelect } from "@/components/GymSelect";
+import { ClientFocusBadge } from "@/components/sports/Focus";
+import { TrackingEditorModal } from "@/components/sports/TrackingEditorModal";
 import {
   Avatar,
   Badge,
@@ -38,6 +42,7 @@ import {
 } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { annotatePRs, doneWorkouts, findPrevious, PR_LABELS, workoutSetCount, workoutVolume } from "@/lib/stats";
+import { describeSchema, hasTrackedValue } from "@/lib/tracking";
 import {
   blankSet,
   deleteWorkout,
@@ -50,6 +55,7 @@ import {
 } from "@/lib/store";
 import type { Exercise, PRKind, SetType, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { cn, fmtClock, fmtDurationShort, fmtVolume, weightUnit } from "@/lib/utils";
+import { FeelingCard } from "./FeelingCard";
 import { makeRest, RestTimerBar, type RestState } from "./RestTimer";
 import { SET_CYCLE, SetHeader, SetRow } from "./SetRow";
 
@@ -71,6 +77,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
   const [menu, setMenu] = useState<string | null>(null);
   const [hint, setHint] = useState<{ weId: string; msg: string } | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [trackFor, setTrackFor] = useState<Exercise | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [summary, setSummary] = useState(false);
   const [templateName, setTemplateName] = useState<string | null>(null);
@@ -157,6 +164,10 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
   const fillFrom = (prev: WorkoutSet | undefined, ex: Exercise): Partial<WorkoutSet> => {
     if (!prev) return {};
     const p: Partial<WorkoutSet> = {};
+    if (ex.tracking) {
+      if (prev.custom) p.custom = { ...prev.custom };
+      return p;
+    }
     if (ex.type === "WEIGHT_REPS" || ex.type === "WEIGHTED_BODYWEIGHT") {
       p.weight = prev.weight;
       p.reps = prev.reps;
@@ -185,8 +196,9 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
     (Object.keys(fill) as (keyof WorkoutSet)[]).forEach((k) => {
       if (merged[k] === undefined && fill[k] !== undefined) (merged as unknown as Record<string, unknown>)[k] = fill[k];
     });
-    const valid =
-      ex.type === "DURATION_ONLY"
+    const valid = ex.tracking
+      ? hasTrackedValue(merged, ex.tracking)
+      : ex.type === "DURATION_ONLY"
         ? !!merged.durationSec
         : ex.type === "DURATION_DISTANCE"
           ? !!merged.durationSec || !!merged.distanceKm
@@ -194,7 +206,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
     if (!valid) {
       flash(
         we.id,
-        ex.type === "DURATION_ONLY" ? "Enter a duration first." : ex.type === "DURATION_DISTANCE" ? "Enter a time or distance first." : "Enter reps first.",
+        ex.tracking ? "Fill in at least one number or time first." : ex.type === "DURATION_ONLY" ? "Enter a duration first." : ex.type === "DURATION_DISTANCE" ? "Enter a time or distance first." : "Enter reps first.",
       );
       return;
     }
@@ -270,6 +282,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
               <span className="font-semibold">{client.name}</span>
             </span>
           )}
+          {client && isTrainer && <ClientFocusBadge clientId={w.clientId} />}
           <Badge className={w.loggedBy === "TRAINER" ? "border-accent/30 bg-accent/15 text-accent" : undefined}>
             Logged by {w.loggedBy === "TRAINER" ? "Trainer" : "Client"}
           </Badge>
@@ -322,14 +335,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
           </Field>
           {!w.liveStartedAt && (
             <Field label="Duration (minutes)" hint="Back-dated logs use a manual duration.">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={w.durationSec ? Math.round(w.durationSec / 60) : ""}
-                onChange={(e) => up((x) => ({ ...x, durationSec: Math.max(0, Number(e.target.value) || 0) * 60 }))}
-                placeholder="60"
-              />
+              <NumberInput label="Duration (min)" min={1} max={1440} allowEmpty placeholder="60" value={w.durationSec ? Math.round(w.durationSec / 60) : undefined} onChange={(v) => up((x) => ({ ...x, durationSec: (v ?? 0) * 60 }))} />
             </Field>
           )}
           <Field label="Session notes">
@@ -380,8 +386,9 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                   <button type="button" onClick={() => setInfoFor(ex)} className="block max-w-full truncate text-left font-bold text-accent hover:underline" aria-label={`${ex.name} — view photo, muscles and history`}>
                     {ex.name}
                   </button>
-                  <div className="text-xs text-muted">
+                  <div className="truncate text-xs text-muted">
                     {ex.primary} · {ex.equipment}
+                    {ex.tracking && ` · ${describeSchema(ex.tracking)}`}
                   </div>
                 </div>
                 <div className="relative">
@@ -401,6 +408,17 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                         >
                           Add note
                         </MenuItem>
+                        {isTrainer && (
+                          <MenuItem
+                            icon={<Sparkles size={16} />}
+                            onClick={() => {
+                              setTrackFor(ex);
+                              setMenu(null);
+                            }}
+                          >
+                            Customize tracking with AI
+                          </MenuItem>
+                        )}
                         <MenuItem icon={<ArrowUp size={16} />} onClick={() => { move(we.id, -1); setMenu(null); }}>
                           Move up
                         </MenuItem>
@@ -486,6 +504,12 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
         })}
       </div>
 
+      {!isActive && (
+        <Card className="mt-4 p-4">
+          <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} />
+        </Card>
+      )}
+
       <div className="mt-4 space-y-2">
         <Button variant="outline" size="lg" className="w-full" onClick={() => setPicker(true)}>
           <Plus size={18} /> Add Exercise
@@ -503,11 +527,13 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
       </div>
 
       <ExerciseDetailModal exercise={infoFor} onClose={() => setInfoFor(null)} clientId={w.clientId} />
+      <TrackingEditorModal exercise={trackFor} onClose={() => setTrackFor(null)} />
 
       {rest && <RestTimerBar rest={rest} onChange={setRest} onDismiss={() => setRest(null)} />}
 
       <ExercisePicker
         open={picker}
+        clientId={w.clientId}
         onClose={() => setPicker(false)}
         onConfirm={(ids) =>
           up((x) => ({
@@ -612,6 +638,9 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
           ) : (
             <Notice>Great work — consistency builds records. No new PRs this time.</Notice>
           )}
+          <div className="border-t border-line pt-4">
+            <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} notes={w.notes} onNotes={(v) => up((x) => ({ ...x, notes: v }))} />
+          </div>
         </div>
       </Modal>
     </div>

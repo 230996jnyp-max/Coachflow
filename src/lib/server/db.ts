@@ -1,5 +1,6 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
+import { createHash } from "node:crypto";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { DDL } from "./schema";
@@ -34,9 +35,34 @@ async function open(): Promise<Db> {
   }
   const client = neon(connectionString());
   const d = drizzle(client, { schema });
-  // Tables are created on first use, so a fresh Neon database needs no manual migration.
-  for (const stmt of DDL) await client.query(stmt);
+  await ensureSchema(client);
   return d as unknown as Db;
+}
+
+/**
+ * Tables are created on first use, so a fresh Neon database needs no manual migration. The DDL is a lot of statements, and over
+ * HTTP each one is a round trip, so it is (1) skipped when the stored fingerprint of the DDL matches, and (2) otherwise sent as
+ * one batched transaction. A cold start on an up-to-date database therefore costs a single quick query.
+ */
+async function ensureSchema(client: NeonQueryFunction<false, false>): Promise<void> {
+  const fingerprint = createHash("sha1").update(DDL.join(";")).digest("hex");
+  try {
+    const rows = (await client.query("SELECT v FROM schema_meta WHERE id = 1")) as { v?: string }[];
+    if (rows[0]?.v === fingerprint) return;
+  } catch {
+    /* no schema_meta table yet: first run (or an older database) */
+  }
+  try {
+    await client.transaction((txn) => [
+      txn.query("CREATE TABLE IF NOT EXISTS schema_meta (id integer PRIMARY KEY, v text NOT NULL)"),
+      ...DDL.map((stmt) => txn.query(stmt)),
+      txn.query("INSERT INTO schema_meta (id, v) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v", [fingerprint]),
+    ]);
+  } catch (e) {
+    // Never block the app on the fast path: fall back to one statement at a time.
+    console.error("Batched schema setup failed, retrying one by one", e instanceof Error ? e.message : "");
+    for (const stmt of DDL) await client.query(stmt);
+  }
 }
 
 export function db(): Promise<Db> {

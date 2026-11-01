@@ -4,13 +4,18 @@
 import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Badge, Card, Modal, Select, Segmented } from "@/components/ui";
+import { Sparkles } from "lucide-react";
+import { SchemaPreview, TrackingEditorModal } from "@/components/sports/TrackingEditorModal";
+import { Badge, Button, Card, Modal, Select, Segmented } from "@/components/ui";
 import { axisProps, C, ChartBox, tooltipStyle } from "@/components/progress/chartKit";
 import { MEASURE_LABELS } from "@/data/exercises";
+import { hideSharedExercise } from "@/lib/store";
 import { useViewer } from "@/lib/hooks";
 import { mediaImage, useExerciseMedia, type MediaEntry } from "@/lib/exerciseMedia";
+import { disciplineOf, sportLabel, STRENGTH } from "@/lib/sports";
 import { doneWorkouts, exerciseHistory, formatSet, type ExercisePoint } from "@/lib/stats";
-import type { Exercise, MeasureType } from "@/lib/types";
+import { formatValue, isChartable, trackingPoints } from "@/lib/tracking";
+import type { Exercise, MeasureType, Workout } from "@/lib/types";
 import { cn, fmtClock, fromKg, round, weightUnit } from "@/lib/utils";
 import { MuscleMap } from "./MuscleMap";
 
@@ -69,7 +74,10 @@ function PRMedal({ className }: { className?: string }) {
 }
 
 export function ExerciseDetailModal({ exercise, onClose, clientId }: { exercise: Exercise | null; onClose: () => void; clientId?: string }) {
-  return exercise ? <Detail key={exercise.id} exercise={exercise} onClose={onClose} clientId={clientId} /> : null;
+  // Always show the current version (the coach may have just changed its tracking format).
+  const { exMap } = useViewer();
+  const current = exercise ? (exMap.get(exercise.id) ?? exercise) : null;
+  return current ? <Detail key={current.id} exercise={current} onClose={onClose} clientId={clientId} /> : null;
 }
 
 function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: () => void; clientId?: string }) {
@@ -78,6 +86,7 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
   const [tab, setTab] = useState<Tab>("summary");
   const [picked, setPicked] = useState<string | null>(null);
   const [metricKey, setMetricKey] = useState<keyof ExercisePoint | null>(null);
+  const [customizing, setCustomizing] = useState(false);
 
   const choices = useMemo(
     () => (isTrainer ? clients.filter((c) => !c.profile.archived).map((c) => ({ id: c.user.id, name: c.user.name })) : user ? [{ id: user.id, name: user.name }] : []),
@@ -139,15 +148,52 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
             <Media exercise={exercise} entry={entry} loading={loading} />
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{exercise.equipment}</Badge>
-              <Badge>{MEASURE_LABELS[exercise.type]}</Badge>
+              {exercise.tracking ? null : <Badge>{MEASURE_LABELS[exercise.type]}</Badge>}
+              {disciplineOf(exercise) !== STRENGTH && <Badge className="border-accent/30 bg-accent/10 text-accent">{sportLabel(disciplineOf(exercise))}</Badge>}
+              {exercise.subCategory && <Badge>{exercise.subCategory}</Badge>}
+              {[...(exercise.joints ?? []), ...(exercise.tissues ?? [])].map((t) => (
+                <Badge key={t} className="border-accent/30 bg-accent/10 text-accent">
+                  {t}
+                </Badge>
+              ))}
               {entry?.lv && <Badge className="capitalize">{entry.lv}</Badge>}
               {exercise.custom && <Badge className="border-accent/30 bg-accent/15 text-accent">Custom</Badge>}
             </div>
+            {exercise.tracking && (
+              <Card className="space-y-2 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted">What you log</div>
+                  {isTrainer && (
+                    <Button size="sm" variant="secondary" onClick={() => setCustomizing(true)}>
+                      <Sparkles size={14} /> Customize tracking with AI
+                    </Button>
+                  )}
+                </div>
+                <SchemaPreview schema={exercise.tracking} />
+              </Card>
+            )}
+            {!exercise.tracking && isTrainer && (
+              <Button size="sm" variant="secondary" onClick={() => setCustomizing(true)}>
+                <Sparkles size={14} /> Customize tracking with AI
+              </Button>
+            )}
+            {exercise.global && isTrainer && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void hideSharedExercise(exercise.id);
+                  onClose();
+                }}
+              >
+                Hide from my library
+              </Button>
+            )}
             {/* Exercises without a photo already show the muscle diagram in the media area above. */}
             {(entry || loading) && (
               <Card className="p-4">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Muscles worked</div>
-                <MuscleMap primary={exercise.primary} secondary={exercise.secondary} />
+                <MuscleMap primary={exercise.primary} secondary={exercise.secondary} joints={exercise.joints} tissues={exercise.tissues} />
               </Card>
             )}
 
@@ -165,7 +211,9 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
                   </Select>
                 )}
               </div>
-              {series.length === 0 ? (
+              {exercise.tracking ? (
+                <TrackingProgress workouts={workouts} exercise={exercise} />
+              ) : series.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted">No history for this exercise yet. Log a workout with it to see progress and PRs here.</p>
               ) : (
                 <>
@@ -207,6 +255,8 @@ function Detail({ exercise, onClose, clientId }: { exercise: Exercise; onClose: 
             </Card>
           </>
         )}
+
+        <TrackingEditorModal exercise={customizing ? exercise : null} onClose={() => setCustomizing(false)} />
 
         {tab === "history" && (
           <div className="space-y-2">
@@ -293,8 +343,8 @@ function Media({ exercise, entry, loading }: { exercise: Exercise; entry: MediaE
   if (!entry || broken) {
     return (
       <div className="rounded-2xl border border-line bg-field/50 p-4">
-        <MuscleMap primary={exercise.primary} secondary={exercise.secondary} />
-        <p className="mt-2 text-center text-[11px] text-muted">No photo for this exercise — showing the muscles it trains.</p>
+        <MuscleMap primary={exercise.primary} secondary={exercise.secondary} joints={exercise.joints} tissues={exercise.tissues} />
+        <p className="mt-2 text-center text-[11px] text-muted">No photo for this exercise — showing the {exercise.joints?.length || exercise.tissues?.length ? "muscles and joints" : "muscles"} it trains.</p>
       </div>
     );
   }
@@ -321,5 +371,54 @@ function Media({ exercise, entry, loading }: { exercise: Exercise; entry: MediaE
         </div>
       )}
     </div>
+  );
+}
+
+/** Progress for a sport drill with its own columns: pick any number / time / calculation and chart it session by session. */
+function TrackingProgress({ workouts, exercise }: { workouts: Workout[]; exercise: Exercise }) {
+  const tk = exercise.tracking!;
+  const metrics = tk.columns.filter(isChartable);
+  const [key, setKey] = useState(tk.primary);
+  const points = useMemo(() => trackingPoints(workouts, exercise.id, tk), [workouts, exercise.id, tk]);
+  const col = metrics.find((c) => c.key === key) ?? metrics.find((c) => c.key === tk.primary) ?? metrics[0];
+  if (!col) return null;
+  const lowerIsBetter = col.kind === "computed" && col.op === "per100";
+  const series = points.filter((p) => p.values[col.key] !== undefined).map((p) => ({ label: format(parseISO(p.date), "d MMM"), v: p.values[col.key] }));
+  if (series.length === 0) return <p className="py-6 text-center text-sm text-muted">No history for this exercise yet. Log a workout with it to see {col.label} here.</p>;
+  const best = series.reduce((b, p) => (lowerIsBetter ? (p.v <= b.v ? p : b) : p.v >= b.v ? p : b));
+  const asClock = col.kind === "duration" || (col.kind === "computed" && col.op === "per100");
+  return (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-3xl font-bold tabular-nums">{formatValue(col, best.v)}</div>
+          <div className="text-sm text-muted">
+            {lowerIsBetter ? "Best (fastest)" : "Best"} {col.label} · {best.label}
+          </div>
+        </div>
+        <PRMedal className="h-14 w-14 shrink-0" />
+      </div>
+      <ChartBox height={200}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={series} margin={{ left: -14, right: 10, top: 10 }}>
+            <CartesianGrid stroke={C.grid} vertical={false} />
+            <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" />
+            <YAxis {...axisProps} domain={[0, "dataMax + 5"]} tickFormatter={(v) => (asClock ? fmtClock(v) : String(Math.round(v)))} />
+            <Tooltip {...tooltipStyle} formatter={(v) => [formatValue(col, Number(v)), col.label]} />
+            <Line dataKey="v" stroke={C.accent} strokeWidth={2.5} dot={{ r: 3.5, fill: C.accent, strokeWidth: 0 }} activeDot={{ r: 5 }} />
+            <ReferenceDot x={best.label} y={best.v} r={6} fill="#FACC15" stroke="#fff" strokeWidth={2} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartBox>
+      {metrics.length > 1 && (
+        <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto">
+          {metrics.map((m) => (
+            <button key={m.key} onClick={() => setKey(m.key)} className={cn("min-h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition-colors", m.key === col.key ? "bg-accent text-on-accent" : "bg-field text-muted hover:text-ink")}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

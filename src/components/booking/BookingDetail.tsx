@@ -1,22 +1,19 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { Check, Clock, MapPin, MessageSquare, Target, X } from "lucide-react";
+import { Check, Clock, MapPin, MessageSquare, Pencil, Target, X } from "lucide-react";
 import { useState } from "react";
-import { GymSelect } from "@/components/GymSelect";
-import { Avatar, Button, Field, Input, Modal, Notice, Select, Toggle } from "@/components/ui";
+import { Avatar, Button, Field, Modal, Notice, Select } from "@/components/ui";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
-import { classesAsBookings } from "@/components/groups/groupUi";
-import { bookingToGymValue, directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
-import type { PlaceInfo } from "@/lib/types";
+import { directionsUrl, isHomeLocation } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
-import { atTime, canCancel, travelProblem, ymd } from "@/lib/scheduling";
-import { locOf } from "@/lib/travel";
-import { cancelBookingAs, rescheduleBooking, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
+import { canCancel } from "@/lib/scheduling";
+import { cancelBookingAs, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
 import Link from "next/link";
 import { RollCallPanel } from "@/components/attendance/Attendance";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation, StatusBadge, timeRange } from "./bookingUi";
+import { EditSessionForm } from "./EditSessionForm";
 
 /** Details for a single booking. Clients can cancel (inside policy); the trainer can run the whole lifecycle. */
 export function BookingDetail({ bookingId, onClose }: { bookingId: string | null; onClose: () => void }) {
@@ -27,12 +24,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const { db, isTrainer } = useViewer();
   const now = useNow(30_000);
   const b = db.bookings.find((x) => x.id === bookingId);
-  const [resched, setResched] = useState(false);
-  const [date, setDate] = useState(() => (b ? ymd(parseISO(b.start)) : ""));
-  const [time, setTime] = useState(() => (b ? format(parseISO(b.start), "HH:mm") : "09:00"));
-  const [gym, setGym] = useState(() => (b ? bookingToGymValue(b) : ""));
-  const [place, setPlace] = useState<PlaceInfo | null>(() => b?.place ?? null);
-  const [waive, setWaive] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [groupSize, setGroupSize] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,13 +33,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const shared = db.groups.find((g) => g.kind === "SHARED" && g.status === "OPEN" && (g.bookingId === b.id || (!isTrainer && g.mine?.role === "OWNER" && g.start === b.start)));
   const partners = shared ? Math.max(0, shared.confirmed - 1) : 0;
   const client = db.users.find((u) => u.id === b.clientId);
-  const newStart = atTime(date, time);
-  const travel = (() => {
-    if (!resched || !gym || !isGymComplete(gym) || Number.isNaN(newStart.getTime())) return null;
-    const loc = gymToBooking(gym, db.gyms);
-    const end = new Date(newStart.getTime() + db.settings.sessionMinutes * 60000);
-    return travelProblem([...db.bookings, ...classesAsBookings(db.groups)], newStart, end, locOf({ gymId: loc.gymId, customGym: loc.customGym, place: placeForBooking(gym, place) ?? undefined }), db.settings, b.id);
-  })();
+  const home = isHomeLocation(b);
   const cancelErr = canCancel(b, now, db.settings, isTrainer ? "TRAINER" : "CLIENT");
   const active = b.status === "PENDING" || b.status === "CONFIRMED";
   const charged = b.status === "COMPLETED" || b.status === "NO_SHOW";
@@ -73,7 +59,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           </Line>
           <Line icon={<MapPin size={16} />}>
             <LocationPill label={bookingLocation(b, db.gyms).label} href={bookingLocation(b, db.gyms).href} />
-            {b.place?.address && <div className="text-xs text-muted">{b.place.address}</div>}
+            {b.place?.address && b.place.address !== b.place.name && !bookingLocation(b, db.gyms).label.includes(b.place.address) && <div className="text-xs text-muted">{b.place.address}</div>}
           </Line>
           <Line icon={<Target size={16} />}>{b.focus}</Line>
           {b.notes && <Line icon={<MessageSquare size={16} />}>{b.notes}</Line>}
@@ -112,7 +98,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           </div>
         )}
 
-        {!isTrainer && !shared && active && (
+        {!isTrainer && !shared && active && !home && (
           <div className="space-y-2 rounded-xl border border-line p-3">
             <div className="text-sm font-semibold">Open to a group / partner session</div>
             <p className="text-xs text-muted">Let other clients ask to join. They’re only added when you and your coach both approve.</p>
@@ -163,54 +149,14 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           </div>
         )}
 
-        {isTrainer && active && (
+        {active && (
           <div className="space-y-3">
-            {!resched ? (
-              <Button variant="outline" className="w-full" onClick={() => setResched(true)}>
-                Reschedule
+            {!editing ? (
+              <Button variant="outline" className="w-full" onClick={() => setEditing(true)}>
+                <Pencil size={16} /> Edit session
               </Button>
             ) : (
-              <div className="space-y-3 rounded-xl border border-line p-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Date">
-                    <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-                  </Field>
-                  <Field label="Time">
-                    <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
-                  </Field>
-                </div>
-                <Field label="Gym location">
-                  <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
-                </Field>
-                {db.settings.travelEnabled && (travel || waive) && (
-                  <div className="space-y-1">
-                    <Notice tone={waive ? "info" : "warn"}>{waive ? "Travel buffer waived for this change." : travel}</Notice>
-                    <Toggle checked={waive} onChange={setWaive} label="Waive travel buffer" />
-                  </div>
-                )}
-                {error && <Notice tone="error">{error}</Notice>}
-                <div className="flex gap-2">
-                  <Button variant="secondary" className="flex-1" onClick={() => setResched(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (!gym || !isGymComplete(gym)) return setError("Choose a gym and its exact location.");
-                      const loc = gymToBooking(gym, db.gyms);
-                      if (travel && !waive) return setError(`${travel} Switch on “Waive travel buffer” to save anyway.`);
-                      setBusy(true);
-                      const err = await rescheduleBooking(b.id, atTime(date, time), loc.gymId, loc.customGym, placeForBooking(gym, place), waive);
-                      setBusy(false);
-                      if (err) setError(err);
-                      else onClose();
-                    }}
-                  >
-                    Save new time
-                  </Button>
-                </div>
-              </div>
+              <EditSessionForm booking={b} onCancel={() => setEditing(false)} onDone={onClose} />
             )}
           </div>
         )}
@@ -234,7 +180,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
             </Button>
           </>
         )}
-        {error && !resched && <Notice tone="error">{error}</Notice>}
+        {error && !editing && <Notice tone="error">{error}</Notice>}
       </div>
     </Modal>
   );

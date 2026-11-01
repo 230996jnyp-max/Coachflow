@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { badRequest, readJson, route } from "@/lib/server/http";
-import { patchWorkoutSet, putWorkout, removeWorkout } from "@/lib/server/training";
+import { alertOnPain } from "@/lib/server/feedback";
+import { patchWorkoutSet, putWorkout, removeWorkout, savedPain } from "@/lib/server/training";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,9 @@ export const PUT = route<Ctx>(async (req, ctx) => {
   const { id } = await ctx.params;
   const w = body.workout as { id?: unknown } | undefined;
   if (!w || w.id !== id) throw badRequest("Workout does not match the address.");
-  await putWorkout(me, w);
+  const before = await savedPain(id);
+  const saved = await putWorkout(me, w);
+  await alertOnPain(me, saved, before);
   return NextResponse.json({ ok: true });
 });
 

@@ -6,7 +6,8 @@ import { db } from "@/lib/server/db";
 import { logCredit } from "@/lib/server/credits";
 import { whenText } from "@/lib/server/groups";
 import { badRequest, conflict, notFound, readJson, route, str } from "@/lib/server/http";
-import { clientCredits, FOCUS, hasConflict, parsePlace, requestLoc, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck, loadSchedule } from "@/lib/server/schedule";
+import { focusAllowed } from "@/lib/sports";
+import { clientCredits, hasConflict, parsePlace, requestLoc, reservedCount, rulesFor, sealDetails, slotAllowed, toBooking, travelCheck, loadSchedule } from "@/lib/server/schedule";
 import { bookings, gyms } from "@/lib/server/schema";
 import { and, eq } from "drizzle-orm";
 import type { SessionFocus } from "@/lib/types";
@@ -35,7 +36,7 @@ export const POST = route(async (req) => {
   if (Number.isNaN(start.getTime())) throw badRequest("Invalid start time.");
   const end = new Date(start.getTime() + rules.sessionMinutes * 60000);
 
-  const focus: SessionFocus = FOCUS.includes(body.focus as SessionFocus) ? (body.focus as SessionFocus) : "Full Body";
+  const focus: SessionFocus = typeof body.focus === "string" && focusAllowed(body.focus, rules.sports) ? body.focus : "Full Body";
   const gymId = typeof body.gymId === "string" && body.gymId ? body.gymId.slice(0, 80) : null;
   const place = gymId ? undefined : parsePlace(body.place);
   const customGym = str(body.customGym, "Location", { optional: true, max: 140 }) || place?.name || "";

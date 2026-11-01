@@ -67,6 +67,74 @@ export const coachSettings = pgTable("coach_settings", {
   travelMaxMin: integer("travel_max_min").notNull().default(90),
   /** The coach's starter routines were created once (so a second device or a deleted routine never re-adds them). */
   templatesSeeded: boolean("templates_seeded").notNull().default(false),
+  /** Coaching specialties and the sports the coach added with AI (JSON arrays of names). */
+  specialties: text("specialties").notNull().default("[]"),
+  sports: text("sports").notNull().default("[]"),
+  /** Niches whose starter routines were already copied to this coach (so a deleted routine never comes back), and the shared-library drills the coach hid (JSON arrays). */
+  nicheTemplates: text("niche_templates").notNull().default("[]"),
+  hiddenExercises: text("hidden_exercises").notNull().default("[]"),
+});
+
+/**
+ * The shared exercise library: drills generated for a niche (Yoga, Powerlifting, Muay Thai ...) that every coach working in that
+ * niche can use. Nothing personal is stored, so it is plain JSON. Deduplicated by niche + normalised name.
+ */
+export const globalExercises = pgTable(
+  "global_exercises",
+  {
+    id: text("id").primaryKey(),
+    niche: text("niche").notNull(),
+    nameKey: text("name_key").notNull(),
+    data: text("data").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("global_exercises_niche_idx").on(t.niche)],
+);
+
+/**
+ * Coach sign-up requests from the public form. The owner approves (a coach account is created and the login is emailed) or declines.
+ * The phone number is personal data, so it is stored encrypted; `ip_hash` only exists to limit how often one network can ask.
+ */
+export const coachSignupRequests = pgTable(
+  "coach_signup_requests",
+  {
+    id: text("id").primaryKey(),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    phoneEnc: text("phone_enc").notNull(),
+    /** PENDING | APPROVED | REJECTED */
+    status: text("status").notNull().default("PENDING"),
+    ipHash: text("ip_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: text("reviewed_by"),
+    /** The coach account created on approval. */
+    coachId: text("coach_id"),
+  },
+  (t) => [index("coach_signup_status_idx").on(t.status, t.createdAt)],
+);
+export type CoachSignupRow = typeof coachSignupRequests.$inferSelect;
+
+/** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
+export const globalTemplates = pgTable(
+  "global_templates",
+  {
+    id: text("id").primaryKey(),
+    niche: text("niche").notNull(),
+    data: text("data").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("global_templates_niche_idx").on(t.niche)],
+);
+
+/** Progress of the background library builder for a niche (a short lock stops two coaches building the same niche at once). */
+export const nicheSeed = pgTable("niche_seed", {
+  niche: text("niche").primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  /** Batches in a row that added (almost) nothing new; the builder stops at 2. */
+  stale: integer("stale").notNull().default(0),
+  batches: integer("batches").notNull().default(0),
+  done: boolean("done").notNull().default(false),
 });
 
 export const gyms = pgTable(
@@ -164,6 +232,18 @@ export const customExercises = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("custom_exercises_owner_idx").on(t.ownerId)],
+);
+
+/** A coach's own tracking format for one exercise (set-table columns + the chart metric), applied to the coach and their clients. */
+export const exerciseTracking = pgTable(
+  "exercise_tracking",
+  {
+    coachId: text("coach_id").notNull(),
+    exerciseId: text("exercise_id").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.coachId, t.exerciseId] })],
 );
 
 /**
@@ -277,6 +357,7 @@ export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
+export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
 export type BookingRow = typeof bookings.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 
@@ -392,6 +473,54 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS custom_exercises_owner_idx ON custom_exercises (owner_id)`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS specialties text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS sports text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS niche_templates text NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS hidden_exercises text NOT NULL DEFAULT '[]'`,
+  `CREATE TABLE IF NOT EXISTS global_exercises (
+    id text PRIMARY KEY,
+    niche text NOT NULL,
+    name_key text NOT NULL,
+    data text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (niche, name_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS global_exercises_niche_idx ON global_exercises (niche)`,
+  `CREATE TABLE IF NOT EXISTS coach_signup_requests (
+    id text PRIMARY KEY,
+    full_name text NOT NULL,
+    email text NOT NULL,
+    phone_enc text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    ip_hash text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    reviewed_at timestamptz,
+    reviewed_by text,
+    coach_id text
+  )`,
+  `CREATE INDEX IF NOT EXISTS coach_signup_status_idx ON coach_signup_requests (status, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS coach_signup_pending_email ON coach_signup_requests (email) WHERE status = 'PENDING'`,
+  `CREATE TABLE IF NOT EXISTS global_templates (
+    id text PRIMARY KEY,
+    niche text NOT NULL,
+    data text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS global_templates_niche_idx ON global_templates (niche)`,
+  `CREATE TABLE IF NOT EXISTS niche_seed (
+    niche text PRIMARY KEY,
+    locked_until timestamptz,
+    stale integer NOT NULL DEFAULT 0,
+    batches integer NOT NULL DEFAULT 0,
+    done boolean NOT NULL DEFAULT false
+  )`,
+  `CREATE TABLE IF NOT EXISTS exercise_tracking (
+    coach_id text NOT NULL,
+    exercise_id text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (coach_id, exercise_id)
+  )`,
   `CREATE TABLE IF NOT EXISTS group_sessions (
     id text PRIMARY KEY,
     coach_id text NOT NULL,

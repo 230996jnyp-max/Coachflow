@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ExercisePicker } from "@/components/ExerciseLibrary";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
+import { NumberInput } from "@/components/NumberInput";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Avatar, Badge, Button, Card, EmptyState, Field, Input, Modal, Notice, SectionTitle, Select, Textarea } from "@/components/ui";
 import { directionsUrl } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
@@ -376,15 +378,15 @@ function EditForm({ g, onClose }: { g: GroupSession; onClose: () => void }) {
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Start time">
-            <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
+            <TimeSelect value={time} onChange={setTime} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Length (min)">
-            <Input type="number" inputMode="numeric" min={15} max={300} step={5} value={minutes} onChange={(e) => setMinutes(Number(e.target.value) || 0)} />
+            <NumberInput label="Length (min)" min={15} max={300} step={5} value={minutes} onChange={(v) => setMinutes(v ?? minutes)} />
           </Field>
           <Field label="Max spots" hint="2 – 30">
-            <Input type="number" inputMode="numeric" min={2} max={30} value={capacity} onChange={(e) => setCapacity(Math.round(Number(e.target.value)) || 0)} />
+            <NumberInput label="Max spots" min={2} max={30} value={capacity} onChange={(v) => setCapacity(v ?? capacity)} />
           </Field>
         </div>
         <Field label="Group workout">
@@ -484,18 +486,30 @@ function StartForm({ g, onClose }: { g: GroupSession; onClose: () => void }) {
           </Field>
         ) : (
           <div className="space-y-2">
-            {plan.map((row, i) => (
-              <div key={row.exerciseId + i} className="grid grid-cols-[1fr_64px_64px_64px_36px] items-center gap-2">
-                <div className="truncate text-sm font-semibold">{exMap.get(row.exerciseId)?.name ?? "Exercise"}</div>
-                <Input aria-label="Sets" type="number" inputMode="numeric" min={1} max={20} value={row.sets} onChange={(e) => setPlan((p) => p.map((r, j) => (j === i ? { ...r, sets: Math.max(1, Number(e.target.value) || 1) } : r)))} />
-                <Input aria-label="Min reps" type="number" inputMode="numeric" min={0} value={row.repMin} onChange={(e) => setPlan((p) => p.map((r, j) => (j === i ? { ...r, repMin: Math.max(0, Number(e.target.value) || 0) } : r)))} />
-                <Input aria-label="Max reps" type="number" inputMode="numeric" min={0} value={row.repMax} onChange={(e) => setPlan((p) => p.map((r, j) => (j === i ? { ...r, repMax: Math.max(0, Number(e.target.value) || 0) } : r)))} />
-                <button type="button" aria-label="Remove exercise" className="text-muted hover:text-danger" onClick={() => setPlan((p) => p.filter((_, j) => j !== i))}>
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            ))}
-            {plan.length > 0 && <div className="grid grid-cols-[1fr_64px_64px_64px_36px] gap-2 text-[10px] font-bold uppercase tracking-wider text-muted"><span /><span>Sets</span><span>Reps min</span><span>Reps max</span><span /></div>}
+            {plan.map((row, i) => {
+              const edit = (patch: Partial<typeof row>) => setPlan((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+              return (
+                <div key={row.exerciseId + i} className="space-y-2 rounded-xl border border-line p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-sm font-semibold">{exMap.get(row.exerciseId)?.name ?? "Exercise"}</div>
+                    <button type="button" aria-label="Remove exercise" className="flex h-8 w-8 shrink-0 items-center justify-center text-muted hover:text-danger" onClick={() => setPlan((p) => p.filter((_, j) => j !== i))}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field label="Sets">
+                      <NumberInput compact label="Sets" min={1} max={20} value={row.sets} onChange={(v) => edit({ sets: v ?? row.sets })} />
+                    </Field>
+                    <Field label="Min reps">
+                      <NumberInput compact label="Min reps" value={row.repMin} onChange={(v) => edit({ repMin: v ?? row.repMin })} />
+                    </Field>
+                    <Field label="Max reps">
+                      <NumberInput compact label="Max reps" value={row.repMax} onChange={(v) => edit({ repMax: v ?? row.repMax })} />
+                    </Field>
+                  </div>
+                </div>
+              );
+            })}
             <Button variant="outline" onClick={() => setPicker(true)}>
               <Plus size={16} /> Add exercises
             </Button>

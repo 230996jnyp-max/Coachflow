@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { SEED_EXERCISES } from "@/data/exercises";
+import { isHomeLocation } from "@/lib/gyms";
 import { findPrevious } from "@/lib/stats";
 import type { AppNotification, Exercise, GroupMember, GroupRequest, GroupSession, MemberStatus, PlaceInfo, TemplateExercise, Workout, WorkoutSet } from "@/lib/types";
 import { openProfile, usersByIds } from "./accounts";
@@ -245,14 +246,21 @@ export async function loadGroups(me: UserRow): Promise<GroupsPayload> {
   const coachId = me.role === "CLIENT" ? me.coachId : me.id;
   const empty: GroupsPayload = { groups: [], requests: [], notifications: [], unread: 0 };
   if (!coachId) return empty;
-  await expireRequests(coachId);
   const d = await db();
   const since = new Date(Date.now() - 120 * 86400000);
-  const rows = await d.select().from(groupSessions).where(and(eq(groupSessions.coachId, coachId), gt(groupSessions.endAt, since)));
-  const members = await membersOf(rows.map((r) => r.id));
-  const att = new Map([...(await attendanceFor("GROUP", rows.map((r) => r.id))), ...(await attendanceFor("BOOKING", rows.filter((r) => r.bookingId).map((r) => r.bookingId as string)))]);
+  // The coach's templates only supply class names, so they load alongside the sessions (independent reads run together).
+  const [, rows, tRows] = await Promise.all([
+    expireRequests(coachId),
+    d.select().from(groupSessions).where(and(eq(groupSessions.coachId, coachId), gt(groupSessions.endAt, since))),
+    d.select().from(templates).where(eq(templates.ownerId, coachId)),
+  ]);
+  const [members, attGroup, attBooking] = await Promise.all([
+    membersOf(rows.map((r) => r.id)),
+    attendanceFor("GROUP", rows.map((r) => r.id)),
+    attendanceFor("BOOKING", rows.filter((r) => r.bookingId).map((r) => r.bookingId as string)),
+  ]);
+  const att = new Map([...attGroup, ...attBooking]);
 
-  const tRows = await d.select().from(templates).where(eq(templates.ownerId, coachId));
   const templateNames = new Map<string, string>();
   for (const t of tRows) {
     try {
@@ -666,6 +674,7 @@ export async function shareBooking(me: UserRow, bookingId: string, capacity: num
   const [existing] = await d.select().from(groupSessions).where(and(eq(groupSessions.bookingId, bookingId), ne(groupSessions.status, "CANCELLED"))).limit(1);
   if (existing) throw conflict("This session is already open to partners.");
   const bk = toBooking(b);
+  if (isHomeLocation(bk)) throw badRequest("Sessions at home stay private, so they can't be opened to partners.");
   await logCredit({ clientId: me.id, coachId: b.coachId, pool: "GROUP", kind: "RESERVED", delta: 0, sessionType: "Group Class", label: "Partner session", note: "Opened to partners — uses a group credit instead of a 1-on-1 credit" });
   return insertGroup({
     coachId: b.coachId,

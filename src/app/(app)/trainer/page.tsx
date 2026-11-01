@@ -5,9 +5,11 @@ import { AlertTriangle, Check, ChevronRight, UserCheck, UserX, X } from "lucide-
 import Link from "next/link";
 import { useState } from "react";
 import { PendingAttendance } from "@/components/attendance/PendingAttendance";
+import { SpecialtiesCard } from "@/components/sports/Focus";
 import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
+import { FeelingBadge } from "@/components/workout/FeelingCard";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
@@ -19,6 +21,14 @@ export default function TrainerDashboard() {
   const { db, user, clients } = useViewer();
   const now = useNow(30_000);
   const [detail, setDetail] = useState<string | null>(null);
+  // Until the coach picks their specialties, offer it once on the dashboard (they can dismiss it).
+  const [skipSpecialties, setSkipSpecialties] = useState(() => {
+    try {
+      return localStorage.getItem("coachflow-specialties-skip") === "1";
+    } catch {
+      return false;
+    }
+  });
   if (!user) return null;
 
   const sod = startOfDay(now);
@@ -45,6 +55,20 @@ export default function TrainerDashboard() {
       </div>
 
       <PendingAttendance />
+
+      {!(db.settings.specialties ?? []).length && !skipSpecialties && (
+        <SpecialtiesCard
+          compact
+          onDismiss={() => {
+            setSkipSpecialties(true);
+            try {
+              localStorage.setItem("coachflow-specialties-skip", "1");
+            } catch {
+              /* ignore */
+            }
+          }}
+        />
+      )}
 
       {pending.length > 0 && (
         <section>
@@ -148,6 +172,7 @@ export default function TrainerDashboard() {
                     {format(parseISO(w.startedAt), "EEE d MMM, h:mm a")} · {fmtDurationShort(w.durationSec)} · {workoutSetCount(w)} sets
                   </div>
                 </div>
+                <FeelingBadge feedback={w.feedback} />
                 <ChevronRight size={16} className="text-muted" />
               </Card>
             </Link>

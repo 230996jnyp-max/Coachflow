@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
+import { CORE_SPORTS, cleanSports } from "@/lib/sports";
 import { int, readJson, route } from "@/lib/server/http";
 import { DEFAULT_RULES, rulesFor } from "@/lib/server/schedule";
 import { coachSettings } from "@/lib/server/schema";
@@ -23,11 +24,18 @@ export const PUT = route(async (req) => {
     travelDefaultMin: "travelDefaultMin" in body ? int(body.travelDefaultMin, "Default travel buffer", 0, 240) : cur.travelDefaultMin,
     travelParkingMin: "travelParkingMin" in body ? int(body.travelParkingMin, "Parking buffer", 0, 120) : cur.travelParkingMin,
     travelMaxMin: "travelMaxMin" in body ? int(body.travelMaxMin, "Maximum travel buffer", 0, 240) : cur.travelMaxMin,
+    specialties: cur.specialties,
+    sports: cur.sports,
   };
+  // Sports the coach added (never a copy of a built-in one), then specialties chosen from the built-in and added ones.
+  if ("sports" in body) next.sports = cleanSports(body.sports, 20).filter((s) => !(CORE_SPORTS as readonly string[]).some((c) => c.toLowerCase() === s.toLowerCase()));
+  if ("specialties" in body) next.specialties = cleanSports(body.specialties, 12);
+  next.specialties = next.specialties.filter((s) => (CORE_SPORTS as readonly string[]).includes(s) || next.sports.includes(s));
   const d = await db();
+  const stored = { ...next, specialties: JSON.stringify(next.specialties), sports: JSON.stringify(next.sports) };
   await d
     .insert(coachSettings)
-    .values({ coachId: me.id, ...next })
-    .onConflictDoUpdate({ target: coachSettings.coachId, set: next });
+    .values({ coachId: me.id, ...stored })
+    .onConflictDoUpdate({ target: coachSettings.coachId, set: stored });
   return NextResponse.json({ settings: next });
 });

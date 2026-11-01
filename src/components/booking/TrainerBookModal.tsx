@@ -4,9 +4,11 @@ import { format } from "date-fns";
 import { CalendarPlus } from "lucide-react";
 import { useState } from "react";
 import { GymSelect } from "@/components/GymSelect";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Button, Field, Input, Modal, Notice, Select, Textarea, Toggle } from "@/components/ui";
-import { directionsUrl, gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
+import { directionsUrl, gymToBooking, isGymComplete, isHomeValue, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
+import { focusOptions } from "@/lib/sports";
 import { atTime, availableCredits, travelProblem, ymd } from "@/lib/scheduling";
 import { locOf } from "@/lib/travel";
 import { createBooking } from "@/lib/store";
@@ -15,7 +17,6 @@ import { classesAsBookings } from "@/components/groups/groupUi";
 import type { Booking, PlaceInfo, SessionFocus } from "@/lib/types";
 import { bookingLocation } from "./bookingUi";
 import { AddToCalendar } from "./CalendarActions";
-import { FOCUS_OPTIONS } from "./BookModal";
 
 export interface TrainerBookInit {
   start?: Date;
@@ -122,6 +123,10 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
               if (p?.defaultGymId) {
                 setGym(p.defaultGymId);
                 setPlace(null);
+              } else if (isHomeValue(gym)) {
+                // A home address belongs to one client.
+                setGym("");
+                setPlace(null);
               }
             }}
           >
@@ -138,11 +143,11 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Start time">
-            <Input type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} />
+            <TimeSelect value={time} onChange={setTime} />
           </Field>
         </div>
         <Field label="Gym location">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" place={place} onPlace={setPlace} homeClientId={clientId || undefined} />
         </Field>
         {db.settings.travelEnabled && (problem || waive) && (
           <div className="space-y-1">
@@ -152,7 +157,7 @@ function Form({ init, onClose }: { init: TrainerBookInit; onClose: () => void })
         )}
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
-            {FOCUS_OPTIONS.map((f) => (
+            {[...new Set([...focusOptions(db.settings.specialties ?? []), "Full Body"])].map((f) => (
               <option key={f}>{f}</option>
             ))}
           </Select>

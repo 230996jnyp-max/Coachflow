@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cn, fmtClock, parseClock } from "@/lib/utils";
 
-const cellBase =
+export const cellBase =
   "h-11 w-full min-w-0 rounded-lg border border-transparent bg-field text-center text-sm font-semibold tabular-nums text-ink outline-none placeholder:font-normal placeholder:text-muted/50 focus:border-accent disabled:opacity-60";
 
 function fmtNum(v: number | undefined): string {

@@ -9,14 +9,15 @@ import { LocationPill, MiniMap } from "@/components/LocationPill";
 import { directionsUrl } from "@/lib/gyms";
 import { AddToCalendar } from "./CalendarActions";
 import { bookingLocation } from "./bookingUi";
-import { gymToBooking, isGymComplete, placeForBooking } from "@/lib/gyms";
+import { gymToBooking, isGymComplete, isHomeValue, placeForBooking } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
+import { BASE_FOCUS, focusOptions } from "@/lib/sports";
 import { createBooking, shareSession } from "@/lib/store";
 import type { Booking, PlaceInfo } from "@/lib/types";
 import type { SessionFocus } from "@/lib/types";
 
-export const FOCUS_OPTIONS: SessionFocus[] = ["Upper Body", "Lower Body", "Full Body", "Cardio / HIIT", "Mobility & Form Check"];
+export const FOCUS_OPTIONS: SessionFocus[] = BASE_FOCUS;
 
 /** Client tap-to-book modal. `start` is the tapped slot. */
 export function BookModal({ start, clientId, initGym, initPlace, onClose }: { start: Date | null; clientId: string; initGym?: string; initPlace?: PlaceInfo | null; onClose: () => void }) {
@@ -61,7 +62,7 @@ function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; c
       setBusy(false);
       return setError(res.error);
     }
-    if (share) {
+    if (share && !isHomeValue(gym)) {
       const err = await shareSession(res.booking.id, groupSize);
       setShareNote(err ? `Your session is booked, but it couldn’t be opened to partners: ${err}` : "Your session is open to partners. Anyone who asks to join needs approval from you and your coach.");
     }
@@ -127,11 +128,11 @@ function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; c
         )}
 
         <Field label="Gym location" hint="Required">
-          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} place={place} onPlace={setPlace} />
+          <GymSelect value={gym} onChange={setGym} noneLabel="Select a gym…" allowPlaces={db.settings.allowCustomGym} place={place} onPlace={setPlace} homeClientId={clientId} />
         </Field>
         <Field label="Session focus">
           <Select value={focus} onChange={(e) => setFocus(e.target.value as SessionFocus)}>
-            {FOCUS_OPTIONS.map((f) => (
+            {focusOptions(db.settings.specialties ?? []).map((f) => (
               <option key={f}>{f}</option>
             ))}
           </Select>
@@ -139,6 +140,9 @@ function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; c
         <Field label="Notes for trainer">
           <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Want to focus on deadlift form today" />
         </Field>
+        {isHomeValue(gym) ? (
+          <p className="rounded-xl border border-line p-3 text-xs text-muted">Sessions at home stay private — they can’t be opened to partners.</p>
+        ) : (
         <div className="space-y-2 rounded-xl border border-line p-3">
           <Toggle checked={share} onChange={setShare} label="Open to a group / partner session" />
           {share && (
@@ -156,6 +160,7 @@ function Form({ start, clientId, initGym, initPlace, onClose }: { start: Date; c
             </>
           )}
         </div>
+        )}
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Modal>
