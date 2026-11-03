@@ -5,7 +5,7 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { isHomeLocation } from "@/lib/gyms";
 import { findPrevious } from "@/lib/stats";
 import type { AppNotification, Exercise, GroupMember, GroupRequest, GroupSession, MemberStatus, PlaceInfo, TemplateExercise, Workout, WorkoutSet } from "@/lib/types";
-import { openProfile, usersByIds } from "./accounts";
+import { loadClientFor, openProfile, usersByIds } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./http";
@@ -686,6 +686,72 @@ export async function shareBooking(me: UserRow, bookingId: string, capacity: num
     ownerId: me.id,
     details: { title: "Partner session", notes: "", gymId: bk.gymId, customGym: bk.customGym, place: bk.place },
   });
+}
+
+/** Is this one of the coach's clients, and do they have a group credit free? (Checked before a 1-on-1 is turned into a partner session.) */
+export async function assertCanJoinGroup(me: UserRow, clientId: string): Promise<UserRow> {
+  const cl = await loadClientFor(me, clientId);
+  if (!cl) throw badRequest("That client isn't yours.");
+  if ((await groupCreditsAvailable(cl)) < 1) throw badRequest("That client has no group class credits left. Add some first.");
+  return cl;
+}
+
+/** Coach: puts a client into a class or partner session (the class screen, and walk-ins on the gym floor). Uses one of their group credits as usual. */
+export async function coachAddMember(me: UserRow, g: GroupRow, clientId: string): Promise<void> {
+  assertCoach(me, g);
+  const d = await db();
+  const det = openGroup(g);
+  const cl = await loadClientFor(me, clientId);
+  if (!cl) throw badRequest("That client isn't yours.");
+  if (g.status !== "OPEN") throw badRequest("This class is closed.");
+  const [cur] = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, clientId))).limit(1);
+  if (cur && (cur.status === "CONFIRMED" || cur.status === "WAITLIST")) throw conflict("They're already in this class.");
+  if ((await confirmedCount(g.id)) >= g.capacity) throw conflict("The class is full. Raise the number of spots first.");
+  if ((await groupCreditsAvailable(cl)) < 1) throw badRequest("That client has no group class credits left. Add some first.");
+  await d
+    .insert(groupMembers)
+    .values({ groupId: g.id, clientId, status: "CONFIRMED", role: "MEMBER" })
+    .onConflictDoUpdate({ target: [groupMembers.groupId, groupMembers.clientId], set: { status: "CONFIRMED", role: "MEMBER", joinedAt: new Date() } });
+  await logReserved(clientId, g.coachId, det.title);
+  await notify([clientId], "group_added", { title: "You've been added to a class", body: `Your coach added you to “${det.title}” on ${await whenText(g.coachId, g.startAt)}.`, link: `/classes/${g.id}` });
+  await ensureWorkoutFor(g, clientId);
+}
+
+/** Coach, gym floor: a client's 1-on-1 turns into a partner session so another client can join on the spot. Returns the session (the existing one if it already is). */
+export async function shareBookingAsCoach(me: UserRow, bookingId: string): Promise<{ group: GroupRow; created: boolean }> {
+  if (me.role === "CLIENT") throw forbidden();
+  const d = await db();
+  const [b] = await d.select().from(bookings).where(eq(bookings.id, bookingId)).limit(1);
+  if (!b || b.coachId !== me.id) throw notFound("Session not found.");
+  const [existing] = await d.select().from(groupSessions).where(and(eq(groupSessions.bookingId, bookingId), ne(groupSessions.status, "CANCELLED"))).limit(1);
+  if (existing) return { group: existing, created: false };
+  if (b.status !== "CONFIRMED") throw badRequest("Only a confirmed session can take a partner.");
+  const [marked] = await d.select({ id: attendance.id }).from(attendance).where(and(eq(attendance.kind, "BOOKING"), eq(attendance.sessionId, bookingId))).limit(1);
+  if (marked) throw badRequest("Attendance has already been marked for this session.");
+  const [owner] = await d.select().from(users).where(eq(users.id, b.clientId)).limit(1);
+  if (!owner) throw notFound("Session not found.");
+  if ((await groupCreditsAvailable(owner)) < 1) throw badRequest(`${await firstNameOf(owner)} has no group class credits, and a partner session uses one. Add a group credit first.`);
+  const bk = toBooking(b);
+  if (isHomeLocation(bk)) throw badRequest("Sessions at home stay private, so a partner can't be added.");
+  await logCredit({ clientId: owner.id, coachId: b.coachId, pool: "GROUP", kind: "RESERVED", delta: 0, sessionType: "Group Class", label: "Partner session", note: "A partner joined on the day — uses a group credit instead of a 1-on-1 credit" });
+  const group = await insertGroup({
+    coachId: b.coachId,
+    kind: "SHARED",
+    start: b.startAt,
+    end: b.endAt,
+    capacity: SHARED_DEFAULT,
+    bookingId,
+    ownerId: owner.id,
+    details: { title: "Partner session", notes: "", gymId: bk.gymId, customGym: bk.customGym, place: bk.place },
+  });
+  return { group, created: true };
+}
+
+/** Undoes a partner session that was made a moment ago for a walk-in that then could not be added. */
+export async function undoShare(group: GroupRow): Promise<void> {
+  const d = await db();
+  await d.delete(groupMembers).where(eq(groupMembers.groupId, group.id));
+  await d.delete(groupSessions).where(eq(groupSessions.id, group.id));
 }
 
 export async function requestJoin(me: UserRow, g: GroupRow): Promise<GroupRequestRow> {

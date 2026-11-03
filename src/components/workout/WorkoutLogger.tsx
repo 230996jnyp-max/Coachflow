@@ -41,7 +41,8 @@ import {
 } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { annotatePRs, doneWorkouts, findPrevious, workoutSetCount, workoutVolume } from "@/lib/stats";
-import { describeSchema, hasTrackedValue } from "@/lib/tracking";
+import { describeSchema } from "@/lib/tracking";
+import { fillFromPrevious, isSetComplete, missingValueMessage, withPreviousFilled } from "@/lib/setLogging";
 import {
   blankSet,
   deleteWorkout,
@@ -165,27 +166,6 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
     setTimeout(() => setHint((h) => (h?.weId === weId ? null : h)), 2600);
   };
 
-  const fillFrom = (prev: WorkoutSet | undefined, ex: Exercise): Partial<WorkoutSet> => {
-    if (!prev) return {};
-    const p: Partial<WorkoutSet> = {};
-    if (ex.tracking) {
-      if (prev.custom) p.custom = { ...prev.custom };
-      return p;
-    }
-    if (ex.type === "WEIGHT_REPS" || ex.type === "WEIGHTED_BODYWEIGHT") {
-      p.weight = prev.weight;
-      p.reps = prev.reps;
-    } else if (ex.type === "BODYWEIGHT_REPS") p.reps = prev.reps;
-    else if (ex.type === "DURATION_ONLY") p.durationSec = prev.durationSec;
-    else {
-      p.distanceKm = prev.distanceKm;
-      p.durationSec = prev.durationSec;
-      p.level = prev.level;
-      p.calories = prev.calories;
-    }
-    return p;
-  };
-
   const toggleDone = (we: WorkoutExercise, set: WorkoutSet) => {
     const ex = exMap.get(we.exerciseId);
     if (!ex) return;
@@ -194,24 +174,10 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
       return;
     }
     const prev = prevSetFor(we, set);
-    const merged: WorkoutSet = { ...set };
-    const fill = fillFrom(prev, ex);
     // Use "previous" values for any field the user left empty.
-    (Object.keys(fill) as (keyof WorkoutSet)[]).forEach((k) => {
-      if (merged[k] === undefined && fill[k] !== undefined) (merged as unknown as Record<string, unknown>)[k] = fill[k];
-    });
-    const valid = ex.tracking
-      ? hasTrackedValue(merged, ex.tracking)
-      : ex.type === "DURATION_ONLY"
-        ? !!merged.durationSec
-        : ex.type === "DURATION_DISTANCE"
-          ? !!merged.durationSec || !!merged.distanceKm
-          : !!merged.reps && merged.reps > 0;
-    if (!valid) {
-      flash(
-        we.id,
-        ex.tracking ? "Fill in at least one number or time first." : ex.type === "DURATION_ONLY" ? "Enter a duration first." : ex.type === "DURATION_DISTANCE" ? "Enter a time or distance first." : "Enter reps first.",
-      );
+    const merged = withPreviousFilled(set, prev, ex);
+    if (!isSetComplete(merged, ex)) {
+      flash(we.id, missingValueMessage(ex));
       return;
     }
     patchSet(we.id, set.id, { ...merged, done: true });
@@ -495,7 +461,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                       onChange={(patch) => patchSet(we.id, set.id, patch)}
                       onToggleDone={() => toggleDone(we, set)}
                       onCycleType={() => cycleType(we, set)}
-                      onFillPrev={() => prev && patchSet(we.id, set.id, fillFrom(prev, ex))}
+                      onFillPrev={() => prev && patchSet(we.id, set.id, fillFromPrevious(prev, ex))}
                     />
                   );
                 })}

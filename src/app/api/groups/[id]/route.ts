@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
@@ -9,12 +8,10 @@ import {
   bookSpot,
   cancelGroup,
   cancelRequest,
-  ensureWorkoutFor,
+  coachAddMember,
   GROUP_MAX,
-  groupCreditsAvailable,
   leaveGroup,
   loadGroups,
-  logReserved,
   notify,
   openGroup,
   promoteWaitlist,
@@ -160,22 +157,7 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
       return out();
     }
     case "addMember": {
-      const clientId = str(body.clientId, "Client", { max: 80 });
-      const cl = await loadClientFor(me, clientId);
-      if (!cl) throw badRequest("That client isn't yours.");
-      if (g.status !== "OPEN") throw badRequest("This class is closed.");
-      const [cur] = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, clientId))).limit(1);
-      if (cur && (cur.status === "CONFIRMED" || cur.status === "WAITLIST")) throw conflict("They're already in this class.");
-      const taken = (await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.status, "CONFIRMED")))).length;
-      if (taken >= g.capacity) throw conflict("The class is full. Raise the number of spots first.");
-      if ((await groupCreditsAvailable(cl)) < 1) throw badRequest("That client has no group class credits left. Add some first.");
-      await d
-        .insert(groupMembers)
-        .values({ groupId: g.id, clientId, status: "CONFIRMED", role: "MEMBER" })
-        .onConflictDoUpdate({ target: [groupMembers.groupId, groupMembers.clientId], set: { status: "CONFIRMED", role: "MEMBER", joinedAt: new Date() } });
-      await logReserved(clientId, g.coachId, det.title);
-      await notify([clientId], "group_added", { title: "You've been added to a class", body: `Your coach added you to “${det.title}” on ${await whenText(g.coachId, g.startAt)}.`, link: `/classes/${g.id}` });
-      await ensureWorkoutFor(g, clientId);
+      await coachAddMember(me, g, str(body.clientId, "Client", { max: 80 }));
       return out();
     }
     case "removeMember": {

@@ -26,6 +26,7 @@ import type { GroupSession } from "@/lib/types";
 import { ApprovalCard, classLocation, classTime, classTitle, GroupBadge, SpotsPill } from "./groupUi";
 import { RollCallPanel } from "@/components/attendance/Attendance";
 import { ClientActions, GroupCreditsCard } from "./ClassList";
+import { FloorLink } from "@/components/floor/FloorBanner";
 import { LiveGrid } from "./LiveGrid";
 
 export function ClassDetail({ id }: { id: string }) {
@@ -189,6 +190,7 @@ function CoachView({ g }: { g: GroupSession }) {
         </div>
         {open && (
           <div className="flex flex-wrap gap-2">
+            <FloorLink sessionKey={g.id} />
             {!g.workoutStartedAt ? (
               <Button onClick={() => setStartOpen(true)} disabled={going.length === 0}>
                 <Dumbbell size={16} /> Start group workout

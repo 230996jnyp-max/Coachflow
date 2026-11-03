@@ -11,6 +11,7 @@ import { canCancel } from "@/lib/scheduling";
 import { cancelBookingAs, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
 import Link from "next/link";
 import { RollCallPanel } from "@/components/attendance/Attendance";
+import { FloorLink } from "@/components/floor/FloorBanner";
 import { CoachEyeCard } from "@/components/workout/CoachEyeCard";
 import { RecapModal } from "@/components/workout/RecapModal";
 import { AddToCalendar } from "./CalendarActions";
@@ -69,6 +70,8 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
           <Line icon={<Target size={16} />}>{b.focus}</Line>
           {b.notes && <Line icon={<MessageSquare size={16} />}>{b.notes}</Line>}
         </div>
+
+        {isTrainer && b.status === "CONFIRMED" && <FloorLink sessionKey={b.id} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent hover:brightness-110" />}
 
         {isTrainer && (active || b.status === "COMPLETED") && <CoachEyeCard clientId={b.clientId} />}
 

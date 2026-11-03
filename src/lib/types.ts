@@ -220,6 +220,10 @@ export interface Workout {
   templateId?: string;
   /** Group class / shared session this workout belongs to (every attendee gets their own copy). */
   groupId?: string;
+  /** The 1-on-1 booking this workout was logged for on the gym floor (partner and group sessions use groupId). */
+  bookingId?: string;
+  /** A private note the coach made during the session ("left knee sore"). Clients never receive it. */
+  coachNote?: string;
   /** How the session felt (pain / energy 0-10, where it hurt). Asked when a workout is finished; always optional. */
   feedback?: WorkoutFeedback;
   /** Brought in with the AI / text importer (a person's own notes), rather than logged live. */
