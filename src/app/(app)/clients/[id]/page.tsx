@@ -23,6 +23,7 @@ import { useMemo, useState } from "react";
 import { BookingList } from "@/components/booking/BookingList";
 import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/TrainerBookModal";
 import { CredentialsModal, genPassword, GOALS, type Credentials } from "@/components/clients/ClientForms";
+import { CoachNutrition } from "@/components/nutrition/CoachNutrition";
 import { ProgressHub } from "@/components/progress/ProgressHub";
 import { GymSelect } from "@/components/GymSelect";
 import { HomeAddressField } from "@/components/HomeAddressField";
@@ -40,7 +41,7 @@ import { adjustCredits, adjustGroupCreditsBy, deleteClient, resetClientPassword,
 import type { ClientGoal } from "@/lib/types";
 import { fmtVolume } from "@/lib/utils";
 
-type Tab = "overview" | "workouts" | "progress" | "sessions" | "profile";
+type Tab = "overview" | "workouts" | "progress" | "nutrition" | "sessions" | "profile";
 
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -89,6 +90,7 @@ export default function ClientDetailPage() {
           { value: "overview", label: "Overview" },
           { value: "workouts", label: "Workouts" },
           { value: "progress", label: "Progress" },
+          { value: "nutrition", label: "Nutrition" },
           { value: "sessions", label: "Sessions" },
           { value: "profile", label: "Profile" },
         ]}
@@ -97,6 +99,7 @@ export default function ClientDetailPage() {
       {tab === "overview" && <Overview clientId={id} onTab={setTab} />}
       {tab === "workouts" && <WorkoutHub clientId={id} />}
       {tab === "progress" && <ProgressHub clientId={id} />}
+      {tab === "nutrition" && <CoachNutrition key={id} clientId={id} />}
       {tab === "sessions" && <Sessions clientId={id} />}
       {tab === "profile" && <ProfileTab key={id} clientId={id} />}
     </div>

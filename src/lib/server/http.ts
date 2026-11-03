@@ -44,11 +44,11 @@ export function assertSameOrigin(req: Request) {
   if (host && originHost !== host) throw forbidden("Cross-site request blocked.");
 }
 
-export async function readJson(req: Request): Promise<Record<string, unknown>> {
+export async function readJson(req: Request, maxChars = 100_000): Promise<Record<string, unknown>> {
   assertSameOrigin(req);
   if (!(req.headers.get("content-type") ?? "").includes("application/json")) throw badRequest("Expected JSON.");
   const text = await req.text();
-  if (text.length > 100_000) throw badRequest("Request too large.");
+  if (text.length > maxChars) throw badRequest("Request too large.");
   try {
     const v = JSON.parse(text);
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error();

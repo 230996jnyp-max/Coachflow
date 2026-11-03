@@ -4,6 +4,7 @@ import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
 import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
+  Apple,
   CalendarDays,
   ChevronsLeft,
   ChevronsRight,
@@ -56,6 +57,7 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/home", label: "Home", icon: <Home size={22} />, mobile: true },
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
   { href: "/progress", label: "Progress", icon: <LineChart size={22} />, mobile: true },
+  { href: "/nutrition", label: "Nutrition", icon: <Apple size={22} />, mobile: true },
   { href: "/book", label: "Book", icon: <CalendarDays size={22} />, mobile: true },
   { href: "/messages", label: "Messages", icon: <MessageCircle size={22} /> },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
@@ -65,7 +67,7 @@ const CLIENT_NAV: NavItem[] = [
 const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
-const CLIENT_ONLY = ["/home", "/progress", "/book"];
+const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, user, isTrainer, db } = useViewer();

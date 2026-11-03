@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "./db";
 import { HttpError } from "./http";
 import { aiUsage } from "./schema";
@@ -28,5 +28,15 @@ export async function tryAiQuota(userId: string, kind: string, cap: number): Pro
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Gives one AI call back (the call failed on our side or the AI was busy, so it shouldn't count against the person's allowance). */
+export async function refundAiQuota(userId: string, kind: string): Promise<void> {
+  try {
+    const d = await db();
+    await d.update(aiUsage).set({ n: sql`greatest(${aiUsage.n} - 1, 0)` }).where(and(eq(aiUsage.userId, userId), eq(aiUsage.day, today()), eq(aiUsage.kind, kind)));
+  } catch {
+    /* a missed refund only costs the person one estimate */
   }
 }

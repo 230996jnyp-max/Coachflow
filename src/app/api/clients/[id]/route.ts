@@ -9,6 +9,7 @@ import { applyHomeAddress, rulesFor } from "@/lib/server/schedule";
 import { CORE_SPORTS, cleanSports } from "@/lib/sports";
 import { purgeClientGroups } from "@/lib/server/groups";
 import { bookings, messages, users } from "@/lib/server/schema";
+import { purgeClientNutrition } from "@/lib/server/nutrition";
 import { purgeClientTraining } from "@/lib/server/training";
 import type { ClientGoal } from "@/lib/types";
 
@@ -86,6 +87,7 @@ export const DELETE = route<Ctx>(async (req, ctx) => {
   await purgeClientGroups(id);
   await d.delete(bookings).where(eq(bookings.clientId, id));
   await purgeClientTraining(id);
+  await purgeClientNutrition(id);
   await d.delete(users).where(and(eq(users.id, id), eq(users.coachId, me.id)));
   return NextResponse.json({ ok: true });
 });

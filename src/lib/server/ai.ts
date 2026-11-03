@@ -32,7 +32,7 @@ interface ChatBody {
 const coolUntil = new Map<string, number>();
 let cursor = Math.floor(Math.random() * 1000);
 
-async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
+export async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
   const keys = groqKeys();
   if (keys.length === 0) throw new HttpError(503, "AI reading isn't set up.");
   const send = (key: string) =>
@@ -90,7 +90,7 @@ async function groq(body: ChatBody, timeoutMs: number): Promise<string> {
 }
 
 /* ---------------- Photos and scans -> text ---------------- */
-const DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/;
+export const DATA_URL = /^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/;
 export const MAX_IMAGE_DATA_URL = 3_800_000;
 
 export async function transcribeImages(images: string[]): Promise<string> {
@@ -193,7 +193,7 @@ function isRealDate(s: unknown): s is string {
   return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d && y >= 2000 && y <= 2100;
 }
 
-function jsonFrom(raw: string): unknown {
+export function jsonFrom(raw: string): unknown {
   const t = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");

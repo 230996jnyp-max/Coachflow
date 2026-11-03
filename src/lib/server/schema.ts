@@ -134,6 +134,46 @@ export const aiNotes = pgTable("ai_notes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Food diary. Each entry is one encrypted blob (what was eaten, the numbers); the plain columns are only for access checks and listing by day. */
+export const nutritionEntries = pgTable(
+  "nutrition_entries",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    day: text("day").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("nutrition_entries_client_idx").on(t.clientId, t.day)],
+);
+
+/** A person's calorie and macro targets (set by their coach, or by themselves). */
+export const nutritionTargets = pgTable("nutrition_targets", {
+  clientId: text("client_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Diets, allergies and the "I'm 18 or older" answer. */
+export const nutritionSettings = pgTable("nutrition_settings", {
+  clientId: text("client_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A coach's comment on one day of a client's food diary. */
+export const nutritionComments = pgTable(
+  "nutrition_comments",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    day: text("day").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("nutrition_comments_client_idx").on(t.clientId, t.day)],
+);
+
 /** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
 export const globalTemplates = pgTable(
   "global_templates",
@@ -374,6 +414,7 @@ export type GroupRow = typeof groupSessions.$inferSelect;
 export type GroupMemberRow = typeof groupMembers.$inferSelect;
 export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
+export type NutritionEntryRow = typeof nutritionEntries.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
 export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
@@ -531,6 +572,32 @@ export const DDL = [
     text text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_entries (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    day text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS nutrition_entries_client_idx ON nutrition_entries (client_id, day)`,
+  `CREATE TABLE IF NOT EXISTS nutrition_targets (
+    client_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_settings (
+    client_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_comments (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    day text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS nutrition_comments_client_idx ON nutrition_comments (client_id, day)`,
   `CREATE TABLE IF NOT EXISTS global_templates (
     id text PRIMARY KEY,
     niche text NOT NULL,
