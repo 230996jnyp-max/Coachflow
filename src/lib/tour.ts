@@ -34,6 +34,12 @@ export const COACH_STEPS: TourStep[] = [
     text: "Add clients, copy their login details in one tap, and manage both 1-on-1 and Group Class credits. Open a client to see their attendance rate and full credit log.",
   },
   {
+    route: "/trainer",
+    targets: ["coach-code"],
+    title: "Your coach code",
+    text: "Share this 6-digit code with a client. They type it when they sign up (or in their Profile) and you accept them here with one tap. Requests show up on your dashboard and Clients page.",
+  },
+  {
     route: "/workout",
     targets: ["workout-start"],
     title: "Workout logger",
@@ -83,6 +89,34 @@ export const CLIENT_STEPS: TourStep[] = [
     targets: ["nav-messages"],
     title: "Chat with your coach",
     text: "Message your coach about form checks, training questions or schedule changes — all in one place.",
+  },
+];
+
+/** Someone training on their own: no coach, so nothing about booking, credits or chat. */
+export const PERSONAL_STEPS: TourStep[] = [
+  {
+    route: "/home",
+    targets: ["home-goal"],
+    title: "Your home base",
+    text: "See this week's goal, your streak, your latest personal records and your starter routines at a glance. Change the goal's days in your profile any time.",
+  },
+  {
+    route: "/workout",
+    targets: ["workout-start"],
+    title: "Log your workouts",
+    text: "Start an empty workout or a routine. The app shows your previous weights, starts your rest timer automatically, suggests what to aim for today and celebrates new PRs.",
+  },
+  {
+    route: "/workout",
+    targets: ["workout-import"],
+    title: "Bring in your plan",
+    text: "Paste a plan from your notes or WhatsApp, or upload a file or photo, and turn it into a routine or a logged workout.",
+  },
+  {
+    route: "/progress",
+    targets: ["progress-hub"],
+    title: "See your progress",
+    text: "Track strength curves, volume and body measurements. Add check-in photos to your Photo vault for side-by-side before-and-after comparisons.",
   },
 ];
 

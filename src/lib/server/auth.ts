@@ -4,8 +4,9 @@ import { eq } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
 import { db } from "./db";
-import { forbidden, unauthorized } from "./http";
+import { forbidden, HttpError, unauthorized } from "./http";
 import { users, type UserRow } from "./schema";
+import { trialBlocked } from "./trial";
 
 const COOKIE = "cf_session";
 const MAX_AGE = 7 * 24 * 60 * 60;
@@ -93,10 +94,18 @@ export async function currentUser(): Promise<UserRow | null> {
   }
 }
 
+/** A coach, the owner, or a client with no coach ("Personal"): the people who choose their own sports and get their own starter routines. */
+export async function requireTrainerOrPersonal(): Promise<UserRow> {
+  const u = await requireUser();
+  if (isStaff(u) || (u.role === "CLIENT" && !u.coachId)) return u;
+  throw forbidden();
+}
+
 /** Requires a signed-in user, optionally restricted to certain roles. */
 export async function requireUser(roles?: DbRole[]): Promise<UserRow> {
   const u = await currentUser();
   if (!u) throw unauthorized();
   if (roles && !roles.includes(u.role as DbRole)) throw forbidden();
+  if (trialBlocked(u)) throw new HttpError(402, "Your free month has ended. Subscriptions are opening soon.", "trial_over");
   return u;
 }

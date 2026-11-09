@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { route } from "@/lib/server/http";
-import { listRequests, pendingCount } from "@/lib/server/signup";
+import { listRequests, pendingCount } from "@/lib/server/legacyRequests";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

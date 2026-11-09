@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { badRequest, readJson, route } from "@/lib/server/http";
-import { approveRequest, declineRequest } from "@/lib/server/signup";
+import { approveRequest, declineRequest } from "@/lib/server/legacyRequests";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { completeOnboarding, deviceOnboarded } from "@/lib/store";
-import { CLIENT_STEPS, closeTour, COACH_STEPS, findTarget, goToStep, startTour, useTour } from "@/lib/tour";
+import { CLIENT_STEPS, closeTour, COACH_STEPS, findTarget, goToStep, PERSONAL_STEPS, startTour, useTour } from "@/lib/tour";
 import { cn } from "@/lib/utils";
 
 interface Geo {
@@ -25,11 +25,11 @@ const CARD_H = 236;
  * Starts by itself on a person's first login (after they set their own password) and can be replayed from Settings.
  */
 export function OnboardingTour() {
-  const { user, isTrainer } = useViewer();
+  const { user, isTrainer, isPersonal } = useViewer();
   const tour = useTour();
   const router = useRouter();
   const pathname = usePathname();
-  const steps = isTrainer ? COACH_STEPS : CLIENT_STEPS;
+  const steps = isTrainer ? COACH_STEPS : isPersonal ? PERSONAL_STEPS : CLIENT_STEPS;
   const index = Math.min(tour.step, steps.length - 1);
   const step = steps[index];
   const [geo, setGeo] = useState<Geo>({ rect: null, vw: 0, vh: 0 });

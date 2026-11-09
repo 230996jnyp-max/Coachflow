@@ -10,7 +10,7 @@ import { Splash } from "@/components/Providers";
 import { Button, Card, Field, Input, Notice } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { IDLE_NOTICE, savedUsername, takeIdleNotice } from "@/lib/idle";
-import { login } from "@/lib/store";
+import { api, loginResult } from "@/lib/store";
 
 export default function LoginPage() {
   const { ready, user, isTrainer, db } = useViewer();
@@ -24,6 +24,8 @@ export default function LoginPage() {
   const [submitted, setSubmitted] = useState(false);
   const [fading, setFading] = useState(false);
   const [idleNotice, setIdleNotice] = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [resent, setResent] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -60,12 +62,19 @@ export default function LoginPage() {
   const attempt = async (u: string, p: string) => {
     setBusy(true);
     setSubmitted(true);
-    const err = await login(u, p);
-    if (err) {
+    const r = await loginResult(u, p);
+    if (r.error) {
       setBusy(false);
       setSubmitted(false);
-      setError(err);
+      setError(r.error);
+      setUnverified(r.code === "unverified");
+      setResent(false);
     }
+  };
+
+  const resend = async () => {
+    await api("/api/auth/resend", { body: { identifier: username.trim() } });
+    setResent(true);
   };
 
   return (
@@ -131,16 +140,24 @@ export default function LoginPage() {
               </div>
             </Field>
             {error && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+            {unverified && (
+              <Button type="button" variant="secondary" className="w-full" onClick={resend} disabled={resent}>
+                {resent ? "Sent. Check your email" : "Resend the confirmation email"}
+              </Button>
+            )}
             <Button type="submit" size="lg" className="w-full" disabled={busy}>
               <LogIn size={18} /> {busy ? "Signing in…" : "Log in"}
             </Button>
-            <p className="text-center text-xs text-muted">
-              Accounts are created by your coach. Ask them for your username and temporary password.
+            <p className="text-center text-sm">
+              <Link href="/forgot" className="font-semibold text-accent hover:underline">
+                Forgot your password?
+              </Link>
             </p>
+            <p className="text-center text-xs text-muted">Your coach made your account? Use the username and temporary password they gave you.</p>
             <p className="border-t border-line pt-4 text-center text-sm text-muted">
-              Are you a coach?{" "}
+              New to CoachFlow?{" "}
               <Link href="/signup" className="font-semibold text-accent hover:underline">
-                Sign Up / Request a Coach Account
+                Sign up free
               </Link>
             </p>
           </form>

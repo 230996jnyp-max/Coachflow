@@ -2,6 +2,7 @@
 
 import { ThemePicker } from "@/components/ThemeSwitcher";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
+import { HaveACoachCard } from "@/components/coachlink/CoachLink";
 import { Bell, Compass, KeyRound, LogOut, Mail, MapPin, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,7 +38,7 @@ import { deleteGym, logout, saveGym, setUnit, updateSettings } from "@/lib/store
 import type { GymLocation } from "@/lib/types";
 
 export default function SettingsPage() {
-  const { user, isTrainer, db } = useViewer();
+  const { user, isTrainer, db, isPersonal } = useViewer();
   const router = useRouter();
   const [gymModal, setGymModal] = useState<Partial<GymLocation> | null>(null);
   const [delGym, setDelGym] = useState<GymLocation | null>(null);
@@ -65,7 +66,8 @@ export default function SettingsPage() {
     <div className="space-y-8">
       <PageHeader title={isTrainer ? "Settings" : "Profile & Settings"} />
       <PasswordBanner />
-      {!isTrainer && <CreditHistory />}
+      {!isTrainer && !isPersonal && <CreditHistory />}
+      {isPersonal && <HaveACoachCard />}
 
       <section>
         <SectionTitle>Account</SectionTitle>
@@ -75,11 +77,11 @@ export default function SettingsPage() {
             <div className="min-w-0">
               <div className="truncate text-lg font-bold">{user.name}</div>
               <div className="text-sm text-muted">
-                @{user.username} · {isTrainer ? "Trainer" : "Client"}
+                @{user.username} · {isTrainer ? "Trainer" : isPersonal ? "Personal" : "Client"}
               </div>
               {profile && (
                 <div className="mt-1 text-xs text-muted">
-                  Goal: {profile.goal} · {profile.credits} session{profile.credits === 1 ? "" : "s"} remaining
+                  {isPersonal ? `Goal: ${profile.personalGoal ?? profile.goal}` : `Goal: ${profile.goal} · ${profile.credits} session${profile.credits === 1 ? "" : "s"} remaining`}
                 </div>
               )}
             </div>
@@ -117,7 +119,7 @@ export default function SettingsPage() {
               ]}
             />
           </div>
-          {!isTrainer && (
+          {!isTrainer && !isPersonal && (
             <div className="border-t border-line pt-4">
               <HomeAddressField clientId={user.id} label="Home address (for sessions at home)" hint="Your coach travels here when a session is at home. Only you and your coach can see it." />
             </div>

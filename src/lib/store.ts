@@ -347,6 +347,8 @@ interface ApiResult<T> {
   status: number;
   data: T | null;
   error?: string;
+  /** A short reason from the server the screen can act on (e.g. "unverified", "trial_over"). */
+  code?: string;
 }
 
 export async function api<T = Record<string, unknown>>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean } = {}): Promise<ApiResult<T>> {
@@ -359,13 +361,13 @@ export async function api<T = Record<string, unknown>>(path: string, init: { met
       cache: "no-store",
       keepalive: init.keepalive,
     });
-    let data: (T & { error?: string }) | null = null;
+    let data: (T & { error?: string; code?: string }) | null = null;
     try {
-      data = (await res.json()) as T & { error?: string };
+      data = (await res.json()) as T & { error?: string; code?: string };
     } catch {
       data = null;
     }
-    return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`) };
+    return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`), code: res.ok ? undefined : data?.code };
   } catch {
     return { ok: false, status: 0, data: null, error: "Can not reach the server. Check your connection." };
   }
@@ -599,8 +601,13 @@ export function useNow(intervalMs = 30_000): Date {
 /* ---------------- Auth ---------------- */
 /** Returns an error message, or null on success. */
 export async function login(username: string, password: string): Promise<string | null> {
+  return (await loginResult(username, password)).error;
+}
+
+/** Like login(), and also says why it failed when the server gave a reason (e.g. "unverified": the email hasn't been confirmed yet). */
+export async function loginResult(username: string, password: string): Promise<{ error: string | null; code?: string }> {
   const r = await api("/api/auth/login", { body: { username, password } });
-  if (!r.ok) return r.error ?? "Login failed.";
+  if (!r.ok) return { error: r.error ?? "Login failed.", code: r.code };
   markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
   if (ok) {
@@ -608,7 +615,7 @@ export async function login(username: string, password: string): Promise<string 
     requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
   }
   if (!ok) clearActive();
-  return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
+  return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
 
 export async function logout() {

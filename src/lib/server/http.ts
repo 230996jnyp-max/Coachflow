@@ -5,6 +5,8 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** A short machine-readable reason the screen can act on (e.g. "unverified"). */
+    public code?: string,
   ) {
     super(message);
   }
@@ -23,7 +25,7 @@ export function route<Ctx = unknown>(handler: (req: Request, ctx: Ctx) => Promis
     try {
       return await handler(req, ctx);
     } catch (e) {
-      if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
+      if (e instanceof HttpError) return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code } : {}) }, { status: e.status });
       console.error("API error:", e);
       return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
     }

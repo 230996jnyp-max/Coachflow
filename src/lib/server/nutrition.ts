@@ -7,6 +7,7 @@ import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { notify } from "./groups";
 import { badRequest, forbidden, notFound } from "./http";
+import { requireAdult } from "./minors";
 import { nutritionComments, nutritionEntries, nutritionSettings, nutritionTargets, type NutritionEntryRow, type UserRow } from "./schema";
 
 /*
@@ -105,11 +106,15 @@ export interface Subject {
 
 /** The person whose diary is being read or changed: me, or (for a coach) one of my clients. */
 export async function subjectFor(me: UserRow, clientId: unknown): Promise<Subject> {
-  if (clientId === undefined || clientId === null || clientId === "" || clientId === me.id) return { id: me.id, self: true };
+  if (clientId === undefined || clientId === null || clientId === "" || clientId === me.id) {
+    requireAdult(me); // calorie tracking is off for under-18s
+    return { id: me.id, self: true };
+  }
   if (typeof clientId !== "string") throw badRequest("Client is not valid.");
   if (me.role === "CLIENT") throw forbidden();
   const row = await loadClientFor(me, clientId);
   if (!row) throw notFound("Client not found.");
+  requireAdult(row);
   return { id: row.id, self: false };
 }
 

@@ -29,7 +29,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
 
   const history = useMemo(() => doneWorkouts(db.workouts, clientId).reverse(), [db.workouts, clientId]);
   // A coach sees the routines for their own niches first; the rest are one tap away.
-  const myNiches = isTrainer ? (db.settings.specialties ?? []) : [];
+  const myNiches = isTrainer || user?.personal ? (db.settings.specialties ?? []) : [];
   const visible = db.templates.filter((t) => (isTrainer ? true : t.shared || t.ownerId === user?.id));
   const inMyNiche = (t: RoutineTemplate) => myNiches.length === 0 || !t.niche || myNiches.includes(t.niche);
   const otherNiche = visible.filter((t) => !inMyNiche(t)).length;

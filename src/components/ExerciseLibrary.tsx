@@ -118,8 +118,8 @@ export function ExerciseBrowser({ exercises, selectable, selected = [], onToggle
   const own = user ? db.clients.find((c) => c.id === user.id) : undefined;
   const forClient = isTrainer ? (clientId ? db.clients.find((c) => c.id === clientId) : undefined) : own;
   const focuses = forClient?.focuses ?? [];
-  const strict = !isTrainer && focuses.length > 0;
-  const baseSports = focuses.length ? focuses : isTrainer ? (db.settings.specialties ?? []) : [];
+  const strict = !isTrainer && !user?.personal && focuses.length > 0;
+  const baseSports = focuses.length ? focuses : isTrainer || user?.personal ? (db.settings.specialties ?? []) : [];
   const baseLabel = strict ? "All my focuses" : focuses.length ? "All assigned focuses" : "★ My niches";
 
   const present = useMemo(() => [...new Set(exercises.map((e) => disciplineOf(e)))], [exercises]);

@@ -24,6 +24,14 @@ export interface User {
   hasCompletedOnboarding?: boolean;
   /** Saved colour theme (the Settings picker and header menu keep it in sync with the device). */
   themePreference?: "black" | "white" | "navy";
+  /** A client with no coach (training on their own): no booking, credits, coach chat or attendance. */
+  personal?: boolean;
+  /** Under 18: no calorie targets, no nutrition diary and no AI features. */
+  isMinor?: boolean;
+  /** A coach's six-digit code (only sent for yourself). */
+  coachCode?: string;
+  /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */
+  trial?: { endsAt: string; daysLeft: number; expired: boolean; enforced: boolean };
 }
 
 export type ClientGoal =
@@ -56,6 +64,11 @@ export interface ClientProfile {
   homeText?: string;
   /** Training focuses the coach assigned (e.g. ["Mobility & Flexibility"]); the exercise pickers follow them. Empty = everything. */
   focuses?: string[];
+  /** Self sign-ups: experience level, weekly training target (days), what they are working towards and starting weight (kg). */
+  level?: string;
+  weeklyTarget?: number;
+  personalGoal?: string;
+  startWeightKg?: number;
 }
 
 export type MuscleGroup =

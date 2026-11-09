@@ -245,7 +245,11 @@ export interface GroupsPayload {
 export async function loadGroups(me: UserRow): Promise<GroupsPayload> {
   const coachId = me.role === "CLIENT" ? me.coachId : me.id;
   const empty: GroupsPayload = { groups: [], requests: [], notifications: [], unread: 0 };
-  if (!coachId) return empty;
+  if (!coachId) {
+    // Someone training on their own has no classes, but still hears back about a coach request.
+    const notifications = await loadNotifications(me.id);
+    return { ...empty, notifications, unread: notifications.filter((n) => !n.read).length };
+  }
   const d = await db();
   const since = new Date(Date.now() - 120 * 86400000);
   // The coach's templates only supply class names, so they load alongside the sessions (independent reads run together).

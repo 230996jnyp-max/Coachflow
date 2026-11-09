@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { SEED_EXERCISES } from "@/data/exercises";
 import { aiConfigured, aiSportExercises } from "@/lib/server/ai";
-import { requireUser } from "@/lib/server/auth";
+import { requireTrainerOrPersonal } from "@/lib/server/auth";
+import { requireAdult } from "@/lib/server/minors";
 import { badRequest, HttpError, int, readJson, route, str } from "@/lib/server/http";
 import { customExercisesFor } from "@/lib/server/training";
 import { SUB_CATEGORIES, disciplineOf } from "@/lib/sports";
@@ -16,7 +17,8 @@ export const maxDuration = 60;
  */
 export const POST = route(async (req) => {
   const body = await readJson(req);
-  const me = await requireUser(["OWNER", "COACH"]);
+  const me = await requireTrainerOrPersonal();
+  requireAdult(me);
   if (!aiConfigured()) throw new HttpError(503, "AI isn't set up.");
   const sport = str(body.sport, "Sport", { min: 2, max: 60 });
   if (/[<>{}]/.test(sport)) throw badRequest("Please type just the name of a sport or discipline.");

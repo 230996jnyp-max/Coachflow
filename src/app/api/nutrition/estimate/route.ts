@@ -3,6 +3,7 @@ import { MEALS } from "@/lib/nutrition";
 import { aiConfigured } from "@/lib/server/ai";
 import { refundAiQuota, takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
+import { requireAdult } from "@/lib/server/minors";
 import { HttpError, readJson, route } from "@/lib/server/http";
 import { getSettings } from "@/lib/server/nutrition";
 import { aiEstimateFood } from "@/lib/server/nutritionAi";
@@ -21,6 +22,7 @@ const DAILY_ESTIMATES = 15;
 export const POST = route(async (req) => {
   const body = await readJson(req, 2_000_000);
   const me = await requireUser();
+  requireAdult(me); // calorie tracking is off for under-18s
   if (!aiConfigured()) throw new HttpError(503, "Food estimates aren't set up on this server. You can still add food by search, barcode or by typing the numbers.");
   const text = typeof body.text === "string" ? body.text.slice(0, 600) : undefined;
   const image = typeof body.image === "string" ? body.image : undefined;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { aiConfigured, aiReadWorkouts, shortlistLibrary } from "@/lib/server/ai";
 import { takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
+import { requireAdult } from "@/lib/server/minors";
 import { HttpError, readJson, route, str } from "@/lib/server/http";
 import { libraryFor } from "@/lib/server/recap";
 
@@ -21,6 +22,7 @@ const COACH_AI_IMPORTS_PER_DAY = 40;
 export const POST = route(async (req) => {
   const body = await readJson(req);
   const me = await requireUser();
+  requireAdult(me);
   if (!aiConfigured()) throw new HttpError(503, "AI reading isn't set up.");
   const text = str(body.text, "Text", { max: 20000 });
   const unit = body.unit === "imperial" ? "imperial" : "metric";

@@ -26,7 +26,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useChat } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
-import { logout } from "@/lib/store";
+import { logout, refreshAccounts, refreshGroups, refreshSchedule } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { FloorBanner } from "./floor/FloorBanner";
 import { NotificationBell } from "./groups/NotificationBell";
@@ -34,6 +34,7 @@ import { ThemeMenu } from "./ThemeSwitcher";
 import { OnboardingTour } from "./tour/OnboardingTour";
 import { InstallButton } from "./InstallButton";
 import { Splash } from "./Providers";
+import { TrialBar, TrialGate } from "./TrialBar";
 import { Avatar } from "./ui";
 
 interface NavItem {
@@ -70,13 +71,14 @@ const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck 
 const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { ready, user, isTrainer, db } = useViewer();
+  const { ready, user, isTrainer, db, isPersonal, isMinor } = useViewer();
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const chat = useChat();
   const threads = useMemo(() => {
     if (!user) return [];
+    if (isPersonal) return []; // nobody to chat with until a coach accepts them
     if (!isTrainer) return [clientThread(user.id)];
     const t = db.clients.map((c) => clientThread(c.id));
     if (user.isOwner) {
@@ -85,17 +87,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       t.push(coachThread(user.id));
     }
     return t;
-  }, [user, isTrainer, db.clients, db.users]);
+  }, [user, isTrainer, isPersonal, db.clients, db.users]);
   const unread = user ? threads.reduce((n, t) => n + unreadFor(chat, user.id, t), 0) : 0;
 
   const forbidden =
     !!user &&
     ((isTrainer && CLIENT_ONLY.some((p) => pathname.startsWith(p))) ||
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
-      (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))));
+      (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
+      (isPersonal && ["/book", "/messages", "/classes"].some((p) => pathname.startsWith(p))) ||
+      (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
   const nicheStep = useNicheStepPending();
+  // A coach accepted this person: switch them from "training on my own" to a coach's client without making them reload.
+  const acceptedUnread = isPersonal && db.notifications.some((n) => n.kind === "coach_accepted" && !n.read);
+  useEffect(() => {
+    if (!acceptedUnread) return;
+    void Promise.all([refreshAccounts(), refreshSchedule(), refreshGroups()]);
+  }, [acceptedUnread]);
   const pendingCoaches = usePendingCoachRequests();
   const isOwner = !!user?.isOwner;
   // The owner sees how many coach sign-up requests are waiting (a badge on Admin), refreshed every minute.
@@ -114,10 +124,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [ready, user, forbidden, mustChange, isTrainer, router]);
 
   if (!ready || !user || forbidden || mustChange) return <Splash />;
+  if (user.trial?.enforced && user.trial.expired && !user.isOwner) return <TrialGate />;
   // Right after sign-in (and after the set-your-password screen), a coach chooses their niche before reaching the dashboard.
   if (isTrainer && nicheStep && !user.mustChangePassword) return <NicheStep />;
 
-  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : CLIENT_NAV;
+  // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
+  const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : clientNav;
   const active = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const activeWorkout = db.workouts.find((w) => w.status === "ACTIVE" && w.loggedById === user.id);
   // A workout the coach is logging for a session on the gym floor leads back to that session, not to one person's workout.
@@ -219,6 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ShieldCheck size={20} />
               </Link>
             )}
+            {!isPersonal && (
             <Link
               href="/messages"
               data-tour="nav-messages"
@@ -228,6 +242,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <MessageCircle size={20} />
               {unread > 0 && <Badge count={unread} />}
             </Link>
+            )}
             <NotificationBell />
             <ThemeMenu />
             <InstallButton compact />
@@ -240,6 +255,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className={cn("pb-28 md:pb-10", slim ? "md:pl-[72px]" : "md:pl-64")}>
         <div className={cn("mx-auto w-full px-4 py-5 md:px-8 md:py-8", pathname.startsWith("/floor/") ? "max-w-7xl" : "max-w-5xl")}>
+          {user.trial && <TrialBar trial={user.trial} />}
           {isTrainer && !pathname.startsWith("/floor/") && <FloorBanner />}
           {children}
         </div>

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { aiConfigured, aiShortNote } from "@/lib/server/ai";
 import { takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
+import { isMinorRow } from "@/lib/server/accounts";
 import { db } from "@/lib/server/db";
 import { readJson, route, str } from "@/lib/server/http";
 import { aiNotes } from "@/lib/server/schema";
@@ -20,6 +21,7 @@ export const maxDuration = 30;
 export const POST = route(async (req) => {
   const body = await readJson(req);
   const me = await requireUser();
+  if (isMinorRow(me)) return NextResponse.json({ text: null });
   const kind = body.kind === "eye" ? "eye" : "why";
   if (kind === "eye" && me.role === "CLIENT") return NextResponse.json({ text: null });
   const facts = str(body.facts, "Facts", { max: 1200 });

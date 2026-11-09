@@ -51,6 +51,9 @@ export const POST = route(async (req) => {
     throw new HttpError(401, FAIL);
   }
 
+  // Someone who signed themselves up must open the link in their confirmation email first (the right password proves it's them asking).
+  if (!user.emailVerified) throw new HttpError(403, "Please confirm your email first: open the link we sent you. Didn't get it? Resend it below.", "unverified");
+
   const upgrade = (await needsRehash(user.passwordHash)) ? { passwordHash: await hashPassword(password) } : {};
   if (user.failedAttempts || user.lockedUntil || upgrade.passwordHash) {
     await d.update(users).set({ failedAttempts: 0, lockedUntil: null, ...upgrade }).where(eq(users.id, user.id));

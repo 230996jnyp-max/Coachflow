@@ -64,7 +64,8 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
     const today = format(new Date(), "yyyy-MM-dd");
     let parsed: ParsedWorkout[] | null = null;
     let why = "";
-    // 1) AI reader: understands shorthand, supersets, warm-up/drop sets, rest times and maps to the exercise library.
+    // 1) AI reader: understands shorthand, supersets, warm-up/drop sets, rest times and maps to the exercise library. (Not for under-18s: they use the built-in reader.)
+    if (!user?.isMinor)
     try {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 58_000);
