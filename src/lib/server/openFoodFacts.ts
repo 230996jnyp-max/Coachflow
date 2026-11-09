@@ -8,7 +8,7 @@ import { HttpError } from "./http";
  * neighbour (they ask apps to identify themselves and to keep search traffic low).
  */
 
-const UA = "CoachFlow/1.0 (https://coachflow-eta-eight.vercel.app; food diary)";
+const UA = "CoachFlow/1.0 (https://coachflow.pro; food diary)";
 const FIELDS = "code,product_name,generic_name,brands,nutriments,serving_size,serving_quantity,allergens_tags,ingredients_analysis_tags";
 
 const ALLERGEN_TAG: Record<string, FoodTag> = {

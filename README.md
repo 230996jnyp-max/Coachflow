@@ -5,7 +5,7 @@ Installable as a mobile app (PWA) and responsive as a desktop dashboard for the 
 
 ## Deployed
 
-Production: https://coachflow-eta-eight.vercel.app (Vercel project `coachflow`, team `230996jnyp-maxs-projects`).
+Production: https://coachflow.pro (`www` redirects to it; the old `coachflow-eta-eight.vercel.app` address redirects to it too) (Vercel project `coachflow`, team `230996jnyp-maxs-projects`).
 Accounts and chat are stored in Neon Postgres (via the Vercel Marketplace integration); email goes out through Gmail SMTP using the project's `SMTP_USER` / `SMTP_PASS` environment variables. Redeploy with `npx vercel deploy --prod`.
 Deployment Protection is on by default, so only people logged in to Vercel can open the URL until it is turned off (Project → Settings → Deployment Protection).
 
