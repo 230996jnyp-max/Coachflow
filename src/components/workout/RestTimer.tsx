@@ -13,7 +13,8 @@ export function makeRest(seconds: number): RestState {
   return { endsAt: Date.now() + seconds * 1000, total: seconds };
 }
 
-function beep() {
+/** A short tone and a buzz (used when a rest ends). */
+export function beep() {
   try {
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new AC();

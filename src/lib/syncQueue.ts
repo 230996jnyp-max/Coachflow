@@ -11,6 +11,8 @@ export interface SyncOptions {
   remove: (id: string, opts: { keepalive: boolean }) => Promise<SyncResult>;
   /** Called when the server refused a change (so the screen can re-sync with what the server has). */
   onDrop?: () => void;
+  /** Called after every send attempt, whatever the outcome (the unsent changes may have changed). */
+  onSettled?: () => void;
 }
 
 /** How long a just-sent record is protected from being overwritten by an older server response. */
@@ -50,6 +52,16 @@ export class SyncQueue {
 
   get pending(): boolean {
     return this.dirty.size > 0 || this.removed.size > 0;
+  }
+
+  /** Nothing waiting and nothing in flight. */
+  get settled(): boolean {
+    return !this.running && !this.pending;
+  }
+
+  /** Records with changes that have not reached the server yet. */
+  unsent(): { save: string[]; remove: string[] } {
+    return { save: [...this.dirty], remove: [...this.removed] };
   }
 
   clear() {
@@ -100,6 +112,7 @@ export class SyncQueue {
       this.running = false;
     }
     if (dropped) this.o.onDrop?.();
+    this.o.onSettled?.();
     if (retry) {
       this.failures++;
       this.schedule(Math.min(30_000, 2_000 * 2 ** Math.min(this.failures, 4)));

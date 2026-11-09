@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/server/auth";
+import { requireTrainerOrPersonal } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { CORE_SPORTS, cleanSports } from "@/lib/sports";
 import { int, readJson, route } from "@/lib/server/http";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 /** PUT — a coach updates their booking rules (partial updates allowed). */
 export const PUT = route(async (req) => {
   const body = await readJson(req);
-  const me = await requireUser(["OWNER", "COACH"]);
+  const me = await requireTrainerOrPersonal();
   const cur = await rulesFor(me.id);
   const next = {
     sessionMinutes: "sessionMinutes" in body ? int(body.sessionMinutes, "Session length", 15, 240) : cur.sessionMinutes,

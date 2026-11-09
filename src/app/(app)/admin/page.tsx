@@ -102,11 +102,14 @@ export default function AdminPage() {
       {error && <Notice tone="error">{error}</Notice>}
 
       <div role="tablist" aria-label="Administrator sections" className="flex gap-1.5">
+        {/* Coaches now sign themselves up. The approvals tab only appears while a request from before that is still waiting. */}
         {(
-          [
-            ["coaches", "Coaches"],
-            ["pending", "Pending Approvals"],
-          ] as const
+          (pending > 0 || tab === "pending"
+            ? [
+                ["coaches", "Coaches"],
+                ["pending", "Earlier requests"],
+              ]
+            : [["coaches", "Coaches"]]) as ["coaches" | "pending", string][]
         ).map(([key, label]) => (
           <button
             key={key}

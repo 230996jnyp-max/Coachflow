@@ -5,6 +5,7 @@ import { ChevronRight, Plus, Search, Ticket, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AddClientModal, CredentialsModal, type Credentials } from "@/components/clients/ClientForms";
+import { CoachCodeCard, LinkRequests } from "@/components/coachlink/CoachLink";
 import { Avatar, Badge, Button, Card, EmptyState, Input, PageHeader, Segmented } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
@@ -36,6 +37,11 @@ export default function ClientsPage() {
           </Button>
         }
       />
+
+      <div className="mb-4 space-y-4">
+        <LinkRequests />
+        <CoachCodeCard compact />
+      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3" data-tour="clients-search">
         <div className="relative min-w-[200px] flex-1">

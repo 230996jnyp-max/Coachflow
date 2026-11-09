@@ -20,6 +20,10 @@ export interface Viewer {
   coaches: User[];
   /** The viewer's own coach: themselves for staff, the assigned coach for a client. */
   coach: User | null;
+  /** A client with no coach (training on their own). */
+  isPersonal: boolean;
+  /** Under 18: no calorie tracking and no AI features. */
+  isMinor: boolean;
 }
 
 export function useViewer(): Viewer {
@@ -56,5 +60,7 @@ export function useViewer(): Viewer {
     owner,
     coaches,
     coach,
+    isPersonal: !!user?.personal,
+    isMinor: !!user?.isMinor,
   };
 }

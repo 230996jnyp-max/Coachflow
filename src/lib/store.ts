@@ -121,6 +121,7 @@ const workoutQ = new SyncQueue({
   },
   remove: async (id, o) => classify(await api(`/api/training/workouts/${id}`, { method: "DELETE", keepalive: o.keepalive })),
   onDrop: () => void refreshTraining(true),
+  onSettled: () => persistOutbox(),
 });
 
 const templateQ = new SyncQueue({
@@ -162,11 +163,99 @@ function track(prev: DB, next: DB) {
   diffById(prev.workouts, next.workouts, workoutQ);
   diffById(prev.templates, next.templates, templateQ);
   if (prev.exercises !== next.exercises) diffById(prev.exercises.filter((e) => e.custom), next.exercises.filter((e) => e.custom), exerciseQ, false);
+  if (prev.workouts !== next.workouts) persistOutbox();
 }
 
 /** Sends every pending change now (used when the tab is hidden or closed). */
 function flushTraining(keepalive: boolean) {
   void exerciseQ.flush(keepalive).then(() => templateQ.flush(keepalive)).then(() => workoutQ.flush(keepalive));
+}
+
+/* ---------------- Unsent changes survive a closed tab or a dead connection ---------------- */
+/*
+ * Workout changes are sent in the background. While they have not reached the server (no signal in a basement gym), a copy of
+ * the unsent workouts, and of any "end session" call still waiting to go out, is kept on this device and sent after the next
+ * sign-in if the tab was closed in between.
+ */
+const outboxKey = (userId: string) => `coachflow-outbox-v1:${userId}`;
+
+export interface PendingEnd {
+  kind: "BOOKING" | "GROUP";
+  id: string;
+  marks: { clientId: string; mark: "PRESENT" | "NO_SHOW"; deduct?: boolean }[];
+  workoutIds: string[];
+}
+let pendingEnds: PendingEnd[] = [];
+let outboxTimer: ReturnType<typeof setTimeout> | undefined;
+/** Set while signing out so a late timer can't delete what was just kept for the next sign-in. */
+let outboxFrozen = false;
+let sendingEnds = false;
+
+let unsentN = 0;
+const unsentListeners = new Set<() => void>();
+function refreshUnsent() {
+  const u = workoutQ.unsent();
+  const n = u.save.length + u.remove.length + pendingEnds.length + (workoutQ.settled || u.save.length + u.remove.length ? 0 : 1);
+  if (n === unsentN) return;
+  unsentN = n;
+  unsentListeners.forEach((l) => l());
+}
+/** How many changes (workouts, or a finished session) have not reached the server yet. */
+export function useUnsent(): number {
+  return useSyncExternalStore(
+    (l) => {
+      unsentListeners.add(l);
+      return () => {
+        unsentListeners.delete(l);
+      };
+    },
+    () => unsentN,
+    () => 0,
+  );
+}
+
+async function writeOutbox(): Promise<void> {
+  const me = state.sessionUserId;
+  if (!me || outboxFrozen) return;
+  const u = workoutQ.unsent();
+  const ws = state.db.workouts.filter((w) => u.save.includes(w.id));
+  try {
+    if (!ws.length && !u.remove.length && !pendingEnds.length) await del(outboxKey(me));
+    else await set(outboxKey(me), { workouts: ws, removed: u.remove, ends: pendingEnds });
+  } catch {
+    /* private window or storage blocked: the in-memory queue still retries */
+  }
+}
+
+function persistOutbox() {
+  refreshUnsent();
+  if (outboxTimer) clearTimeout(outboxTimer);
+  outboxTimer = setTimeout(() => void writeOutbox(), 250);
+}
+
+/** After sign-in: puts back whatever this device still had unsent, then sends it. */
+async function restoreOutbox(userId: string): Promise<void> {
+  let box: { workouts?: Workout[]; removed?: string[]; ends?: PendingEnd[] } | undefined;
+  try {
+    box = await get(outboxKey(userId));
+  } catch {
+    return;
+  }
+  if (!box || state.sessionUserId !== userId) return;
+  const ws = Array.isArray(box.workouts) ? box.workouts : [];
+  const gone = new Set(Array.isArray(box.removed) ? box.removed : []);
+  if (ws.length || gone.size) {
+    const byId = new Map(ws.map((w) => [w.id, w]));
+    mutate((db) => {
+      const kept = db.workouts.filter((w) => !gone.has(w.id)).map((w) => byId.get(w.id) ?? w);
+      const have = new Set(kept.map((w) => w.id));
+      return { ...db, workouts: [...kept, ...ws.filter((w) => !have.has(w.id) && !gone.has(w.id))] };
+    });
+    for (const id of gone) workoutQ.remove(id);
+  }
+  pendingEnds = Array.isArray(box.ends) ? box.ends : [];
+  persistOutbox();
+  if (pendingEnds.length) void sendPendingEnds();
 }
 
 interface TrainingData {
@@ -258,6 +347,8 @@ interface ApiResult<T> {
   status: number;
   data: T | null;
   error?: string;
+  /** A short reason from the server the screen can act on (e.g. "unverified", "trial_over"). */
+  code?: string;
 }
 
 export async function api<T = Record<string, unknown>>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean } = {}): Promise<ApiResult<T>> {
@@ -270,13 +361,13 @@ export async function api<T = Record<string, unknown>>(path: string, init: { met
       cache: "no-store",
       keepalive: init.keepalive,
     });
-    let data: (T & { error?: string }) | null = null;
+    let data: (T & { error?: string; code?: string }) | null = null;
     try {
-      data = (await res.json()) as T & { error?: string };
+      data = (await res.json()) as T & { error?: string; code?: string };
     } catch {
       data = null;
     }
-    return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`) };
+    return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`), code: res.ok ? undefined : data?.code };
   } catch {
     return { ok: false, status: 0, data: null, error: "Can not reach the server. Check your connection." };
   }
@@ -315,6 +406,9 @@ async function establishSession(): Promise<boolean> {
   if (!local || local.version !== DB_VERSION) local = createEmptyDB();
 
   // Switching accounts: drop anything queued for the previous one.
+  outboxFrozen = false;
+  pendingEnds = [];
+  if (outboxTimer) clearTimeout(outboxTimer);
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();
@@ -362,6 +456,7 @@ async function establishSession(): Promise<boolean> {
   setState({ ready: true, sessionUserId: me.id, db: withGroups });
   if (server) trainingSince = new Date(Date.parse(server.now) - 10_000).toISOString();
   trainingLoaded = serverOk;
+  if (serverOk) await restoreOutbox(me.id);
   if (serverOk) {
     trainingPartial = true;
     void refreshTraining(true); // the rest of the workout history, quietly
@@ -439,6 +534,7 @@ export async function initStore() {
       void refreshTraining();
       void refreshGroups();
     }
+    if (pendingEnds.length) void sendPendingEnds();
   }, 45_000);
   // Live group classes: every 3 seconds while a live grid / group workout is open, and a little slower around class time.
   let fastN = 0;
@@ -461,6 +557,11 @@ export async function initStore() {
       }
     });
     window.addEventListener("pagehide", () => flushTraining(true));
+    // The signal is back: send what waited (workouts first, then a finished session).
+    window.addEventListener("online", () => {
+      flushTraining(false);
+      void sendPendingEnds();
+    });
   }
 }
 
@@ -500,8 +601,13 @@ export function useNow(intervalMs = 30_000): Date {
 /* ---------------- Auth ---------------- */
 /** Returns an error message, or null on success. */
 export async function login(username: string, password: string): Promise<string | null> {
+  return (await loginResult(username, password)).error;
+}
+
+/** Like login(), and also says why it failed when the server gave a reason (e.g. "unverified": the email hasn't been confirmed yet). */
+export async function loginResult(username: string, password: string): Promise<{ error: string | null; code?: string }> {
   const r = await api("/api/auth/login", { body: { username, password } });
-  if (!r.ok) return r.error ?? "Login failed.";
+  if (!r.ok) return { error: r.error ?? "Login failed.", code: r.code };
   markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
   if (ok) {
@@ -509,7 +615,7 @@ export async function login(username: string, password: string): Promise<string 
     requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
   }
   if (!ok) clearActive();
-  return ok ? null : "Signed in, but your account could not be loaded. Please try again.";
+  return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
 
 export async function logout() {
@@ -518,6 +624,8 @@ export async function logout() {
   await Promise.all([exerciseQ.flush(), templateQ.flush()]);
   await workoutQ.flush();
   flush();
+  await writeOutbox(); // anything still unsent waits on this device for the next sign-in
+  outboxFrozen = true;
   clearActive();
   workoutQ.clear();
   templateQ.clear();
@@ -739,6 +847,11 @@ export function saveTemplate(t: RoutineTemplate) {
   }));
 }
 
+/** A client saved imported routines: tells their coach (how many and the names, never the contents). */
+export function notifyRoutineImport(titles: string[], exercises: number) {
+  void api("/api/notify/import", { body: { titles, exercises } });
+}
+
 export function deleteTemplate(id: string) {
   mutate((db) => ({ ...db, templates: db.templates.filter((t) => t.id !== id) }));
 }
@@ -905,6 +1018,7 @@ export function logCompletedWorkouts(inputs: CompletedWorkoutInput[]): string[] 
         notes: inp.notes ?? "",
         loggedBy: me.role,
         loggedById: me.id,
+        imported: true,
         exercises: inp.exercises.map((e) => ({
           id: uid("we"),
           exerciseId: e.exerciseId,
@@ -1309,6 +1423,96 @@ export async function reopenSession(t: AttendanceTarget): Promise<string | null>
   const r = await api("/api/attendance", { body: { kind: t.kind, id: t.id, reopen: true } });
   await afterAttendance();
   return r.ok ? null : (r.error ?? "Could not reopen the session.");
+}
+
+/* ---------------- Gym floor ---------------- */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Adds workouts that don't exist yet. It never replaces one: another device may already have logged sets in it. */
+export function addWorkouts(list: Workout[]) {
+  mutate((db) => {
+    const have = new Set(db.workouts.map((w) => w.id));
+    const add = list.filter((w) => !have.has(w.id));
+    return add.length ? { ...db, workouts: [...db.workouts, ...add] } : db;
+  });
+}
+
+/** Waits until every workout change has reached the server, or gives up (no signal). */
+export async function flushWorkouts(timeoutMs = 6000): Promise<boolean> {
+  const t0 = Date.now();
+  await workoutQ.flush();
+  while (!workoutQ.settled && Date.now() - t0 < timeoutMs) await sleep(200);
+  return workoutQ.settled;
+}
+
+export interface FloorEndRow {
+  clientId: string;
+  workoutId?: string;
+  mark: "PRESENT" | "NO_SHOW";
+  /** No-show only: take the credit anyway. */
+  deduct?: boolean;
+}
+export type FloorEndResult = { ok: true; recaps: number } | { ok: false; queued: boolean; error?: string };
+
+const refused = (status: number) => status !== 0 && status < 500 && status !== 429;
+
+async function sendEnd(end: PendingEnd): Promise<FloorEndResult> {
+  if (await flushWorkouts()) {
+    const r = await api<{ recaps: number }>("/api/floor/end", { body: end });
+    if (r.ok) {
+      await afterAttendance();
+      return { ok: true, recaps: r.data?.recaps ?? 0 };
+    }
+    if (refused(r.status)) return { ok: false, queued: false, error: r.error ?? "Couldn't end the session." };
+  }
+  // No signal: it waits on this device and goes out as soon as the connection is back.
+  pendingEnds = [...pendingEnds.filter((e) => !(e.kind === end.kind && e.id === end.id)), end];
+  persistOutbox();
+  return { ok: false, queued: true };
+}
+
+async function sendPendingEnds(): Promise<void> {
+  if (sendingEnds || !pendingEnds.length) return;
+  sendingEnds = true;
+  try {
+    for (const end of [...pendingEnds]) {
+      if (!(await flushWorkouts(3000))) break;
+      const r = await api("/api/floor/end", { body: end });
+      if (!r.ok && !refused(r.status)) break;
+      pendingEnds = pendingEnds.filter((e) => e !== end);
+      persistOutbox();
+      if (r.ok) await afterAttendance();
+    }
+  } finally {
+    sendingEnds = false;
+  }
+}
+
+/**
+ * Gym floor, "End session". Everyone who logged sets keeps their finished workout; a workout with nothing logged is removed.
+ * Attendance and credits are then settled for the whole session in one call (see /api/floor/end), with recaps going to the clients.
+ */
+export async function endFloorSession(target: AttendanceTarget, rows: FloorEndRow[]): Promise<FloorEndResult> {
+  const workoutIds: string[] = [];
+  for (const r of rows) {
+    const w = r.workoutId ? state.db.workouts.find((x) => x.id === r.workoutId) : undefined;
+    if (!w) continue;
+    if (r.mark === "PRESENT" && w.exercises.some((we) => we.sets.some((s) => s.done))) {
+      finishWorkout(w.id);
+      workoutIds.push(w.id);
+    } else deleteWorkout(w.id);
+  }
+  return sendEnd({ kind: target.kind, id: target.id, marks: rows.map((r) => ({ clientId: r.clientId, mark: r.mark, ...(r.deduct ? { deduct: true } : {}) })), workoutIds });
+}
+
+/** Coach, gym floor: another of the coach's clients joins the session on the spot. Returns the group they joined, or an error. */
+export async function addWalkIn(target: { groupId?: string; bookingId?: string }, clientId: string): Promise<{ groupId: string } | { error: string }> {
+  const r = await api<GroupsData & { groupId: string }>("/api/floor/walk-in", { body: { ...target, clientId } });
+  if (!r.ok || !r.data) return { error: r.error ?? "Couldn't add them. Please try again." };
+  applyGroups(r.data);
+  void refreshSchedule();
+  void refreshAccounts();
+  return { groupId: r.data.groupId };
 }
 
 /** Attendance rate and credit log for one client (the coach picks the client; a client always gets their own). */

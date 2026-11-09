@@ -24,6 +24,14 @@ export interface User {
   hasCompletedOnboarding?: boolean;
   /** Saved colour theme (the Settings picker and header menu keep it in sync with the device). */
   themePreference?: "black" | "white" | "navy";
+  /** A client with no coach (training on their own): no booking, credits, coach chat or attendance. */
+  personal?: boolean;
+  /** Under 18: no calorie targets, no nutrition diary and no AI features. */
+  isMinor?: boolean;
+  /** A coach's six-digit code (only sent for yourself). */
+  coachCode?: string;
+  /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */
+  trial?: { endsAt: string; daysLeft: number; expired: boolean; enforced: boolean };
 }
 
 export type ClientGoal =
@@ -56,6 +64,11 @@ export interface ClientProfile {
   homeText?: string;
   /** Training focuses the coach assigned (e.g. ["Mobility & Flexibility"]); the exercise pickers follow them. Empty = everything. */
   focuses?: string[];
+  /** Self sign-ups: experience level, weekly training target (days), what they are working towards and starting weight (kg). */
+  level?: string;
+  weeklyTarget?: number;
+  personalGoal?: string;
+  startWeightKg?: number;
 }
 
 export type MuscleGroup =
@@ -159,7 +172,7 @@ export interface Exercise {
 }
 
 export type SetType = "N" | "W" | "D" | "F";
-export type PRKind = "WEIGHT" | "E1RM" | "VOLUME" | "REPS" | "TIME" | "DISTANCE";
+export type PRKind = "WEIGHT" | "E1RM" | "VOLUME" | "REPS" | "TIME" | "DISTANCE" | "HOLD" | "ROUNDS" | "ROUND_TIME" | "PACE" | "ACCURACY" | "MAKES" | "METRIC";
 
 export interface WorkoutSet {
   id: string;
@@ -220,8 +233,14 @@ export interface Workout {
   templateId?: string;
   /** Group class / shared session this workout belongs to (every attendee gets their own copy). */
   groupId?: string;
+  /** The 1-on-1 booking this workout was logged for on the gym floor (partner and group sessions use groupId). */
+  bookingId?: string;
+  /** A private note the coach made during the session ("left knee sore"). Clients never receive it. */
+  coachNote?: string;
   /** How the session felt (pain / energy 0-10, where it hurt). Asked when a workout is finished; always optional. */
   feedback?: WorkoutFeedback;
+  /** Brought in with the AI / text importer (a person's own notes), rather than logged live. */
+  imported?: boolean;
   exercises: WorkoutExercise[];
 }
 

@@ -12,9 +12,9 @@ import {
   MoreHorizontal,
   NotebookPen,
   Plus,
+  Share2,
   Sparkles,
   Trash2,
-  Trophy,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -35,14 +35,14 @@ import {
   IconButton,
   Input,
   Modal,
-  Notice,
   Select,
   Textarea,
   Toggle,
 } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
-import { annotatePRs, doneWorkouts, findPrevious, PR_LABELS, workoutSetCount, workoutVolume } from "@/lib/stats";
-import { describeSchema, hasTrackedValue } from "@/lib/tracking";
+import { annotatePRs, doneWorkouts, findPrevious, workoutSetCount, workoutVolume } from "@/lib/stats";
+import { describeSchema } from "@/lib/tracking";
+import { fillFromPrevious, isSetComplete, missingValueMessage, withPreviousFilled } from "@/lib/setLogging";
 import {
   blankSet,
   deleteWorkout,
@@ -55,9 +55,13 @@ import {
 } from "@/lib/store";
 import type { Exercise, PRKind, SetType, Workout, WorkoutExercise, WorkoutSet } from "@/lib/types";
 import { cn, fmtClock, fmtDurationShort, fmtVolume, weightUnit } from "@/lib/utils";
+import { CoachEyeCard } from "./CoachEyeCard";
+import { RecapModal } from "./RecapModal";
 import { FeelingCard } from "./FeelingCard";
 import { makeRest, RestTimerBar, type RestState } from "./RestTimer";
+import { suggestFor, targetForSet } from "@/lib/progression";
 import { SET_CYCLE, SetHeader, SetRow } from "./SetRow";
+import { SuggestionBar, targetText } from "./SuggestionBar";
 
 function LiveTimer({ since }: { since: string }) {
   const now = useNow(1000);
@@ -77,6 +81,7 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
   const [menu, setMenu] = useState<string | null>(null);
   const [hint, setHint] = useState<{ weId: string; msg: string } | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [recapOpen, setRecapOpen] = useState(false);
   const [trackFor, setTrackFor] = useState<Exercise | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [summary, setSummary] = useState(false);
@@ -161,27 +166,6 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
     setTimeout(() => setHint((h) => (h?.weId === weId ? null : h)), 2600);
   };
 
-  const fillFrom = (prev: WorkoutSet | undefined, ex: Exercise): Partial<WorkoutSet> => {
-    if (!prev) return {};
-    const p: Partial<WorkoutSet> = {};
-    if (ex.tracking) {
-      if (prev.custom) p.custom = { ...prev.custom };
-      return p;
-    }
-    if (ex.type === "WEIGHT_REPS" || ex.type === "WEIGHTED_BODYWEIGHT") {
-      p.weight = prev.weight;
-      p.reps = prev.reps;
-    } else if (ex.type === "BODYWEIGHT_REPS") p.reps = prev.reps;
-    else if (ex.type === "DURATION_ONLY") p.durationSec = prev.durationSec;
-    else {
-      p.distanceKm = prev.distanceKm;
-      p.durationSec = prev.durationSec;
-      p.level = prev.level;
-      p.calories = prev.calories;
-    }
-    return p;
-  };
-
   const toggleDone = (we: WorkoutExercise, set: WorkoutSet) => {
     const ex = exMap.get(we.exerciseId);
     if (!ex) return;
@@ -190,24 +174,10 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
       return;
     }
     const prev = prevSetFor(we, set);
-    const merged: WorkoutSet = { ...set };
-    const fill = fillFrom(prev, ex);
     // Use "previous" values for any field the user left empty.
-    (Object.keys(fill) as (keyof WorkoutSet)[]).forEach((k) => {
-      if (merged[k] === undefined && fill[k] !== undefined) (merged as unknown as Record<string, unknown>)[k] = fill[k];
-    });
-    const valid = ex.tracking
-      ? hasTrackedValue(merged, ex.tracking)
-      : ex.type === "DURATION_ONLY"
-        ? !!merged.durationSec
-        : ex.type === "DURATION_DISTANCE"
-          ? !!merged.durationSec || !!merged.distanceKm
-          : !!merged.reps && merged.reps > 0;
-    if (!valid) {
-      flash(
-        we.id,
-        ex.tracking ? "Fill in at least one number or time first." : ex.type === "DURATION_ONLY" ? "Enter a duration first." : ex.type === "DURATION_DISTANCE" ? "Enter a time or distance first." : "Enter reps first.",
-      );
+    const merged = withPreviousFilled(set, prev, ex);
+    if (!isSetComplete(merged, ex)) {
+      flash(we.id, missingValueMessage(ex));
       return;
     }
     patchSet(we.id, set.id, { ...merged, done: true });
@@ -243,12 +213,11 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
 
   const exitTo = () => router.push(isTrainer && w.clientId !== user.id ? `/clients/${w.clientId}` : "/workout");
 
-  const prList = w.exercises.flatMap((we) =>
-    we.sets.filter((s) => s.pr?.length).map((s) => ({ we, s })),
-  );
 
   return (
     <div className={cn(rest && "pb-24")}>
+      {isActive && isTrainer && w.clientId !== user.id && <CoachEyeCard clientId={w.clientId} planned={w.exercises.map((e) => e.exerciseId)} className="mb-4" />}
+
       {/* Header */}
       <Card className="mb-4 space-y-4 p-4">
         <div className="flex items-start justify-between gap-3">
@@ -264,14 +233,19 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
               <Check size={18} /> Finish
             </Button>
           ) : (
-            <Button
-              onClick={() => {
-                finishWorkout(w.id);
-                exitTo();
-              }}
-            >
-              <Check size={18} /> Save
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setRecapOpen(true)}>
+                <Share2 size={16} /> Recap
+              </Button>
+              <Button
+                onClick={() => {
+                  finishWorkout(w.id);
+                  exitTo();
+                }}
+              >
+                <Check size={18} /> Save
+              </Button>
+            </div>
           )}
         </div>
 
@@ -379,6 +353,14 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
           const hintMsg = hint?.weId === we.id ? hint.msg : null;
           const tpl = template?.exercises.find((t) => t.exerciseId === we.exerciseId);
           const repHint = tpl && tpl.repMax > 0 ? (tpl.repMin === tpl.repMax ? `${tpl.repMax}` : `${tpl.repMin}-${tpl.repMax}`) : undefined;
+          // What to aim for today, from the last sessions of this exercise (only while the workout is still being logged).
+          const sug = isActive ? suggestFor(ex, clientWorkouts, { unit, repMin: tpl && tpl.repMax > 0 ? tpl.repMin : undefined, repMax: tpl && tpl.repMax > 0 ? tpl.repMax : undefined }, w.id) : null;
+          let wi = 0;
+          const applyAll = () =>
+            patchEx(we.id, (x) => {
+              let k = 0;
+              return { ...x, sets: x.sets.map((st) => { if (st.type === "W") return st; const t = sug ? targetForSet(sug, k++) : undefined; return st.done || !t ? st : { ...st, ...t, custom: t.custom ?? st.custom }; }) };
+            });
           return (
             <Card key={we.id} className="p-3">
               <div className="mb-2 flex items-start justify-between gap-2 px-1">
@@ -452,12 +434,16 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                 </div>
               )}
 
+              {sug && <SuggestionBar ex={ex} sug={sug} unit={unit} onApplyAll={applyAll} />}
               <SetHeader ex={ex} showRpe={showRpe} unit={unit} wLabel={wUnit.toUpperCase()} />
               <div className="space-y-0.5">
                 {we.sets.map((set) => {
                   if (set.type === "N") n++;
                   const label = set.type === "N" ? String(n) : set.type;
                   const prev = prevSetFor(we, set);
+                  const rawTarget = sug && set.type !== "W" ? targetForSet(sug, wi++) : undefined;
+                  // Once a set already holds the suggested numbers there is nothing left to suggest.
+                  const target = rawTarget && !(["weight", "reps", "durationSec", "distanceKm"] as const).every((k) => rawTarget[k] === undefined || rawTarget[k] === set[k]) || (rawTarget?.custom && JSON.stringify(rawTarget.custom) !== JSON.stringify(set.custom ?? {})) ? rawTarget : undefined;
                   return (
                     <SetRow
                       key={set.id}
@@ -470,10 +456,12 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
                       repHint={repHint}
                       prFlags={prMap.get(set.id)}
                       coachEdited={!!set.coachEdit && !set.coachEdit.superseded}
+                      suggest={target && sug ? { text: targetText(target, ex, unit), deload: sug.kind === "DELOAD" } : undefined}
+                      onApplySuggest={() => target && patchSet(we.id, set.id, { ...target, custom: target.custom ?? set.custom })}
                       onChange={(patch) => patchSet(we.id, set.id, patch)}
                       onToggleDone={() => toggleDone(we, set)}
                       onCycleType={() => cycleType(we, set)}
-                      onFillPrev={() => prev && patchSet(we.id, set.id, fillFrom(prev, ex))}
+                      onFillPrev={() => prev && patchSet(we.id, set.id, fillFromPrevious(prev, ex))}
                     />
                   );
                 })}
@@ -597,64 +585,24 @@ export function WorkoutLogger({ workoutId }: { workoutId: string }) {
         </Field>
       </Modal>
 
-      <Modal
+      <RecapModal
+        workoutId={w.id}
         open={summary}
+        title="Workout complete"
         onClose={() => {
           setSummary(false);
           exitTo();
         }}
-        title="Workout complete"
-        footer={
-          <Button
-            onClick={() => {
-              setSummary(false);
-              exitTo();
-            }}
-          >
-            Done
-          </Button>
-        }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <SummaryStat label="Duration" value={fmtDurationShort(w.durationSec)} />
-            <SummaryStat label="Volume" value={fmtVolume(totalVol, unit)} />
-            <SummaryStat label="Sets" value={String(doneSets)} />
-          </div>
-          {prList.length > 0 ? (
-            <div>
-              <div className="mb-2 flex items-center gap-2 text-sm font-bold text-pr">
-                <Trophy size={16} /> {prList.length} personal record{prList.length > 1 ? "s" : ""}!
-              </div>
-              <ul className="space-y-1.5">
-                {prList.slice(0, 8).map(({ we, s }) => (
-                  <li key={s.id} className="flex items-center justify-between gap-3 rounded-lg bg-pr/10 px-3 py-2 text-sm">
-                    <span className="truncate font-medium">{exMap.get(we.exerciseId)?.name}</span>
-                    <span className="shrink-0 text-xs font-semibold text-pr">{s.pr!.map((p) => PR_LABELS[p]).join(" · ")}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <Notice>Great work — consistency builds records. No new PRs this time.</Notice>
-          )}
-          <div className="border-t border-line pt-4">
-            <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} notes={w.notes} onNotes={(v) => up((x) => ({ ...x, notes: v }))} />
-          </div>
+        <div className="border-t border-line pt-4">
+          <FeelingCard feedback={w.feedback} onChange={(fb) => up((x) => ({ ...x, feedback: fb }))} notes={w.notes} onNotes={(v) => up((x) => ({ ...x, notes: v }))} />
         </div>
-      </Modal>
+      </RecapModal>
+      {!isActive && <RecapModal workoutId={w.id} open={recapOpen} onClose={() => setRecapOpen(false)} />}
     </div>
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-field py-3">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-muted">{label}</div>
-      <div className="text-lg font-bold">{value}</div>
-    </div>
-  );
-}
 
 function MenuItem({
   icon,

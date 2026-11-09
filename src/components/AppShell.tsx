@@ -4,6 +4,7 @@ import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
 import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
+  Apple,
   CalendarDays,
   ChevronsLeft,
   ChevronsRight,
@@ -25,13 +26,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useChat } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
-import { logout } from "@/lib/store";
+import { logout, refreshAccounts, refreshGroups, refreshSchedule } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { FloorBanner } from "./floor/FloorBanner";
 import { NotificationBell } from "./groups/NotificationBell";
 import { ThemeMenu } from "./ThemeSwitcher";
 import { OnboardingTour } from "./tour/OnboardingTour";
 import { InstallButton } from "./InstallButton";
 import { Splash } from "./Providers";
+import { TrialBar, TrialGate } from "./TrialBar";
 import { Avatar } from "./ui";
 
 interface NavItem {
@@ -55,25 +58,27 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/home", label: "Home", icon: <Home size={22} />, mobile: true },
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
   { href: "/progress", label: "Progress", icon: <LineChart size={22} />, mobile: true },
+  { href: "/nutrition", label: "Nutrition", icon: <Apple size={22} />, mobile: true },
   { href: "/book", label: "Book", icon: <CalendarDays size={22} />, mobile: true },
   { href: "/messages", label: "Messages", icon: <MessageCircle size={22} /> },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Profile", icon: <UserRound size={22} />, mobile: true },
 ];
 
-const TRAINER_ONLY = ["/trainer", "/clients", "/schedule"];
+const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
-const CLIENT_ONLY = ["/home", "/progress", "/book"];
+const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { ready, user, isTrainer, db } = useViewer();
+  const { ready, user, isTrainer, db, isPersonal, isMinor } = useViewer();
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const chat = useChat();
   const threads = useMemo(() => {
     if (!user) return [];
+    if (isPersonal) return []; // nobody to chat with until a coach accepts them
     if (!isTrainer) return [clientThread(user.id)];
     const t = db.clients.map((c) => clientThread(c.id));
     if (user.isOwner) {
@@ -82,17 +87,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       t.push(coachThread(user.id));
     }
     return t;
-  }, [user, isTrainer, db.clients, db.users]);
+  }, [user, isTrainer, isPersonal, db.clients, db.users]);
   const unread = user ? threads.reduce((n, t) => n + unreadFor(chat, user.id, t), 0) : 0;
 
   const forbidden =
     !!user &&
     ((isTrainer && CLIENT_ONLY.some((p) => pathname.startsWith(p))) ||
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
-      (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))));
+      (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
+      (isPersonal && ["/book", "/messages", "/classes"].some((p) => pathname.startsWith(p))) ||
+      (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
   const nicheStep = useNicheStepPending();
+  // A coach accepted this person: switch them from "training on my own" to a coach's client without making them reload.
+  const acceptedUnread = isPersonal && db.notifications.some((n) => n.kind === "coach_accepted" && !n.read);
+  useEffect(() => {
+    if (!acceptedUnread) return;
+    void Promise.all([refreshAccounts(), refreshSchedule(), refreshGroups()]);
+  }, [acceptedUnread]);
   const pendingCoaches = usePendingCoachRequests();
   const isOwner = !!user?.isOwner;
   // The owner sees how many coach sign-up requests are waiting (a badge on Admin), refreshed every minute.
@@ -111,13 +124,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [ready, user, forbidden, mustChange, isTrainer, router]);
 
   if (!ready || !user || forbidden || mustChange) return <Splash />;
+  if (user.trial?.enforced && user.trial.expired && !user.isOwner) return <TrialGate />;
   // Right after sign-in (and after the set-your-password screen), a coach chooses their niche before reaching the dashboard.
   if (isTrainer && nicheStep && !user.mustChangePassword) return <NicheStep />;
 
-  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : CLIENT_NAV;
+  // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
+  const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : clientNav;
   const active = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const activeWorkout = db.workouts.find((w) => w.status === "ACTIVE" && w.loggedById === user.id);
-  const showBanner = activeWorkout && !pathname.startsWith(`/workout/${activeWorkout.id}`);
+  // A workout the coach is logging for a session on the gym floor leads back to that session, not to one person's workout.
+  const floorKey = activeWorkout?.groupId ?? activeWorkout?.bookingId;
+  const resumeHref = activeWorkout ? (floorKey ? `/floor/${floorKey}` : `/workout/${activeWorkout.id}`) : "";
+  const onFloor = pathname.startsWith("/floor/");
+  const showBanner = activeWorkout && !onFloor && !pathname.startsWith(`/workout/${activeWorkout.id}`);
+  // The gym floor needs the width: the sidebar shrinks to icons there.
+  const slim = collapsed || onFloor;
 
   return (
     <div className="animate-fade-in min-h-dvh bg-bg">
@@ -125,14 +147,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-line bg-surface md:flex",
-          collapsed ? "w-[72px]" : "w-64",
+          slim ? "w-[72px]" : "w-64",
         )}
       >
-        <div className={cn("flex h-16 items-center gap-3 border-b border-line px-4", collapsed && "justify-center px-0")}>
+        <div className={cn("flex h-16 items-center gap-3 border-b border-line px-4", slim && "justify-center px-0")}>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <Dumbbell size={20} />
           </div>
-          {!collapsed && <span className="text-lg font-bold tracking-tight">{db.settings.brandName}</span>}
+          {!slim && <span className="text-lg font-bold tracking-tight">{db.settings.brandName}</span>}
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {nav.map((n) => (
@@ -143,7 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               title={n.label}
               className={cn(
                 "flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors",
-                collapsed && "justify-center px-0",
+                slim && "justify-center px-0",
                 active(n.href) ? "bg-accent/15 text-accent" : "text-muted hover:bg-field hover:text-ink",
               )}
             >
@@ -152,26 +174,26 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {n.href === "/messages" && unread > 0 && <Badge count={unread} />}
                 {n.href === "/admin" && pendingCoaches > 0 && <Badge count={pendingCoaches} />}
               </span>
-              {!collapsed && n.label}
+              {!slim && n.label}
             </Link>
           ))}
         </nav>
         <div className="space-y-2 border-t border-line p-3">
-          <div className={cn("flex items-center gap-2", collapsed && "flex-col")}>
+          <div className={cn("flex items-center gap-2", slim && "flex-col")}>
             <NotificationBell />
             <ThemeMenu align="left" up />
-            {!collapsed && <span className="text-xs font-semibold text-muted">Notifications</span>}
+            {!slim && <span className="text-xs font-semibold text-muted">Notifications</span>}
           </div>
-          {!collapsed && <InstallButton className="w-full" />}
-          <div className={cn("flex items-center gap-3 rounded-xl p-2", collapsed && "justify-center")}>
+          {!slim && <InstallButton className="w-full" />}
+          <div className={cn("flex items-center gap-3 rounded-xl p-2", slim && "justify-center")}>
             <Avatar name={user.name} size={36} />
-            {!collapsed && (
+            {!slim && (
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold">{user.name}</div>
                 <div className="text-xs text-muted">{user.isOwner ? "App Owner" : isTrainer ? "Coach" : "Client"}</div>
               </div>
             )}
-            {!collapsed && (
+            {!slim && (
               <button
                 aria-label="Log out"
                 title="Log out"
@@ -187,10 +209,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <button
             onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={slim ? "Expand sidebar" : "Collapse sidebar"}
             className="flex min-h-9 w-full items-center justify-center rounded-lg text-muted hover:bg-field hover:text-ink"
           >
-            {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+            {slim ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
           </button>
         </div>
       </aside>
@@ -210,6 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ShieldCheck size={20} />
               </Link>
             )}
+            {!isPersonal && (
             <Link
               href="/messages"
               data-tour="nav-messages"
@@ -219,6 +242,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <MessageCircle size={20} />
               {unread > 0 && <Badge count={unread} />}
             </Link>
+            )}
             <NotificationBell />
             <ThemeMenu />
             <InstallButton compact />
@@ -229,8 +253,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className={cn("pb-28 md:pb-10", collapsed ? "md:pl-[72px]" : "md:pl-64")}>
-        <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-8 md:py-8">{children}</div>
+      <main className={cn("pb-28 md:pb-10", slim ? "md:pl-[72px]" : "md:pl-64")}>
+        <div className={cn("mx-auto w-full px-4 py-5 md:px-8 md:py-8", pathname.startsWith("/floor/") ? "max-w-7xl" : "max-w-5xl")}>
+          {user.trial && <TrialBar trial={user.trial} />}
+          {isTrainer && !pathname.startsWith("/floor/") && <FloorBanner />}
+          {children}
+        </div>
         <NicheSeeder />
       </main>
 
@@ -240,13 +268,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {showBanner && activeWorkout && (
         <Link
-          href={`/workout/${activeWorkout.id}`}
+          href={resumeHref}
           className={cn(
             "fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-40 flex items-center justify-between gap-3 rounded-2xl border border-accent/40 bg-accent-dim px-4 py-3 shadow-xl md:bottom-4 md:left-auto md:right-4 md:w-80",
           )}
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
-            <Timer size={18} className="text-accent" /> Workout in progress
+            <Timer size={18} className="text-accent" /> {floorKey ? "Session in progress" : "Workout in progress"}
           </span>
           <span className="text-xs font-bold text-accent">Resume →</span>
         </Link>

@@ -121,9 +121,9 @@ export async function nicheStatus(niches: string[]): Promise<NicheStatus[]> {
   return out;
 }
 
-/** The niches a person works in: a coach's own, or their coach's for a client. */
+/** The niches a person works in: a coach's own, their coach's for a client, or their own for someone training on their own. */
 export async function nichesOf(me: UserRow): Promise<{ coachId: string; niches: string[]; hidden: string[] } | null> {
-  const coachId = me.role === "CLIENT" ? me.coachId : me.id;
+  const coachId = me.role === "CLIENT" ? (me.coachId ?? me.id) : me.id;
   if (!coachId) return null;
   const d = await db();
   const [r] = await d.select().from(coachSettings).where(eq(coachSettings.coachId, coachId)).limit(1);
@@ -273,7 +273,7 @@ async function generateRoutines(niche: string): Promise<void> {
  * Makes sure a coach has 3-5 starter routines for a niche: the shared ones are written once (by AI, from real library drills) and
  * copied to the coach one time per niche, so a routine the coach deletes does not come back.
  */
-export async function ensureNicheRoutines(me: UserRow, nicheName: string): Promise<{ niche: string; added: RoutineTemplate[] }> {
+export async function ensureNicheRoutines(me: UserRow, nicheName: string, opts: { allowAi?: boolean } = {}): Promise<{ niche: string; added: RoutineTemplate[] }> {
   const niche = await resolveNiche(nicheName);
   const k = nicheKey(niche);
   const d = await db();
@@ -284,7 +284,7 @@ export async function ensureNicheRoutines(me: UserRow, nicheName: string): Promi
 
   // Strength & Gym already ships its own starter routines (created for every coach once).
   const isStrength = k === nicheKey(CORE_SPORTS[0]);
-  if (!isStrength) await generateRoutines(niche);
+  if (!isStrength && opts.allowAi !== false) await generateRoutines(niche);
   const shared = isStrength ? [] : await globalRoutines(niche);
 
   // Claim the niche first so two devices never copy the routines twice.

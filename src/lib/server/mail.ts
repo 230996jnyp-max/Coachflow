@@ -37,7 +37,14 @@ export interface MailInput {
   ics?: { method: "REQUEST" | "CANCEL"; content: string };
 }
 
-async function writeOutbox(entry: unknown) {
+// Two emails composed at the same moment must not overwrite each other's line in the local outbox file.
+let outboxQueue: Promise<void> = Promise.resolve();
+function writeOutbox(entry: unknown): Promise<void> {
+  outboxQueue = outboxQueue.then(() => writeOutboxNow(entry)).catch(() => undefined);
+  return outboxQueue;
+}
+
+async function writeOutboxNow(entry: unknown) {
   try {
     await fs.mkdir(dataDir, { recursive: true });
     const file = path.join(dataDir, "outbox.json");

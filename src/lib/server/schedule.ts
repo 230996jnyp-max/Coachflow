@@ -164,7 +164,8 @@ export const coachIdFor = (me: UserRow): string | null => (me.role === "CLIENT" 
 /** Everything the scheduling screens need, scoped to what `me` may see. */
 export async function loadSchedule(me: UserRow) {
   const coachId = coachIdFor(me);
-  if (!coachId) return { settings: DEFAULT_RULES, gyms: [], slots: [], bookings: [] };
+  // Someone training on their own has no schedule, but keeps their own sports choice in their settings row.
+  if (!coachId) return { settings: me.role === "CLIENT" ? await rulesFor(me.id) : DEFAULT_RULES, gyms: [], slots: [], bookings: [] };
   const d = await db();
   const since = new Date(Date.now() - 120 * 86400000);
   // Independent reads run together (each one is a round trip to the database).

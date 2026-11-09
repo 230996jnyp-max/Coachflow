@@ -10,7 +10,7 @@ import { EQUIPMENT, MEASURE_LABELS, MUSCLES } from "@/data/exercises";
 import { buildIndex, isKnownName, type ExerciseGuess } from "@/lib/exerciseMatch";
 import { useViewer } from "@/lib/hooks";
 import { buildDrafts, draftsToTemplates, draftsToWorkouts, guessFor, isResolved, type DraftExercise, type DraftSet, type DraftWorkout, type ResolvedExercise } from "@/lib/importDraft";
-import { addExercise, logCompletedWorkouts, saveTemplate } from "@/lib/store";
+import { addExercise, logCompletedWorkouts, notifyRoutineImport, saveTemplate } from "@/lib/store";
 import type { Equipment, Exercise, MeasureType, MuscleGroup } from "@/lib/types";
 import { cn, weightUnit } from "@/lib/utils";
 import { parseWorkoutText, type ParsedWorkout } from "@/lib/workoutText";
@@ -36,9 +36,11 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
   const [step, setStep] = useState<"input" | "preview" | "done">("input");
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<DraftWorkout[]>([]);
-  const [dest, setDest] = useState<Dest>("TEMPLATE");
+  // A client imports for themself: log it as a finished workout, or keep it as a routine of their own.
+  const isClient = user?.role === "CLIENT";
+  const [dest, setDest] = useState<Dest>(isClient ? "HISTORY" : "TEMPLATE");
   const active = clients.filter((c) => !c.profile.archived);
-  const [clientId, setClientId] = useState(defaultClientId ?? active[0]?.user.id ?? "");
+  const [clientId, setClientId] = useState(defaultClientId ?? (isClient ? (user?.id ?? "") : (active[0]?.user.id ?? "")));
   const [defaultDate, setDefaultDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [share, setShare] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +64,8 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
     const today = format(new Date(), "yyyy-MM-dd");
     let parsed: ParsedWorkout[] | null = null;
     let why = "";
-    // 1) AI reader: understands shorthand, supersets, warm-up/drop sets, rest times and maps to the exercise library.
+    // 1) AI reader: understands shorthand, supersets, warm-up/drop sets, rest times and maps to the exercise library. (Not for under-18s: they use the built-in reader.)
+    if (!user?.isMinor)
     try {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 58_000);
@@ -167,6 +170,7 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
     if (dest === "TEMPLATE") {
       const list = draftsToTemplates(drafts, resolve, unit, user.id, share && user.role === "TRAINER");
       list.forEach(saveTemplate);
+      if (isClient && list.length) notifyRoutineImport(list.map((t) => t.name), list.reduce((n, t) => n + t.exercises.length, 0));
       setResult({ dest, count: list.length, created: made.size });
     } else {
       const list = draftsToWorkouts(drafts, resolve, unit, clientId, defaultDate);
@@ -276,11 +280,15 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
             <div>
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Save to</div>
               <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    ["TEMPLATE", "Routine templates", "Reusable plans you can start for any client"],
-                    ["HISTORY", "A client's history", "Log them as completed workouts"],
-                  ] as [Dest, string, string][]
+                {(isClient
+                  ? ([
+                      ["HISTORY", "Log directly", "Add it to your workout history as completed"],
+                      ["TEMPLATE", "Save as a routine", "Keep it to start and log any time in one tap"],
+                    ] as [Dest, string, string][])
+                  : ([
+                      ["TEMPLATE", "Routine templates", "Reusable plans you can start for any client"],
+                      ["HISTORY", "A client's history", "Log them as completed workouts"],
+                    ] as [Dest, string, string][])
                 ).map(([v, title, hint]) => (
                   <button
                     key={v}
@@ -297,15 +305,17 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
 
             {dest === "HISTORY" ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Client" error={!clientId ? "Add a client first." : null}>
-                  <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
-                    {active.map((c) => (
-                      <option key={c.user.id} value={c.user.id}>
-                        {c.user.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                {!isClient && (
+                  <Field label="Client" error={!clientId ? "Add a client first." : null}>
+                    <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                      {active.map((c) => (
+                        <option key={c.user.id} value={c.user.id}>
+                          {c.user.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
                 <Field label="Date for workouts without one" hint="Dates written in your text always win.">
                   <Input type="date" value={defaultDate} onChange={(e) => setDefaultDate(e.target.value)} />
                 </Field>
@@ -355,7 +365,7 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
                 </div>
               ))}
             </div>
-            {dest === "HISTORY" && clientName && <p className="text-xs text-muted">These will be logged as completed workouts for {clientName}.</p>}
+            {dest === "HISTORY" && clientName && !isClient && <p className="text-xs text-muted">These will be logged as completed workouts for {clientName}.</p>}
           </div>
         )}
 
@@ -366,12 +376,12 @@ function ImportFlow({ onClose, defaultClientId }: { onClose: () => void; default
             </div>
             <div>
               <div className="text-lg font-bold">
-                {result.dest === "TEMPLATE" ? `${result.count} routine${result.count === 1 ? "" : "s"} saved` : `${result.count} workout${result.count === 1 ? "" : "s"} logged${clientName ? ` for ${clientName}` : ""}`}
+                {result.dest === "TEMPLATE" ? `${result.count} routine${result.count === 1 ? "" : "s"} saved` : `${result.count} workout${result.count === 1 ? "" : "s"} logged${clientName && !isClient ? ` for ${clientName}` : ""}`}
               </div>
               {result.created > 0 && <p className="mt-1 text-sm text-muted">{result.created} new custom exercise{result.created === 1 ? "" : "s"} added to your library.</p>}
-              <p className="mt-1 text-sm text-muted">{result.dest === "TEMPLATE" ? "Find them under Routine templates." : "They appear in the client's workout history."}</p>
+              <p className="mt-1 text-sm text-muted">{result.dest === "TEMPLATE" ? (isClient ? "Find them under Routine templates: tap Start to log one any time. They are private to you." : "Find them under Routine templates.") : isClient ? "They appear in your workout history, and your coach has been told." : "They appear in the client's workout history."}</p>
             </div>
-            {result.dest === "HISTORY" && clientId && (
+            {result.dest === "HISTORY" && clientId && !isClient && (
               <Link href={`/clients/${clientId}`} className="inline-block text-sm font-semibold text-accent">
                 Open client →
               </Link>

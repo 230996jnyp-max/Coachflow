@@ -28,10 +28,60 @@ export const users = pgTable(
     onboarded: boolean("onboarded").notNull().default(false),
     /** Chosen colour theme (black | white | navy); null until the person picks one. */
     theme: text("theme"),
+    /** A coach's 6-digit code, shared so clients can find them at sign-up (null for everyone else). Unique. */
+    coachCode: text("coach_code"),
+    /** False only for someone who signed themselves up and hasn't opened the link in their verification email yet. */
+    emailVerified: boolean("email_verified").notNull().default(true),
+    /** End of the 30-day free trial of a self sign-up (coach or personal). Null = no trial (coach-made clients, older accounts). */
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("users_coach_idx").on(t.coachId), index("users_role_idx").on(t.role)],
+);
+
+/**
+ * One-time links sent by email: `verify` (confirm an address after sign-up) and `reset` (choose a new password). Only a hash of the
+ * token is stored, so a copy of the table can't be used to take over an account.
+ */
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_tokens_hash_idx").on(t.tokenHash), index("auth_tokens_user_idx").on(t.userId, t.kind)],
+);
+
+/** A person who signed up (or later asked) to train with a coach, waiting for that coach to accept. */
+export const coachLinks = pgTable(
+  "coach_links",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    /** PENDING | ACCEPTED | DECLINED | CANCELLED */
+    status: text("status").notNull().default("PENDING"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("coach_links_coach_idx").on(t.coachId, t.status), index("coach_links_client_idx").on(t.clientId, t.status)],
+);
+
+/** One row per rate-limited event (sign-up, code lookup, password reset ...), keyed by what is being limited. Old rows are pruned as they are read. */
+export const rateEvents = pgTable(
+  "rate_events",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("rate_events_key_idx").on(t.key, t.at)],
 );
 
 /**
@@ -114,6 +164,65 @@ export const coachSignupRequests = pgTable(
   (t) => [index("coach_signup_status_idx").on(t.status, t.createdAt)],
 );
 export type CoachSignupRow = typeof coachSignupRequests.$inferSelect;
+
+/** How many AI calls a person made today, by kind (limits protect the shared free AI quota). */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    userId: text("user_id").notNull(),
+    day: text("day").notNull(),
+    kind: text("kind").notNull(),
+    n: integer("n").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day, t.kind] })],
+);
+
+/** Short AI-written sentences (why a target was suggested, a client brief), kept so each is only written once. */
+export const aiNotes = pgTable("ai_notes", {
+  key: text("key").primaryKey(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Food diary. Each entry is one encrypted blob (what was eaten, the numbers); the plain columns are only for access checks and listing by day. */
+export const nutritionEntries = pgTable(
+  "nutrition_entries",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    day: text("day").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("nutrition_entries_client_idx").on(t.clientId, t.day)],
+);
+
+/** A person's calorie and macro targets (set by their coach, or by themselves). */
+export const nutritionTargets = pgTable("nutrition_targets", {
+  clientId: text("client_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Diets, allergies and the "I'm 18 or older" answer. */
+export const nutritionSettings = pgTable("nutrition_settings", {
+  clientId: text("client_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A coach's comment on one day of a client's food diary. */
+export const nutritionComments = pgTable(
+  "nutrition_comments",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    day: text("day").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("nutrition_comments_client_idx").on(t.clientId, t.day)],
+);
 
 /** Starter routines for a niche, shared by all coaches (exercise ids point at library exercises). */
 export const globalTemplates = pgTable(
@@ -355,6 +464,7 @@ export type GroupRow = typeof groupSessions.$inferSelect;
 export type GroupMemberRow = typeof groupMembers.$inferSelect;
 export type GroupRequestRow = typeof groupRequests.$inferSelect;
 export type WorkoutRow = typeof workouts.$inferSelect;
+export type NutritionEntryRow = typeof nutritionEntries.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;
 export type CustomExerciseRow = typeof customExercises.$inferSelect;
 export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
@@ -385,6 +495,38 @@ export const DDL = [
   `CREATE INDEX IF NOT EXISTS users_role_idx ON users (role)`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme text`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS coach_code text`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_coach_code_idx ON users (coach_code) WHERE coach_code IS NOT NULL`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz`,
+  `CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email))`,
+  `CREATE TABLE IF NOT EXISTS auth_tokens (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    kind text NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS auth_tokens_hash_idx ON auth_tokens (token_hash)`,
+  `CREATE INDEX IF NOT EXISTS auth_tokens_user_idx ON auth_tokens (user_id, kind)`,
+  `CREATE TABLE IF NOT EXISTS coach_links (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    decided_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS coach_links_coach_idx ON coach_links (coach_id, status)`,
+  `CREATE INDEX IF NOT EXISTS coach_links_client_idx ON coach_links (client_id, status)`,
+  `CREATE TABLE IF NOT EXISTS rate_events (
+    id text PRIMARY KEY,
+    key text NOT NULL,
+    at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
   `CREATE TABLE IF NOT EXISTS messages (
     id text PRIMARY KEY,
     thread text NOT NULL,
@@ -500,6 +642,44 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS coach_signup_status_idx ON coach_signup_requests (status, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS coach_signup_pending_email ON coach_signup_requests (email) WHERE status = 'PENDING'`,
+  `CREATE TABLE IF NOT EXISTS ai_usage (
+    user_id text NOT NULL,
+    day text NOT NULL,
+    kind text NOT NULL,
+    n integer NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day, kind)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ai_notes (
+    key text PRIMARY KEY,
+    text text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_entries (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    day text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS nutrition_entries_client_idx ON nutrition_entries (client_id, day)`,
+  `CREATE TABLE IF NOT EXISTS nutrition_targets (
+    client_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_settings (
+    client_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nutrition_comments (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    day text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS nutrition_comments_client_idx ON nutrition_comments (client_id, day)`,
   `CREATE TABLE IF NOT EXISTS global_templates (
     id text PRIMARY KEY,
     niche text NOT NULL,

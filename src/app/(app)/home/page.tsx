@@ -11,6 +11,7 @@ import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bo
 import { CalendarQuickLinks } from "@/components/booking/CalendarActions";
 import { GroupCreditsCard } from "@/components/groups/ClassList";
 import { ApprovalCard } from "@/components/groups/groupUi";
+import { PersonalHome } from "@/components/home/PersonalHome";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -19,7 +20,14 @@ import { doneWorkouts, formatSet, PR_LABELS, weeklyBuckets, weekStreak, workoutS
 import { startWorkout, useNow } from "@/lib/store";
 import { fmtDurationShort, fmtVolume } from "@/lib/utils";
 
-export default function ClientHome() {
+/** A client with a coach sees sessions and credits; someone training on their own sees their own training (see PersonalHome). */
+export default function HomePage() {
+  const { user } = useViewer();
+  if (!user) return null;
+  return user.personal ? <PersonalHome /> : <ClientHome />;
+}
+
+function ClientHome() {
   const { db, user, unit, exMap } = useViewer();
   const now = useNow(60_000);
   const router = useRouter();

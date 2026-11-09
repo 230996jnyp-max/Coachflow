@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { epley, fmtClock, fromKg, round, weightUnit } from "./utils";
 import { formatCustomSet } from "./tracking";
+import { checkSetMetrics, metricsFor, type PrMetric } from "./prMetrics";
 
 export type ExerciseMap = Map<string, Exercise>;
 
@@ -74,6 +75,9 @@ interface Bests {
 export function annotatePRs(workouts: Workout[], exMap: ExerciseMap): Map<string, PRKind[]> {
   const out = new Map<string, PRKind[]>();
   const bests = new Map<string, Bests>();
+  // Sport drills with their own columns keep their records by metric (hold, pace for a distance, accuracy ...).
+  const metricBests = new Map<string, Map<string, number>>();
+  const metricDefs = new Map<string, PrMetric[]>();
   const sorted = [...workouts].sort(byDate);
 
   for (const w of sorted) {
@@ -94,7 +98,13 @@ export function annotatePRs(workouts: Workout[], exMap: ExerciseMap): Map<string
       for (const s of we.sets) {
         if (!s.done || s.type === "W") continue;
         const flags: PRKind[] = [];
-        if (isWeightType(ex)) {
+        if (ex.tracking) {
+          let defs = metricDefs.get(we.exerciseId);
+          if (!defs) metricDefs.set(we.exerciseId, (defs = metricsFor(ex.tracking)));
+          let mb = metricBests.get(we.exerciseId);
+          if (!mb) metricBests.set(we.exerciseId, (mb = new Map()));
+          flags.push(...checkSetMetrics(s, defs, mb));
+        } else if (isWeightType(ex)) {
           const wt = s.weight ?? 0;
           const reps = s.reps ?? 0;
           if (wt > 0 && reps > 0) {
@@ -135,6 +145,13 @@ export const PR_LABELS: Record<PRKind, string> = {
   REPS: "Most reps",
   TIME: "Longest hold",
   DISTANCE: "Longest distance",
+  HOLD: "Longest hold",
+  ROUNDS: "Most rounds",
+  ROUND_TIME: "Longest round",
+  PACE: "Fastest pace",
+  ACCURACY: "Best accuracy",
+  MAKES: "Most makes",
+  METRIC: "Personal best",
 };
 
 /* ---------------- "Previous" lookup ---------------- */

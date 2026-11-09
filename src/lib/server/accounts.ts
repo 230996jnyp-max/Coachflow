@@ -3,6 +3,9 @@ import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { ClientGoal, ClientProfile, PlaceInfo, UnitSystem, User } from "@/lib/types";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
+import { ageOn, isMinorAge, trialDaysLeft, trialOver } from "@/lib/signupRules";
+import { trialEnforced } from "./trial";
+import { ensureCoachCode } from "./coachCode";
 import { badRequest, conflict, isUniqueViolation, str } from "./http";
 import { users, type UserRow } from "./schema";
 
@@ -24,17 +27,56 @@ export interface ProfileJson {
   homeText?: string;
   /** Training focuses the coach assigned (sport names). */
   focuses?: string[];
+  /** Self sign-ups: birth date (YYYY-MM-DD), experience, weekly training target, starting body weight (kg) and what they are working towards. */
+  dob?: string;
+  level?: string;
+  weeklyTarget?: number;
+  startWeightKg?: number;
+  personalGoal?: string;
+  /** When they accepted the Terms and Privacy Policy, and (13 to 17) that a parent or guardian agrees. */
+  consent?: { at: string; guardian?: boolean };
+  /** A client who signed up with a coach's code: the coach to ask once their email is confirmed. */
+  pendingCoachId?: string;
+}
+
+/** What a coach's sealed profile holds (their name and email are plain columns). */
+export interface StaffProfileJson {
+  phone?: string;
+  dob?: string;
+  experienceYears?: number;
+  tagline?: string;
+  consent?: { at: string };
 }
 
 export const GOALS: ClientGoal[] = ["Hypertrophy", "Fat Loss", "Strength", "Conditioning", "General Fitness"];
 
 const aad = (id: string) => `profile:${id}`;
 
-export const sealProfile = (id: string, p: ProfileJson | Record<string, never>) => encryptJson(p, aad(id));
+export const sealProfile = (id: string, p: ProfileJson | StaffProfileJson | Record<string, never>) => encryptJson(p, aad(id));
 
 export function openProfile(row: UserRow): ProfileJson {
   return decryptJson<ProfileJson>(row.profileEnc, aad(row.id));
 }
+
+export function openStaffProfile(row: UserRow): StaffProfileJson {
+  return decryptJson<StaffProfileJson>(row.profileEnc, aad(row.id));
+}
+
+/** Their date of birth, when they gave one (self sign-ups). Never throws. */
+export function dobOf(row: UserRow): string | null {
+  try {
+    const p = decryptJson<{ dob?: string }>(row.profileEnc, aad(row.id));
+    return p.dob ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Under 18 (only known when they gave a birth date). Minors get no calorie targets and no AI features. */
+export const isMinorRow = (row: UserRow): boolean => isMinorAge(ageOn(dobOf(row)));
+
+/** A client with no coach: someone training on their own ("Personal"). Accepted by a coach later, they become that coach's client. */
+export const isPersonalRow = (row: UserRow): boolean => row.role === "CLIENT" && !row.coachId;
 
 export const isClientRow = (r: UserRow) => r.role === "CLIENT";
 
@@ -55,6 +97,12 @@ export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
     hasCompletedOnboarding: row.onboarded,
     ...(row.theme === "black" || row.theme === "white" || row.theme === "navy" ? { themePreference: row.theme } : {}),
     ...(opts.withEmail && staff && row.email ? { email: row.email } : {}),
+    ...(row.role === "CLIENT" && !row.coachId ? { personal: true } : {}),
+    ...(isMinorRow(row) ? { isMinor: true } : {}),
+    ...(opts.withEmail && row.coachCode ? { coachCode: row.coachCode } : {}),
+    ...(opts.withEmail && row.trialEndsAt
+      ? { trial: { endsAt: row.trialEndsAt.toISOString(), daysLeft: trialDaysLeft(row.trialEndsAt) ?? 0, expired: trialOver(row.trialEndsAt), enforced: trialEnforced() } }
+      : {}),
   };
 }
 
@@ -76,12 +124,18 @@ export function toProfile(row: UserRow): ClientProfile {
     ...(p.homePlace ? { homePlace: p.homePlace } : {}),
     ...(p.homeText ? { homeText: p.homeText } : {}),
     ...(p.focuses?.length ? { focuses: p.focuses } : {}),
+    ...(p.level ? { level: p.level } : {}),
+    ...(p.weeklyTarget ? { weeklyTarget: p.weeklyTarget } : {}),
+    ...(p.personalGoal ? { personalGoal: p.personalGoal } : {}),
+    ...(p.startWeightKg ? { startWeightKg: p.startWeightKg } : {}),
   };
 }
 
 /** Rows the viewer may see, decrypted into the shapes the app's local store expects. */
 export async function bootstrapFor(me: UserRow): Promise<{ me: User; users: User[]; clients: ClientProfile[] }> {
   const d = await db();
+  // Coaches who existed before coach codes get theirs the first time they load the app.
+  if ((me.role === "COACH" || me.role === "OWNER") && !me.coachCode) me = { ...me, coachCode: await ensureCoachCode(me) };
   const out: User[] = [toUser(me, { withEmail: true })];
   const profiles: ClientProfile[] = [];
 

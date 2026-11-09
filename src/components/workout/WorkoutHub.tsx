@@ -29,7 +29,7 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
 
   const history = useMemo(() => doneWorkouts(db.workouts, clientId).reverse(), [db.workouts, clientId]);
   // A coach sees the routines for their own niches first; the rest are one tap away.
-  const myNiches = isTrainer ? (db.settings.specialties ?? []) : [];
+  const myNiches = isTrainer || user?.personal ? (db.settings.specialties ?? []) : [];
   const visible = db.templates.filter((t) => (isTrainer ? true : t.shared || t.ownerId === user?.id));
   const inMyNiche = (t: RoutineTemplate) => myNiches.length === 0 || !t.niche || myNiches.includes(t.niche);
   const otherNiche = visible.filter((t) => !inMyNiche(t)).length;
@@ -73,19 +73,20 @@ export function WorkoutHub({ clientId }: { clientId: string }) {
         </div>
       </section>
 
-      {isTrainer && (
-        <section>
-          <SectionTitle>Import &amp; export</SectionTitle>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Button size="lg" variant="outline" data-tour="workout-import" onClick={() => setImporting(true)}>
-              <ClipboardPaste size={18} /> Import from Notepad / text
-            </Button>
+      <section>
+        <SectionTitle>{isTrainer ? "Import & export" : "Import"}</SectionTitle>
+        <div className={isTrainer ? "grid gap-3 sm:grid-cols-2" : "grid gap-3"}>
+          <Button size="lg" variant="outline" data-tour="workout-import" onClick={() => setImporting(true)}>
+            <ClipboardPaste size={18} /> {isTrainer ? "Import from Notepad / text" : "Import Workout with AI"}
+          </Button>
+          {isTrainer && (
             <Button size="lg" variant="outline" onClick={() => setExporting({ scope: "HISTORY", clientId })}>
               <Download size={18} /> Export workouts (PDF / text)
             </Button>
-          </div>
-        </section>
-      )}
+          )}
+        </div>
+        {!isTrainer && <p className="mt-2 text-xs text-muted">Paste your notes from Apple Notes, Notepad or WhatsApp. Log them as a finished workout, or save them as a routine you can start any time.</p>}
+      </section>
 
       <section>
         <SectionTitle
