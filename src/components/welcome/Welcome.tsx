@@ -15,7 +15,7 @@ const HERO: Record<Who, { head: string; lede: string; signup: string }> = {
 };
 
 const SECTION: Record<Who, { head: string; note: string }> = {
-  train: { head: "Made for how you train.", note: "Four things worth trying right now. Everything here is a sample, so nothing is saved." },
+  train: { head: "Made for how you train.", note: "Five things to try right now, and one on the way. Everything here is a sample, so nothing is saved." },
   coach: { head: "Made for how coaching really works.", note: "Six things worth trying right now. Everything here is a sample, so nothing is saved." },
 };
 

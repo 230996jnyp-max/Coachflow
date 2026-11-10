@@ -371,7 +371,7 @@
   display: grid;
   grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
   gap: 56px;
-  align-items: center;
+  align-items: start;
 }
 .wc-tabs {
   list-style: none;
@@ -448,7 +448,8 @@
   }
 }
 .wc-show-phone {
-  position: relative;
+  position: sticky;
+  top: 24px;
   width: min(100%, 330px);
   margin: 0 auto;
   container-type: inline-size;
@@ -457,9 +458,11 @@
   animation: none;
   position: relative;
   aspect-ratio: 540 / 1170;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px #3a424b, 0 24px 60px rgba(0, 0, 0, 0.5);
   border-radius: 38px;
   border-width: 7px;
+  border-color: #2b3239;
+  background: #2b3239;
 }
 .wc-show-phone .wc-phone img {
   position: absolute;
@@ -1657,6 +1660,153 @@
   }
 }
 
+/* ---- food, sport and the coming-soon card ---- */
+.wc-searchbox {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 10px;
+  padding: 0 14px;
+  background: var(--wc-bg3);
+  color: var(--wc-ink);
+  border: 2px solid var(--wc-rule2);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+}
+.wc-scan {
+  position: relative;
+  height: 92px;
+  margin-bottom: 12px;
+  border: 2px dashed var(--wc-rule2);
+  border-radius: var(--wc-radius);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-size: 14px;
+  color: var(--wc-muted);
+}
+.wc-scan i {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  height: 2px;
+  background: var(--wc-accent);
+  opacity: 0;
+}
+.wc-scan[data-on="true"] i {
+  opacity: 1;
+  animation: wc-scanline 1.3s ease-in-out;
+}
+@keyframes wc-scanline {
+  from {
+    transform: translateY(6px);
+  }
+  to {
+    transform: translateY(84px);
+  }
+}
+.wc-sport {
+  border-top: 2px solid var(--wc-rule2);
+  padding-top: 12px;
+}
+.wc-sport-drill {
+  font-family: var(--wc-font-display);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 26px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.wc-sport dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.wc-sport dt {
+  font-size: 12px;
+  color: var(--wc-muted);
+}
+.wc-sport dd {
+  margin: 0;
+  font-size: 15px;
+}
+.wc-soon {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--wc-on-accent);
+  background: var(--wc-accent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.wc-card[data-soon] {
+  border-style: dashed;
+  border-color: var(--wc-accent);
+}
+.wc-chat {
+  display: grid;
+  gap: 10px;
+  border-top: 2px solid var(--wc-rule2);
+  padding-top: 14px;
+}
+.wc-bubble {
+  max-width: 86%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.wc-bubble-you {
+  justify-self: end;
+  background: var(--wc-accent);
+  color: var(--wc-on-accent);
+  border-bottom-right-radius: 4px;
+}
+.wc-bubble-ai {
+  justify-self: start;
+  background: var(--wc-bg3);
+  border-bottom-left-radius: 4px;
+}
+.wc-typing {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 18px;
+}
+.wc-typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wc-muted);
+  animation: wc-dots 1.2s ease-in-out infinite;
+}
+.wc-typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.wc-typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes wc-dots {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-scan[data-on="true"] i,
+  .wc-typing i {
+    animation: none;
+  }
+}
+
 /* ---- coach code on the first screen ---- */
 .wc-codelink {
   margin-top: 6px;
@@ -1935,7 +2085,7 @@
   .wc-rv {
     animation: wc-rv linear both;
     animation-timeline: view();
-    animation-range: entry 0% cover 28%;
+    animation-range: entry 0% entry 70%;
   }
   @keyframes wc-rv {
     from {
@@ -1989,6 +2139,7 @@
     padding: 52px 0;
   }
   .wc-show-phone {
+    position: static;
     width: min(100%, 290px);
   }
 }
