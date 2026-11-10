@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BookingDemo, CodeDemo, ProgressChart, SetLogger } from "./Demos";
+import { CodeDemo, ImportDemo, LinkedDemo, TravelDemo } from "./Demos";
 import { saira } from "./fonts";
-import { Marquee, PhoneStack, Showcase, StartForm } from "./Showcase";
+import { LinkedPair, Showcase, StartForm } from "./Showcase";
 import "./welcome.css";
 
 type Who = "train" | "coach";
@@ -15,7 +15,7 @@ const HERO: Record<Who, { head: string; lede: string; signup: string }> = {
 };
 
 const FAQ: { q: string; a: string }[] = [
-  { q: "Do I need a coach to use it?", a: "No. You can train on your own and add a coach later with their six-digit code." },
+  { q: "Do I need a coach to use it?", a: "No. You can train on your own and add a coach later with their six-digit code. Your history comes with you." },
   { q: "What does it cost?", a: "Your first 30 days are free and you don't need a card to start. We'll show pricing before anything is charged." },
   { q: "Do I install anything?", a: "No. It runs in your browser, and you can add it to your phone's home screen like an app." },
   { q: "Can coaches run groups?", a: "Yes. Group classes have spots, waitlists and attendance, next to one-to-one sessions." },
@@ -29,18 +29,18 @@ export function Welcome() {
 
   return (
     <div className={`wc ${saira.variable}`}>
-      <div className="wc-band">
+      <div className="wc-top">
         <div className="wc-wrap">
           <header className="wc-nav">
             <Link href="/" className="wc-mark">
               CoachFlow
             </Link>
             <nav className="wc-nav-links" aria-label="Main">
+              <a href="#different" className="wc-hide-s">
+                Why CoachFlow
+              </a>
               <a href="#features" className="wc-hide-s">
                 Features
-              </a>
-              <a href="#try" className="wc-hide-s">
-                Try it
               </a>
               <a href="#faq" className="wc-hide-s">
                 Questions
@@ -72,40 +72,60 @@ export function Welcome() {
                   No card needed. Already have an account? <Link href="/login">Log in</Link>
                 </p>
               </div>
-              <PhoneStack who={who} />
+              <LinkedPair who={who} />
             </section>
           </main>
         </div>
       </div>
 
-      <Marquee />
+      <div className="wc-wrap">
+        <section className="wc-diff" id="different" aria-labelledby="wc-diff-h">
+          <h2 id="wc-diff-h" className="wc-rv">
+            Made for how training really works.
+          </h2>
+          <p className="wc-diff-note">Four things worth trying right now. Everything here is a sample, so nothing is saved.</p>
+          <div className="wc-diff-grid">
+            <article className="wc-card wc-rv">
+              <div className="wc-card-head">
+                <h3>Both sides, one app</h3>
+                <span className="wc-sample">Sample</span>
+              </div>
+              <p>You log it, your coach sees it. They leave a note, you see it.</p>
+              <LinkedDemo />
+            </article>
+            <article className="wc-card wc-rv">
+              <div className="wc-card-head">
+                <h3>It knows you travel</h3>
+                <span className="wc-sample">Sample</span>
+              </div>
+              <p>Coaches move between gyms. Bookings leave room for the journey, so nobody turns up late.</p>
+              <TravelDemo />
+            </article>
+            <article className="wc-card wc-rv">
+              <div className="wc-card-head">
+                <h3>Paste it. It&apos;s logged.</h3>
+                <span className="wc-sample">Sample</span>
+              </div>
+              <p>Bring your notes, a spreadsheet or a photo. Import turns them into a workout.</p>
+              <ImportDemo />
+            </article>
+            <article className="wc-card wc-rv">
+              <div className="wc-card-head">
+                <h3>Join with six digits</h3>
+                <span className="wc-sample">Sample</span>
+              </div>
+              <p>No invite emails to chase. Enter your coach&apos;s code and they accept you.</p>
+              <CodeDemo />
+            </article>
+          </div>
+        </section>
+      </div>
 
       <div id="features">
         <Showcase />
       </div>
 
       <div className="wc-wrap">
-        <section className="wc-try" id="try" aria-labelledby="wc-try-h">
-          <h2 id="wc-try-h" className="wc-rv">
-            Try it yourself.
-          </h2>
-          <p className="wc-try-note">Tap around. Everything here is a sample, so nothing is saved.</p>
-          <div className="wc-try-grid">
-            <div className="wc-rv">
-              <SetLogger />
-            </div>
-            <div className="wc-rv">
-              <BookingDemo />
-            </div>
-            <div className="wc-rv">
-              <CodeDemo />
-            </div>
-            <div className="wc-rv">
-              <ProgressChart />
-            </div>
-          </div>
-        </section>
-
         <section className="wc-trust" aria-label="Good to know">
           <div className="wc-rv">
             <strong>Private by design</strong>

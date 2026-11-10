@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-/* The loud parts of the welcome page: moving phones, the marquee and the tabbed showcase. Every picture is a real screen from the app with demo data. */
+/* The product, shown: a linked pair of phones in the hero and a tabbed showcase. Every picture is a real screen from the app with demo data. */
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -16,69 +16,37 @@ const SHOTS = {
   schedule: { src: "/welcome/phone-schedule.webp", alt: "The CoachFlow schedule screen: sessions waiting for attendance." },
 } as const;
 
-type Who = "train" | "coach";
 type Shot = keyof typeof SHOTS;
+type Who = "train" | "coach";
 
-const STACKS: Record<Who, { c: Shot; l: Shot; r: Shot; chips: [string, string, string] }> = {
-  train: { c: "logger", l: "progress", r: "home", chips: ["New best on squat", "Coach note: great depth", "Session confirmed"] },
-  coach: { c: "clients", l: "schedule", r: "logger", chips: ["Alice logged a workout", "New client request", "Attendance in one tap"] },
-};
-
-/** Three phones that float and lean toward the pointer, with chips that pop in around them. */
-export function PhoneStack({ who }: { who: Who }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const s = STACKS[who];
-  const move = (e: React.PointerEvent) => {
-    const el = ref.current;
-    if (!el || reducedMotion()) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--px", String(((e.clientX - r.left) / r.width - 0.5) * 2));
-    el.style.setProperty("--py", String(((e.clientY - r.top) / r.height - 0.5) * 2));
-  };
-  const leave = () => {
-    ref.current?.style.setProperty("--px", "0");
-    ref.current?.style.setProperty("--py", "0");
-  };
-  const phone = (pos: "c" | "l" | "r", shot: Shot, delay: string, priority = false) => (
-    <div className="wc-ph" data-pos={pos}>
-      <div className="wc-phone" style={{ ["--delay" as string]: delay }}>
-        <Image src={SHOTS[shot].src} alt={SHOTS[shot].alt} width={540} height={1170} sizes="(max-width: 860px) 40vw, 260px" priority={priority} />
-      </div>
-    </div>
-  );
+/** Two phones, one for you and one for your coach, with messages passing between them. The one that matches the visitor leads. */
+export function LinkedPair({ who }: { who: Who }) {
   return (
-    <div className="wc-stack" ref={ref} onPointerMove={move} onPointerLeave={leave} key={who}>
-      {phone("l", s.l, "-2s")}
-      {phone("r", s.r, "-4s")}
-      {phone("c", s.c, "0s", true)}
-      <span className="wc-chip" data-pos="1">
-        {s.chips[0]}
-      </span>
-      <span className="wc-chip" data-pos="2">
-        {s.chips[1]}
-      </span>
-      <span className="wc-chip" data-pos="3">
-        {s.chips[2]}
-      </span>
-    </div>
-  );
-}
-
-const WORDS = ["Back squat", "Bench press", "Deadlift", "Pull-up", "Overhead press", "Barbell row", "Lunge", "Plank", "Hip thrust", "Dip"];
-
-/** A band of exercise names sliding past. Decorative, so it is hidden from screen readers. */
-export function Marquee() {
-  const track = [...WORDS, ...WORDS];
-  return (
-    <div className="wc-marquee" aria-hidden="true">
-      <div className="wc-marquee-track">
-        {track.map((w, i) => (
-          <span key={i}>{w}</span>
-        ))}
-        {track.map((w, i) => (
-          <span key={`b${i}`}>{w}</span>
-        ))}
+    <div className="wc-pair" data-lead={who === "train" ? "you" : "coach"}>
+      <figure className="wc-side" data-side="you">
+        <div className="wc-phone">
+          <Image src={SHOTS.logger.src} alt={SHOTS.logger.alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
+        </div>
+        <figcaption>You log the set</figcaption>
+      </figure>
+      <div className="wc-link" aria-hidden="true">
+        <span className="wc-dot" />
+        <span className="wc-pulse" style={{ ["--i" as string]: "0s" }}>
+          Set logged
+        </span>
+        <span className="wc-pulse" style={{ ["--i" as string]: "3s" }}>
+          Note sent
+        </span>
+        <span className="wc-pulse" style={{ ["--i" as string]: "6s" }}>
+          Session booked
+        </span>
       </div>
+      <figure className="wc-side" data-side="coach">
+        <div className="wc-phone">
+          <Image src={SHOTS.clients.src} alt={SHOTS.clients.alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
+        </div>
+        <figcaption>Your coach sees it</figcaption>
+      </figure>
     </div>
   );
 }
