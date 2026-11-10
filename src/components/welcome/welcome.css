@@ -1807,6 +1807,50 @@
   }
 }
 
+/* ---- waitlist ---- */
+.wc-waitlist {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--wc-rule);
+}
+.wc-waitlist label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.wc-waitlist-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.wc-waitlist-row input[type="email"] {
+  flex: 1 1 170px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--wc-bg3);
+  color: var(--wc-ink);
+  border: 2px solid var(--wc-rule2);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+}
+.wc-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.wc-card .wc-chat {
+  margin-top: 4px;
+  min-height: 118px;
+}
+.wc-card[data-soon] .wc-chat .wc-bubble {
+  animation: wc-in 0.35s both;
+}
+
 /* ---- coach code on the first screen ---- */
 .wc-codelink {
   margin-top: 6px;

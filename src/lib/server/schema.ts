@@ -84,6 +84,14 @@ export const rateEvents = pgTable(
   (t) => [index("rate_events_key_idx").on(t.key, t.at)],
 );
 
+/** People who asked to hear when the AI personal trainer is ready. Only an address and which side of the app they came from. */
+export const aiWaitlist = pgTable("ai_waitlist", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  interest: text("interest").notNull().default("train"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /**
  * messages — body and email-delivery metadata are encrypted. `thread` is `c:<clientId>` (coach ↔ client) or
  * `o:<coachId>` (owner ↔ coach).
@@ -527,6 +535,12 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
+  `CREATE TABLE IF NOT EXISTS ai_waitlist (
+    id text PRIMARY KEY,
+    email text NOT NULL UNIQUE,
+    interest text NOT NULL DEFAULT 'train',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS messages (
     id text PRIMARY KEY,
     thread text NOT NULL,

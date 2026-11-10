@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { route } from "@/lib/server/http";
-import { users } from "@/lib/server/schema";
+import { aiWaitlist, users } from "@/lib/server/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +50,8 @@ export const GET = route(async () => {
     .from(users)
     .where(and(isNotNull(users.trialEndsAt), isNull(users.coachId), sql`${users.emailVerified} = false`));
 
+  const [wl] = await d.select({ n: sql<number>`count(*)::int` }).from(aiWaitlist);
+
   const by = (k: Kind) => totals.find((t) => t.kind === k) ?? { total: 0, verified: 0, trial: 0 };
   const dayMap = new Map(daily.map((r) => [r.day, r.n]));
   const days: { day: string; n: number }[] = [];
@@ -63,6 +65,7 @@ export const GET = route(async () => {
     personal: by("personal"),
     clients: by("client"),
     unverified: waiting.n,
+    waitlist: wl.n,
     days,
     recent: recent.map((r) => ({ kind: r.kind, verified: r.verified, active: r.active, createdAt: r.createdAt.toISOString() })),
   });

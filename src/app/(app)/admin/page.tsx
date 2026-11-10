@@ -244,11 +244,40 @@ interface SignupOverview {
   personal: Bucket;
   clients: Bucket;
   unverified: number;
+  waitlist: number;
   days: { day: string; n: number }[];
   recent: { kind: "coach" | "personal" | "client"; verified: boolean; active: boolean; createdAt: string }[];
 }
 
 const KIND_LABEL = { coach: "Coach", personal: "Personal", client: "Coached client" } as const;
+
+/** People who asked to hear when the AI personal trainer is ready. The addresses are fetched only when the owner asks to copy them. */
+function WaitlistRow({ count }: { count: number }) {
+  const [state, setState] = useState<"idle" | "busy" | "copied" | "error">("idle");
+  const copy = async () => {
+    setState("busy");
+    const r = await api<{ list: { email: string }[] }>("/api/admin/waitlist");
+    if (!r.ok || !r.data) return setState("error");
+    try {
+      await navigator.clipboard.writeText(r.data.list.map((x) => x.email).join("\n"));
+      setState("copied");
+    } catch {
+      setState("error");
+    }
+    setTimeout(() => setState("idle"), 2500);
+  };
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+      <div>
+        <div className="font-semibold">AI trainer waitlist</div>
+        <div className="text-sm text-muted">{count === 1 ? "1 person is" : `${count} people are`} waiting to hear when it&apos;s ready.</div>
+      </div>
+      <Button size="sm" variant="secondary" onClick={() => void copy()} disabled={count === 0 || state === "busy"}>
+        {state === "copied" ? "Copied" : state === "error" ? "Could not copy" : state === "busy" ? "Getting them" : "Copy emails"}
+      </Button>
+    </Card>
+  );
+}
 
 /** Counts and dates only — never names or emails. */
 function SignupsPanel() {
@@ -280,6 +309,7 @@ function SignupsPanel() {
         <Stat label="Last 7 days" value={week} sub="new accounts" tone="success" />
         <Stat label="Not verified" value={data.unverified} sub="Personal accounts waiting on the email link" />
       </div>
+      <WaitlistRow count={data.waitlist} />
       <section>
         <SectionTitle>New accounts, last 14 days</SectionTitle>
         <Card className="p-4">
