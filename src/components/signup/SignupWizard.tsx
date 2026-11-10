@@ -59,7 +59,12 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 /** The three-step sign-up: your details, how you'll use CoachFlow, then a few questions for that role. */
 export function SignupWizard() {
   const [step, setStep] = useState(1);
-  const [role, setRole] = useState<SignupRole | null>(null);
+  // The welcome page can pre-pick a role (?role=coach or ?role=personal). This only mounts in the browser, so reading the address is safe.
+  const [role, setRole] = useState<SignupRole | null>(() => {
+    if (typeof window === "undefined") return null;
+    const r = new URLSearchParams(window.location.search).get("role");
+    return r === "coach" ? "COACH" : r === "personal" ? "PERSONAL" : null;
+  });
   // Step 1
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
