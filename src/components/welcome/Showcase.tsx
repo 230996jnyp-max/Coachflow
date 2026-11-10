@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/store";
+import { LiveClients, LiveLogger, LiveProgress } from "./LiveScreens";
 
 /* The product, shown: a linked pair of phones in the hero and a tabbed showcase. Every picture is a real screen from the app with demo data. */
 
@@ -21,36 +22,34 @@ const SHOTS = {
 type Shot = keyof typeof SHOTS;
 type Who = "train" | "coach";
 
-const PAIR: Record<Who, { left: Shot; right: Shot; leftCap: string; rightCap: string; link: boolean; pulses: [string, string, string] }> = {
+const PAIR: Record<Who, { leftCap: string; rightCap: string; link: boolean; pulses: [string, string, string] }> = {
   // Someone training on their own: their log, and what it builds.
-  train: { left: "logger", right: "progress", leftCap: "Log it", rightCap: "Watch it climb", link: false, pulses: ["New personal best", "Workout imported", "Goal on track"] },
+  train: { leftCap: "Log it", rightCap: "Watch it climb", link: false, pulses: ["Set logged", "New best", "Streak kept"] },
   // A coach: the client's side and their own, linked.
-  coach: { left: "logger", right: "clients", leftCap: "Your client logs it", rightCap: "You see it", link: true, pulses: ["Set logged", "Note sent", "Session booked"] },
+  coach: { leftCap: "Your client logs it", rightCap: "You see it", link: true, pulses: ["Set logged", "You're notified", "Note sent"] },
 };
 
-/** Two phones. For someone training alone they show the log and what it builds; for a coach they are the client's phone and the coach's, with messages passing between. */
+/** Two live phones that play one 10 second story together. Training alone: a set is ticked, the volume and chart rise, a new best is flagged. Coaching: the client ticks sets, the coach's list reacts, and a note goes back. */
 export function LinkedPair({ who }: { who: Who }) {
   const p = PAIR[who];
   return (
     <div className="wc-pair" data-lead={who === "train" ? "you" : "coach"} data-link={p.link} key={who}>
       <figure className="wc-side" data-side="you">
         <div className="wc-phone">
-          <Image src={SHOTS[p.left].src} alt={SHOTS[p.left].alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
+          <LiveLogger note={who === "coach"} />
         </div>
         <figcaption>{p.leftCap}</figcaption>
       </figure>
       <div className="wc-link" aria-hidden="true">
         <span className="wc-dot" />
         {p.pulses.map((t, n) => (
-          <span key={t} className="wc-pulse" style={{ ["--i" as string]: `${n * 3}s` }}>
+          <span key={t} className="wc-pulse" data-k={n + 1}>
             {t}
           </span>
         ))}
       </div>
       <figure className="wc-side" data-side="coach">
-        <div className="wc-phone">
-          <Image src={SHOTS[p.right].src} alt={SHOTS[p.right].alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
-        </div>
+        <div className="wc-phone">{who === "coach" ? <LiveClients /> : <LiveProgress />}</div>
         <figcaption>{p.rightCap}</figcaption>
       </figure>
     </div>
