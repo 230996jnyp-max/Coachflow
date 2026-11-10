@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CodeDemo, ImportDemo, LinkedDemo, TravelDemo } from "./Demos";
+import { CoachDemoCards, PersonalDemoCards } from "./Cards";
 import { saira } from "./fonts";
 import { LinkedPair, Showcase, StartForm } from "./Showcase";
 import "./welcome.css";
@@ -10,8 +10,13 @@ import "./welcome.css";
 type Who = "train" | "coach";
 
 const HERO: Record<Who, { head: string; lede: string; signup: string }> = {
-  train: { head: "Train smarter. Beat last week.", lede: "Log every lift, book your coach and watch your numbers climb.", signup: "/signup?role=personal" },
-  coach: { head: "Coach more. Chase less.", lede: "Track every client, take bookings and see who needs a nudge.", signup: "/signup?role=coach" },
+  train: { head: "Train smarter. Beat last week.", lede: "Log every lift, track your food and watch your numbers climb. No coach needed.", signup: "/signup?role=personal" },
+  coach: { head: "Coach more. Chase less.", lede: "Run clients, classes and bookings in one place, and see exactly what they log.", signup: "/signup?role=coach" },
+};
+
+const SECTION: Record<Who, { head: string; note: string }> = {
+  train: { head: "Made for how you train.", note: "Four things worth trying right now. Everything here is a sample, so nothing is saved." },
+  coach: { head: "Made for how coaching really works.", note: "Six things worth trying right now. Everything here is a sample, so nothing is saved." },
 };
 
 const FAQ: { q: string; a: string }[] = [
@@ -26,6 +31,7 @@ const FAQ: { q: string; a: string }[] = [
 export function Welcome() {
   const [who, setWho] = useState<Who>("train");
   const h = HERO[who];
+  const s = SECTION[who];
 
   return (
     <div className={`wc ${saira.variable}`}>
@@ -81,48 +87,17 @@ export function Welcome() {
       <div className="wc-wrap">
         <section className="wc-diff" id="different" aria-labelledby="wc-diff-h">
           <h2 id="wc-diff-h" className="wc-rv">
-            Made for how training really works.
+            {s.head}
           </h2>
-          <p className="wc-diff-note">Four things worth trying right now. Everything here is a sample, so nothing is saved.</p>
-          <div className="wc-diff-grid">
-            <article className="wc-card wc-rv">
-              <div className="wc-card-head">
-                <h3>Both sides, one app</h3>
-                <span className="wc-sample">Sample</span>
-              </div>
-              <p>You log it, your coach sees it. They leave a note, you see it.</p>
-              <LinkedDemo />
-            </article>
-            <article className="wc-card wc-rv">
-              <div className="wc-card-head">
-                <h3>It knows you travel</h3>
-                <span className="wc-sample">Sample</span>
-              </div>
-              <p>Coaches move between gyms. Bookings leave room for the journey, so nobody turns up late.</p>
-              <TravelDemo />
-            </article>
-            <article className="wc-card wc-rv">
-              <div className="wc-card-head">
-                <h3>Paste it. It&apos;s logged.</h3>
-                <span className="wc-sample">Sample</span>
-              </div>
-              <p>Bring your notes, a spreadsheet or a photo. Import turns them into a workout.</p>
-              <ImportDemo />
-            </article>
-            <article className="wc-card wc-rv">
-              <div className="wc-card-head">
-                <h3>Join with six digits</h3>
-                <span className="wc-sample">Sample</span>
-              </div>
-              <p>No invite emails to chase. Enter your coach&apos;s code and they accept you.</p>
-              <CodeDemo />
-            </article>
+          <p className="wc-diff-note">{s.note}</p>
+          <div className="wc-diff-grid" key={who}>
+            {who === "train" ? <PersonalDemoCards /> : <CoachDemoCards />}
           </div>
         </section>
       </div>
 
       <div id="features">
-        <Showcase />
+        <Showcase who={who} />
       </div>
 
       <div className="wc-wrap">

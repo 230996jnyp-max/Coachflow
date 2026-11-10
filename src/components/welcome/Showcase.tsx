@@ -14,60 +14,77 @@ const SHOTS = {
   progress: { src: "/welcome/phone-progress.webp", alt: "The CoachFlow progress screen: weekly volume, streak and totals." },
   clients: { src: "/welcome/phone-clients.webp", alt: "The CoachFlow clients screen: a coach code and a roster of clients." },
   schedule: { src: "/welcome/phone-schedule.webp", alt: "The CoachFlow schedule screen: sessions waiting for attendance." },
+  classes: { src: "/welcome/phone-classes.webp", alt: "The CoachFlow classes list: a group class that is full with two people on the waitlist." },
 } as const;
 
 type Shot = keyof typeof SHOTS;
 type Who = "train" | "coach";
 
-/** Two phones, one for you and one for your coach, with messages passing between them. The one that matches the visitor leads. */
+const PAIR: Record<Who, { left: Shot; right: Shot; leftCap: string; rightCap: string; link: boolean; pulses: [string, string, string] }> = {
+  // Someone training on their own: their log, and what it builds.
+  train: { left: "logger", right: "progress", leftCap: "Log it", rightCap: "Watch it climb", link: false, pulses: ["New personal best", "Workout imported", "Goal on track"] },
+  // A coach: the client's side and their own, linked.
+  coach: { left: "logger", right: "clients", leftCap: "Your client logs it", rightCap: "You see it", link: true, pulses: ["Set logged", "Note sent", "Session booked"] },
+};
+
+/** Two phones. For someone training alone they show the log and what it builds; for a coach they are the client's phone and the coach's, with messages passing between. */
 export function LinkedPair({ who }: { who: Who }) {
+  const p = PAIR[who];
   return (
-    <div className="wc-pair" data-lead={who === "train" ? "you" : "coach"}>
+    <div className="wc-pair" data-lead={who === "train" ? "you" : "coach"} data-link={p.link} key={who}>
       <figure className="wc-side" data-side="you">
         <div className="wc-phone">
-          <Image src={SHOTS.logger.src} alt={SHOTS.logger.alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
+          <Image src={SHOTS[p.left].src} alt={SHOTS[p.left].alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
         </div>
-        <figcaption>You log the set</figcaption>
+        <figcaption>{p.leftCap}</figcaption>
       </figure>
       <div className="wc-link" aria-hidden="true">
         <span className="wc-dot" />
-        <span className="wc-pulse" style={{ ["--i" as string]: "0s" }}>
-          Set logged
-        </span>
-        <span className="wc-pulse" style={{ ["--i" as string]: "3s" }}>
-          Note sent
-        </span>
-        <span className="wc-pulse" style={{ ["--i" as string]: "6s" }}>
-          Session booked
-        </span>
+        {p.pulses.map((t, n) => (
+          <span key={t} className="wc-pulse" style={{ ["--i" as string]: `${n * 3}s` }}>
+            {t}
+          </span>
+        ))}
       </div>
       <figure className="wc-side" data-side="coach">
         <div className="wc-phone">
-          <Image src={SHOTS.clients.src} alt={SHOTS.clients.alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
+          <Image src={SHOTS[p.right].src} alt={SHOTS[p.right].alt} width={540} height={1170} sizes="(max-width: 860px) 42vw, 260px" priority />
         </div>
-        <figcaption>Your coach sees it</figcaption>
+        <figcaption>{p.rightCap}</figcaption>
       </figure>
     </div>
   );
 }
 
-const TABS: { title: string; text: string; shot: Shot }[] = [
-  { title: "Log every set", text: "Last time's weights sit beside each set, so you know exactly what to beat.", shot: "logger" },
-  { title: "See the climb", text: "Weekly volume, streaks and totals build up as you train.", shot: "progress" },
-  { title: "Stay on schedule", text: "Your next session, group classes and credits in one view.", shot: "home" },
-  { title: "Run your roster", text: "Every client with their credits and next session. Your coach code is one tap away.", shot: "clients" },
-  { title: "Confirm sessions fast", text: "Finished sessions wait for attendance: present or no-show in one tap.", shot: "schedule" },
-];
+type Tab = { title: string; text: string; shot: Shot };
+
+const TABS: Record<Who, Tab[]> = {
+  train: [
+    { title: "Log every set", text: "Last time's weights sit beside each set, so you know exactly what to beat.", shot: "logger" },
+    { title: "See the climb", text: "Weekly volume, streaks and totals build up as you train.", shot: "progress" },
+  ],
+  coach: [
+    { title: "Run your roster", text: "Every client with their credits and next session. Your coach code is one tap away.", shot: "clients" },
+    { title: "Group classes with waitlists", text: "Set the spots. Extra clients wait in order and move up when someone cancels.", shot: "classes" },
+    { title: "Confirm sessions fast", text: "Finished sessions wait for attendance: present or no-show in one tap.", shot: "schedule" },
+    { title: "What your clients see", text: "Their next session, group classes and credits in one view.", shot: "home" },
+    { title: "Smart suggestions", text: "Plain rules suggest the next weight, and a deload when progress stalls.", shot: "logger" },
+  ],
+};
 
 /** Tabs that swap the phone. They advance by themselves until someone picks one. */
-export function Showcase() {
+export function Showcase({ who }: { who: Who }) {
+  return <ShowcaseTabs key={who} tabs={TABS[who]} />;
+}
+
+function ShowcaseTabs({ tabs: TAB_LIST }: { tabs: Tab[] }) {
   const [i, setI] = useState(0);
   const [auto, setAuto] = useState(true);
   useEffect(() => {
     if (!auto || reducedMotion()) return;
-    const id = setInterval(() => setI((n) => (n + 1) % TABS.length), 4500);
+    const id = setInterval(() => setI((n) => (n + 1) % TAB_LIST.length), 4500);
     return () => clearInterval(id);
-  }, [auto]);
+  }, [auto, TAB_LIST.length]);
   return (
     <section className="wc-show" aria-labelledby="wc-all">
       <div className="wc-wrap">
@@ -76,7 +93,7 @@ export function Showcase() {
         </h2>
         <div className="wc-show-grid">
           <div role="tablist" aria-label="What CoachFlow does" className="wc-tabs">
-            {TABS.map((t, n) => (
+            {TAB_LIST.map((t, n) => (
               <button
                 key={t.title}
                 type="button"
@@ -99,7 +116,7 @@ export function Showcase() {
           </div>
           <div className="wc-show-phone" id="wc-tabpanel" role="tabpanel" aria-labelledby={`wc-tab-${i}`}>
             <div className="wc-phone">
-              {TABS.map((t, n) => (
+              {TAB_LIST.map((t, n) => (
                 <Image key={t.shot} src={SHOTS[t.shot].src} alt={n === i ? SHOTS[t.shot].alt : ""} width={540} height={1170} sizes="330px" data-on={i === n} />
               ))}
             </div>
