@@ -199,6 +199,24 @@
   gap: 10px;
 }
 
+/* ---- real screenshots ---- */
+.wc-shot {
+  margin: 0;
+  min-width: 0;
+}
+.wc-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--wc-radius-lg);
+  border: 1px solid var(--wc-rule);
+}
+.wc-shot figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--wc-muted);
+}
+
 /* ---- panels (the product, shown) ---- */
 .wc-panel {
   background: var(--wc-bg2);

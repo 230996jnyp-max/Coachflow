@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
-import { BookingDemo, CodeDemo, CoachFeed, ProgressChart, SetLogger } from "./Demos";
+import { BookingDemo, CodeDemo, ProgressChart } from "./Demos";
 import { saira } from "./fonts";
 import "./welcome.css";
 
@@ -54,7 +55,14 @@ export function Welcome() {
                 </Link>
               </div>
             </div>
-            {who === "train" ? <SetLogger /> : <CoachFeed />}
+            <figure className="wc-shot">
+              {who === "train" ? (
+                <Image src="/welcome/app-train.jpg" width={600} height={600} priority alt="The CoachFlow workout screen: a bench press with sets, weights, reps and a suggested deload." />
+              ) : (
+                <Image src="/welcome/app-coach.jpg" width={598} height={600} priority alt="The CoachFlow coach screen: your six-digit coach code and a roster of clients with credits and next sessions." />
+              )}
+              <figcaption>The real app, with demo clients.</figcaption>
+            </figure>
           </section>
 
           <section className="wc-sec" aria-labelledby="wc-book">
