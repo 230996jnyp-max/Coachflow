@@ -68,7 +68,17 @@ export function SignupWizard() {
   // Step 1
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  // An email typed on the welcome page is passed along in this tab's session storage (once), never in the address.
+  const [email, setEmail] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const v = sessionStorage.getItem("cf_signup_email") ?? "";
+      sessionStorage.removeItem("cf_signup_email");
+      return v;
+    } catch {
+      return "";
+    }
+  });
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [phone, setPhone] = useState("");

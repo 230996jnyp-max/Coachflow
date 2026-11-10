@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { BookingDemo, CodeDemo, ProgressChart } from "./Demos";
+import { BookingDemo, CodeDemo, ProgressChart, SetLogger } from "./Demos";
 import { saira } from "./fonts";
 import "./welcome.css";
 
@@ -14,10 +15,44 @@ const HERO: Record<Who, { head: string; lede: string; signup: string }> = {
   coach: { head: "Coach more. Chase less.", lede: "Track every client, take bookings and see who needs a nudge.", signup: "/signup?role=coach" },
 };
 
+const FEATURES: { title: string; text: string }[] = [
+  { title: "Workout logger", text: "Last time's weights sit beside every set, so you know what to beat." },
+  { title: "Routines", text: "Build routines once and use them again, or share them with clients." },
+  { title: "Nutrition", text: "Search foods, scan barcodes and keep calories and macros in view." },
+  { title: "Bookings", text: "Set your open hours. Clients request a slot and you answer in a tap." },
+  { title: "Group classes", text: "Run classes with waitlists, repeats and attendance." },
+  { title: "Messages", text: "Chat with your coach or your clients without leaving the app." },
+  { title: "AI import", text: "Paste a workout from your notes and it becomes a logged session." },
+  { title: "Private by design", text: "Client profiles are encrypted, and coaches only see their own clients." },
+];
+
+const FAQ: { q: string; a: string }[] = [
+  { q: "Do I need a coach to use it?", a: "No. You can train on your own and add a coach later with their six-digit code." },
+  { q: "What does it cost?", a: "Your first 30 days are free and you don't need a card to start. We'll show pricing before anything is charged." },
+  { q: "Do I install anything?", a: "No. It runs in your browser, and you can add it to your phone's home screen like an app." },
+  { q: "Can coaches run groups?", a: "Yes. Group classes have spots, waitlists and attendance, next to one-to-one sessions." },
+  { q: "Who can see my data?", a: "You, and the coach you accept. A coach never sees another coach's clients." },
+];
+
 /** The page logged-out visitors see first: what CoachFlow is, shown by using it. */
 export function Welcome() {
+  const router = useRouter();
   const [who, setWho] = useState<Who>("train");
+  const [email, setEmail] = useState("");
   const h = HERO[who];
+
+  /** The email is carried to the sign-up form through the tab's session storage, never the address bar. */
+  const start = (e: React.FormEvent) => {
+    e.preventDefault();
+    const v = email.trim();
+    try {
+      if (v) sessionStorage.setItem("cf_signup_email", v);
+    } catch {
+      /* private mode: they just type it again */
+    }
+    router.push(h.signup);
+  };
+
   return (
     <div className={`wc ${saira.variable}`}>
       <div className="wc-wrap">
@@ -25,7 +60,13 @@ export function Welcome() {
           <Link href="/" className="wc-mark">
             CoachFlow
           </Link>
-          <nav className="wc-nav-links" aria-label="Account">
+          <nav className="wc-nav-links" aria-label="Main">
+            <a href="#features" className="wc-hide-s">
+              Features
+            </a>
+            <a href="#faq" className="wc-hide-s">
+              Questions
+            </a>
             <Link href="/login">Log in</Link>
             <Link href={h.signup} className="wc-btn wc-btn-primary wc-btn-small">
               Start free
@@ -46,14 +87,18 @@ export function Welcome() {
               </div>
               <h1 id="wc-h1">{h.head}</h1>
               <p className="wc-lede">{h.lede}</p>
-              <div className="wc-actions">
-                <Link href={h.signup} className="wc-btn wc-btn-primary">
+              <form className="wc-start" onSubmit={start}>
+                <label htmlFor="wc-email" className="wc-sr">
+                  Email address
+                </label>
+                <input id="wc-email" type="email" autoComplete="email" inputMode="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <button type="submit" className="wc-btn wc-btn-primary">
                   Start free for 30 days
-                </Link>
-                <Link href="/login" className="wc-btn wc-btn-ghost">
-                  Log in
-                </Link>
-              </div>
+                </button>
+              </form>
+              <p className="wc-fine">
+                No card needed. Already have an account? <Link href="/login">Log in</Link>
+              </p>
             </div>
             <figure className="wc-shot">
               {who === "train" ? (
@@ -63,6 +108,26 @@ export function Welcome() {
               )}
               <figcaption>The real app, with demo clients.</figcaption>
             </figure>
+          </section>
+
+          <section className="wc-sec" aria-labelledby="wc-log">
+            <div>
+              <h2 id="wc-log">Log a set. Beat it.</h2>
+              <p>Try it: change the weight and log a set. Your best gets flagged as you go.</p>
+            </div>
+            <SetLogger />
+          </section>
+
+          <section className="wc-feat" id="features" aria-labelledby="wc-all">
+            <h2 id="wc-all">Everything in one place.</h2>
+            <ul>
+              {FEATURES.map((f) => (
+                <li key={f.title}>
+                  <strong>{f.title}</strong>
+                  <span>{f.text}</span>
+                </li>
+              ))}
+            </ul>
           </section>
 
           <section className="wc-sec" aria-labelledby="wc-book">
@@ -89,31 +154,22 @@ export function Welcome() {
             <ProgressChart />
           </section>
 
-          <section className="wc-two" aria-label="Who CoachFlow is for">
+          <section className="wc-faq" id="faq" aria-labelledby="wc-q">
+            <h2 id="wc-q">Questions</h2>
             <div>
-              <h2>On your own</h2>
-              <ul>
-                <li>Log workouts and build routines</li>
-                <li>Track nutrition and calories (adults)</li>
-                <li>Import a workout with AI</li>
-                <li>Add a coach any time</li>
-              </ul>
-            </div>
-            <div>
-              <h2>For coaches</h2>
-              <ul>
-                <li>A roster with every client&apos;s progress</li>
-                <li>Availability, bookings and group classes</li>
-                <li>Attendance and chat in one place</li>
-                <li>Your own six-digit coach code</li>
-              </ul>
+              {FAQ.map((f) => (
+                <details key={f.q}>
+                  <summary>{f.q}</summary>
+                  <p>{f.a}</p>
+                </details>
+              ))}
             </div>
           </section>
 
           <section className="wc-end" aria-labelledby="wc-free">
             <h2 id="wc-free">Free for your first 30 days.</h2>
             <div className="wc-actions">
-              <Link href="/signup" className="wc-btn wc-btn-primary">
+              <Link href={h.signup} className="wc-btn wc-btn-primary">
                 Start free
               </Link>
               <Link href="/login" className="wc-btn wc-btn-ghost">

@@ -6,6 +6,80 @@ import { useEffect, useRef, useState } from "react";
  * The product, shown. Everything here is a labelled sample: invented names and numbers that never claim to be real users or results.
  */
 
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** The live set logger: the hero for someone who trains. Plays itself until they touch it. */
+export function SetLogger() {
+  const [weight, setWeight] = useState(80);
+  const [sets, setSets] = useState<number[]>([80, 80]);
+  const [best, setBest] = useState(false);
+  const [auto, setAuto] = useState(true);
+
+  useEffect(() => {
+    if (!auto || reducedMotion()) return;
+    const id = setInterval(() => {
+      setSets((s) => {
+        if (s.length >= 4) {
+          setWeight(80);
+          setBest(false);
+          return [80, 80];
+        }
+        const next = s.length === 2 ? 82.5 : 85;
+        setWeight(next);
+        setBest(true);
+        return [...s, next];
+      });
+    }, 2200);
+    return () => clearInterval(id);
+  }, [auto]);
+
+  const take = () => setAuto(false);
+  const log = () => {
+    take();
+    setSets((s) => (s.length >= 5 ? [weight] : [...s, weight]));
+    setBest(weight > 80);
+  };
+  const bump = (d: number) => {
+    take();
+    setWeight((w) => Math.max(20, Math.min(300, Math.round((w + d) * 2) / 2)));
+  };
+
+  return (
+    <div className="wc-panel" aria-label="Sample set logger">
+      <div className="wc-panel-head">
+        <span>Back squat, today</span>
+        <span className="wc-sample">Sample</span>
+      </div>
+      <div className="wc-bignum" aria-live="polite">
+        {weight}
+        <small>kg</small>
+      </div>
+      <div className="wc-stepper">
+        <button type="button" className="wc-step" onClick={() => bump(-2.5)} aria-label="Lower the weight by 2.5 kilograms">
+          -
+        </button>
+        <button type="button" className="wc-step" onClick={() => bump(2.5)} aria-label="Raise the weight by 2.5 kilograms">
+          +
+        </button>
+        <button type="button" className="wc-btn wc-btn-primary wc-btn-small" onClick={log}>
+          Log set
+        </button>
+        <span className="wc-tag" data-on={best}>
+          New best
+        </span>
+      </div>
+      <ul className="wc-rows">
+        {sets.map((w, i) => (
+          <li key={`${i}-${w}`}>
+            <span>Set {i + 1}</span>
+            <span className="wc-fig">{w} kg x 5</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const SLOTS: Record<string, { t: string; taken?: boolean }[]> = {
   Thu: [{ t: "7:00" }, { t: "8:00", taken: true }, { t: "9:30" }, { t: "12:00" }, { t: "5:30", taken: true }],
   Fri: [{ t: "7:00", taken: true }, { t: "8:30" }, { t: "10:00" }, { t: "4:00" }],
@@ -71,7 +145,7 @@ export function BookingDemo() {
             <strong>
               {day} {slot}
             </strong>{" "}
-            is confirmed. Both of you get a reminder.
+            is confirmed.
           </>
         )}
       </div>
