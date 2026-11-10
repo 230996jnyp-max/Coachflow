@@ -847,6 +847,60 @@
   }
 }
 
+/* ---- coach code on the first screen ---- */
+.wc-codelink {
+  margin-top: 6px;
+  padding: 10px 0;
+  background: none;
+  border: 0;
+  color: var(--wc-accent-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.wc-codebox {
+  margin-top: 14px;
+  max-width: 540px;
+  border-top: 1px solid var(--wc-rule);
+  padding-top: 14px;
+}
+.wc-codebox label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.wc-codebox-row {
+  display: flex;
+  gap: 10px;
+}
+.wc-codebox input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 220px;
+  min-height: 48px;
+  background: var(--wc-bg2);
+  color: var(--wc-ink);
+  border: 2px solid var(--wc-rule2);
+  border-radius: 999px;
+  font-family: var(--wc-font-fig);
+  font-size: 22px;
+  letter-spacing: 0.16em;
+  text-align: center;
+  padding: 0 12px;
+}
+.wc-codebox .wc-btn[disabled] {
+  opacity: 0.6;
+  cursor: wait;
+}
+.wc-codebox p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
 /* ---- extra demo pieces ---- */
 .wc-pair[data-link="false"] .wc-link {
   border-top-color: transparent;

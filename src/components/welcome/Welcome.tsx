@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CoachDemoCards, PersonalDemoCards } from "./Cards";
 import { saira } from "./fonts";
-import { LinkedPair, Showcase, StartForm } from "./Showcase";
+import { CoachCodeStart, LinkedPair, Showcase, StartForm } from "./Showcase";
 import "./welcome.css";
 
 type Who = "train" | "coach";
@@ -77,6 +77,7 @@ export function Welcome() {
                 <p className="wc-fine">
                   No card needed. Already have an account? <Link href="/login">Log in</Link>
                 </p>
+                {who === "train" && <CoachCodeStart />}
               </div>
               <LinkedPair who={who} />
             </section>

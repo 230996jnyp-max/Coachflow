@@ -57,14 +57,10 @@ const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The three-step sign-up: your details, how you'll use CoachFlow, then a few questions for that role. */
-export function SignupWizard() {
+export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole | null }) {
   const [step, setStep] = useState(1);
-  // The welcome page can pre-pick a role (?role=coach or ?role=personal). This only mounts in the browser, so reading the address is safe.
-  const [role, setRole] = useState<SignupRole | null>(() => {
-    if (typeof window === "undefined") return null;
-    const r = new URLSearchParams(window.location.search).get("role");
-    return r === "coach" ? "COACH" : r === "personal" ? "PERSONAL" : null;
-  });
+  // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
+  const [role, setRole] = useState<SignupRole | null>(initialRole);
   // Step 1
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
@@ -95,7 +91,17 @@ export function SignupWizard() {
   const [tagline, setTagline] = useState("");
   const [gymChoice, setGymChoice] = useState<string[]>([]);
   const [gymText, setGymText] = useState("");
-  const [code, setCode] = useState("");
+  // A coach code typed on the welcome page arrives through this tab's session storage (once). It is looked up below so the coach's name shows.
+  const [code, setCode] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const v = sessionStorage.getItem("cf_signup_coach_code") ?? "";
+      sessionStorage.removeItem("cf_signup_coach_code");
+      return cleanCoachCode(v) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [coach, setCoach] = useState<{ name: string; tagline: string } | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [medical, setMedical] = useState("");
@@ -109,6 +115,22 @@ export function SignupWizard() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ email: string; role: SignupRole } | null>(null);
   const [resent, setResent] = useState(false);
+
+  // A code that came from the welcome page is checked straight away, so step 3 already names the coach.
+  useEffect(() => {
+    if (code.length !== 6) return;
+    let alive = true;
+    void api<{ name: string; tagline: string }>("/api/signup/coach-code", { body: { code } }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.data) setCoach(r.data);
+      else setCodeError(r.error ?? "We couldn't find a coach with that code.");
+    });
+    return () => {
+      alive = false;
+    };
+    // Only for the code present when the form opens; typing a code is handled by onCode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Each new step starts at the top of the page.
   useEffect(() => {

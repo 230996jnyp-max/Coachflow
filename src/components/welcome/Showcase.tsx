@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { api } from "@/lib/store";
 
 /* The product, shown: a linked pair of phones in the hero and a tabbed showcase. Every picture is a real screen from the app with demo data. */
 
@@ -124,6 +125,60 @@ function ShowcaseTabs({ tabs: TAB_LIST }: { tabs: Tab[] }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** "Have a coach code?": checks the six digits, names the coach, then carries the code to the sign-up form (in this tab's session storage, not the address bar). */
+export function CoachCodeStart() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [state, setState] = useState<{ kind: "idle" | "busy" | "error" | "found"; text?: string }>({ kind: "idle" });
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (code.length !== 6) return setState({ kind: "error", text: "A coach code is six digits." });
+    setState({ kind: "busy" });
+    const r = await api<{ name: string }>("/api/signup/coach-code", { body: { code } });
+    if (!r.ok || !r.data) return setState({ kind: "error", text: r.error ?? "We couldn't find a coach with that code." });
+    setState({ kind: "found", text: `${r.data.name} is waiting for you. Taking you to sign-up.` });
+    try {
+      sessionStorage.setItem("cf_signup_coach_code", code);
+    } catch {
+      /* private mode: they type it again on the next screen */
+    }
+    router.push("/signup?role=client");
+  };
+  if (!open) {
+    return (
+      <button type="button" className="wc-codelink" onClick={() => setOpen(true)}>
+        Have a coach code?
+      </button>
+    );
+  }
+  return (
+    <form className="wc-codebox" onSubmit={submit}>
+      <label htmlFor="wc-coach-code">Your coach&apos;s six-digit code</label>
+      <div className="wc-codebox-row">
+        <input
+          id="wc-coach-code"
+          inputMode="numeric"
+          autoComplete="off"
+          autoFocus
+          placeholder="482915"
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+            setState({ kind: "idle" });
+          }}
+        />
+        <button type="submit" className="wc-btn wc-btn-ghost wc-btn-small" disabled={state.kind === "busy" || state.kind === "found"}>
+          {state.kind === "busy" ? "Checking" : "Continue"}
+        </button>
+      </div>
+      <p className={state.kind === "error" ? "wc-err" : "wc-fine"} role={state.kind === "error" ? "alert" : "status"}>
+        {state.text ?? "Your coach shares it with you. They accept you once you've signed up."}
+      </p>
+    </form>
   );
 }
 
