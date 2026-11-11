@@ -69,6 +69,9 @@ export interface ClientProfile {
   weeklyTarget?: number;
   personalGoal?: string;
   startWeightKg?: number;
+  /** An event the client is working towards ("Sundown Marathon") and its date (yyyy-MM-dd): the countdown on their dashboard. Shared with the coach. */
+  goalEventName?: string;
+  goalEventDate?: string;
 }
 
 export type MuscleGroup =
@@ -498,8 +501,47 @@ export interface AppNotification {
   title: string;
   body: string;
   link?: string;
+  /** The client this is about (coaches can filter by it); older notifications have none. */
+  about?: string;
   createdAt: string;
   read: boolean;
+}
+
+/** One comment under a finished workout. The text is only ever seen by the client and their coach. */
+export interface WorkoutComment {
+  id: string;
+  workoutId: string;
+  authorId: string;
+  authorName: string;
+  authorRole: "CLIENT" | "COACH";
+  text: string;
+  createdAt: string;
+}
+
+export type WorkoutEmoji = "👍" | "🔥";
+export const WORKOUT_EMOJIS: WorkoutEmoji[] = ["👍", "🔥"];
+
+export interface WorkoutReaction {
+  emoji: WorkoutEmoji;
+  count: number;
+  mine: boolean;
+  /** First names of the people who reacted. */
+  names: string[];
+}
+
+/** The conversation around one workout. `canTalk` is false for someone training without a coach. */
+export interface WorkoutTalk {
+  canTalk: boolean;
+  comments: WorkoutComment[];
+  reactions: WorkoutReaction[];
+}
+
+/** A private note a coach keeps about a client. Never sent to the client. */
+export interface ClientNote {
+  id: string;
+  clientId: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface DB {

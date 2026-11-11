@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { openProfile, parseUsername, sealProfile, setUsername } from "@/lib/server/accounts";
+import { applyGoalFields, openProfile, parseUsername, sealProfile, setUsername, type ProfileJson } from "@/lib/server/accounts";
 import { isStaff, requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, forbidden, readJson, route } from "@/lib/server/http";
@@ -10,7 +10,11 @@ import { users } from "@/lib/server/schema";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** PATCH { unit?, hasCompletedOnboarding?, themePreference?, homeAddress?, username? } — personal preferences (homeAddress: a client's own home, { place } | { text } | null). */
+/**
+ * PATCH { unit?, hasCompletedOnboarding?, themePreference?, homeAddress?, goalInfo?, username? } — personal preferences
+ * (homeAddress: a client's own home, { place } | { text } | null; goalInfo: { personalGoal?, goalEventName?, goalEventDate?, weeklyTarget? },
+ * where only someone without a coach may set weeklyTarget).
+ */
 export const PATCH = route(async (req) => {
   const body = await readJson(req);
   const me = await requireUser();
@@ -27,12 +31,23 @@ export const PATCH = route(async (req) => {
     if (body.themePreference !== "black" && body.themePreference !== "white" && body.themePreference !== "navy") throw badRequest("Unknown theme.");
     set.theme = body.themePreference;
   }
+  // Both of these edit the client's own sealed profile, so open it once and seal it once.
+  let profile: ProfileJson | null = null;
   if ("homeAddress" in body) {
     if (me.role !== "CLIENT") throw forbidden("Home addresses belong to clients.");
-    const p = openProfile(me);
-    applyHomeAddress(p, body.homeAddress);
-    set.profileEnc = sealProfile(me.id, p);
+    profile ??= openProfile(me);
+    applyHomeAddress(profile, body.homeAddress);
   }
+  if ("goalInfo" in body) {
+    if (me.role !== "CLIENT") throw forbidden("Goals belong to clients.");
+    const g = body.goalInfo;
+    if (!g || typeof g !== "object" || Array.isArray(g)) throw badRequest("Goal details are missing.");
+    // Someone with a coach has their weekly target set by that coach.
+    if ("weeklyTarget" in g && me.coachId) throw forbidden("Your coach sets your weekly target.");
+    profile ??= openProfile(me);
+    applyGoalFields(profile, g as Record<string, unknown>);
+  }
+  if (profile) set.profileEnc = sealProfile(me.id, profile);
   if ("username" in body) {
     const username = parseUsername(body.username, isStaff(me));
     if (username !== me.username) await setUsername(me.id, username);

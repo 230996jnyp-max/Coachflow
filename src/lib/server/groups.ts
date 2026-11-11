@@ -73,6 +73,8 @@ interface NoteBody {
   title: string;
   body: string;
   link?: string;
+  /** The client this notification is about (lets a coach filter their notifications by client). */
+  about?: string;
 }
 
 async function firstNameOf(row: UserRow): Promise<string> {
@@ -115,14 +117,20 @@ export async function notify(userIds: string[], kind: string, n: NoteBody, opts:
   }
 }
 
-export async function loadNotifications(userId: string): Promise<AppNotification[]> {
+/**
+ * A person's notifications, newest first. The app keeps the latest 40 in memory for the bell; the Notifications page asks for more
+ * (up to 200) and can page back with `before` (an ISO time).
+ */
+export async function loadNotifications(userId: string, opts: { limit?: number; before?: Date } = {}): Promise<AppNotification[]> {
   const d = await db();
-  const rows = await d.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt)).limit(40);
+  const limit = Math.max(1, Math.min(200, opts.limit ?? 40));
+  const where = opts.before ? and(eq(notifications.userId, userId), lt(notifications.createdAt, opts.before)) : eq(notifications.userId, userId);
+  const rows = await d.select().from(notifications).where(where).orderBy(desc(notifications.createdAt)).limit(limit);
   const out: AppNotification[] = [];
   for (const r of rows) {
     try {
       const b = decryptJson<NoteBody>(r.bodyEnc, aadN(r.id));
-      out.push({ id: r.id, kind: r.kind, title: b.title, body: b.body, link: b.link, createdAt: r.createdAt.toISOString(), read: !!r.readAt });
+      out.push({ id: r.id, kind: r.kind, title: b.title, body: b.body, link: b.link, ...(b.about ? { about: b.about } : {}), createdAt: r.createdAt.toISOString(), read: !!r.readAt });
     } catch {
       /* skip unreadable */
     }

@@ -12,6 +12,7 @@ import { CalendarQuickLinks } from "@/components/booking/CalendarActions";
 import { GroupCreditsCard } from "@/components/groups/ClassList";
 import { ApprovalCard } from "@/components/groups/groupUi";
 import { PersonalHome } from "@/components/home/PersonalHome";
+import { GoalCard } from "@/components/goal/GoalCard";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -102,6 +103,10 @@ function ClientHome() {
             }
           />
         )}
+      </section>
+
+      <section>
+        <GoalCard clientId={user.id} editable canSetTarget={false} />
       </section>
 
       <section data-tour="home-credits">

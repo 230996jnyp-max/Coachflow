@@ -737,6 +737,27 @@ export async function updateClient(id: string, patch: { user?: Partial<User>; pr
   return null;
 }
 
+export interface GoalInfo {
+  personalGoal?: string;
+  goalEventName?: string;
+  goalEventDate?: string;
+  weeklyTarget?: number;
+}
+
+/**
+ * Saves a client's goal, the event they are counting down to and (when allowed) their weekly target. A client edits their own;
+ * their coach edits it from the client page. Empty text or date clears a field.
+ */
+export async function saveGoalInfo(clientId: string, info: GoalInfo): Promise<string | null> {
+  if (state.sessionUserId === clientId) {
+    const r = await api("/api/me", { method: "PATCH", body: { goalInfo: info } });
+    if (!r.ok) return r.error ?? "Could not save your goal.";
+    await refreshAccounts();
+    return null;
+  }
+  return updateClient(clientId, { profile: info });
+}
+
 /** Saves where a client trains at home (their own profile, or the coach editing a client). Private to the client and their coach. */
 export async function saveHomeAddress(clientId: string, home: { place?: PlaceInfo | null; text?: string } | null): Promise<string | null> {
   const body = { homeAddress: home === null ? null : home.place ? { place: home.place } : { text: home.text ?? "" } };

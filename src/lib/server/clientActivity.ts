@@ -48,7 +48,7 @@ export async function announceWorkout(me: UserRow, w: Workout, origin: string): 
     const title = w.title || "a workout";
     const body = `${name} just ${verb} “${title}” (${plural(w.exercises.length, "exercise")}, ${plural(prCount, "PR")}).`;
     const link = `/workout/${w.id}`;
-    await notify([coach.id], "client_workout", { title: `${first} ${verb} a workout`, body, link }, { email: false });
+    await notify([coach.id], "client_workout", { title: `${first} ${verb} a workout`, body, link, about: me.id }, { email: false });
 
     // Email only for imports and for workouts with a new personal record.
     if (!w.imported && prCount === 0) return;
@@ -86,7 +86,7 @@ export async function announceRoutines(me: UserRow, titles: string[], exercises:
     const first = name.split(" ")[0] || "A client";
     const clean = titles.map((t) => t.replace(/\s+/g, " ").trim().slice(0, 80)).filter(Boolean).slice(0, 5);
     const body = `${name} imported ${plural(titles.length, "routine")} with AI${clean.length ? `: ${clean.map((t) => `“${t}”`).join(", ")}` : ""} (${plural(exercises, "exercise")}). Imported routines are private to the client.`;
-    await notify([coach.id], "client_import", { title: `${first} imported a routine`, body, link: `/clients/${me.id}` }, { email: false });
+    await notify([coach.id], "client_import", { title: `${first} imported a routine`, body, link: `/clients/${me.id}`, about: me.id }, { email: false });
     const url = `${origin}/clients/${me.id}`;
     await emailCoach(coach, me.id, `${first} imported a routine`, `${body}\n\nOpen their profile: ${url}`, layout(`${first} imported a routine`, `<p style="margin:0;color:#E8ECF4;line-height:1.5;">${escapeHtml(body)}</p>`, { label: "Open the client", href: url }));
   } catch (e) {

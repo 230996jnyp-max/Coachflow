@@ -84,6 +84,46 @@ export const rateEvents = pgTable(
   (t) => [index("rate_events_key_idx").on(t.key, t.at)],
 );
 
+/** A coach's private note about a client (the text is encrypted). Clients never receive these. */
+export const clientNotes = pgTable(
+  "client_notes",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("client_notes_client_idx").on(t.clientId, t.createdAt)],
+);
+
+/** A comment under a workout, between the client and their coach (the text is encrypted). `clientId` is the workout's owner. */
+export const workoutComments = pgTable(
+  "workout_comments",
+  {
+    id: text("id").primaryKey(),
+    workoutId: text("workout_id").notNull(),
+    clientId: text("client_id").notNull(),
+    authorId: text("author_id").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("workout_comments_workout_idx").on(t.workoutId, t.createdAt), index("workout_comments_client_idx").on(t.clientId)],
+);
+
+/** A quick 👍 / 🔥 on a workout. One row per person per emoji. */
+export const workoutReactions = pgTable(
+  "workout_reactions",
+  {
+    workoutId: text("workout_id").notNull(),
+    userId: text("user_id").notNull(),
+    emoji: text("emoji").notNull(),
+    clientId: text("client_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.workoutId, t.userId, t.emoji] }), index("workout_reactions_client_idx").on(t.clientId)],
+);
+
 /** People who asked to hear when the AI personal trainer is ready. Only an address and which side of the app they came from. */
 export const aiWaitlist = pgTable("ai_waitlist", {
   id: text("id").primaryKey(),
@@ -535,6 +575,33 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
+  `CREATE TABLE IF NOT EXISTS client_notes (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    body_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS client_notes_client_idx ON client_notes (client_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS workout_comments (
+    id text PRIMARY KEY,
+    workout_id text NOT NULL,
+    client_id text NOT NULL,
+    author_id text NOT NULL,
+    body_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS workout_comments_workout_idx ON workout_comments (workout_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS workout_comments_client_idx ON workout_comments (client_id)`,
+  `CREATE TABLE IF NOT EXISTS workout_reactions (
+    workout_id text NOT NULL,
+    user_id text NOT NULL,
+    emoji text NOT NULL,
+    client_id text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (workout_id, user_id, emoji)
+  )`,
+  `CREATE INDEX IF NOT EXISTS workout_reactions_client_idx ON workout_reactions (client_id)`,
   `CREATE TABLE IF NOT EXISTS ai_waitlist (
     id text PRIMARY KEY,
     email text NOT NULL UNIQUE,
