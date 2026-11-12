@@ -538,6 +538,13 @@ export interface WorkoutTalk {
   reactions: WorkoutReaction[];
 }
 
+/** A coach's saved reply: a short title and the message to put in a chat. {first_name} becomes the other person's first name. */
+export interface SavedReply {
+  id: string;
+  title: string;
+  text: string;
+}
+
 /** A private note a coach keeps about a client. Never sent to the client. */
 export interface ClientNote {
   id: string;

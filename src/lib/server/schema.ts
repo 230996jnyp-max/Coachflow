@@ -103,6 +103,18 @@ export const assignments = pgTable(
   (t) => [index("assignments_client_idx").on(t.clientId, t.date), index("assignments_coach_idx").on(t.coachId, t.date)],
 );
 
+/** A coach's saved reply (a short title and the message, encrypted), inserted into a chat with one tap. Private to that coach. */
+export const savedReplies = pgTable(
+  "saved_replies",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("saved_replies_owner_idx").on(t.ownerId, t.createdAt)],
+);
+
 /** A body check-in (weight, body fat, measurements). The numbers are encrypted; `date` (yyyy-MM-dd) is kept in the clear to sort by. */
 export const bodyLogs = pgTable(
   "body_logs",
@@ -636,6 +648,13 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS assignments_client_idx ON assignments (client_id, date)`,
   `CREATE INDEX IF NOT EXISTS assignments_coach_idx ON assignments (coach_id, date)`,
+  `CREATE TABLE IF NOT EXISTS saved_replies (
+    id text PRIMARY KEY,
+    owner_id text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS saved_replies_owner_idx ON saved_replies (owner_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS body_logs (
     id text PRIMARY KEY,
     client_id text NOT NULL,

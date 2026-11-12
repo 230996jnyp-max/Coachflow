@@ -1,22 +1,23 @@
 "use client";
 
 import { format, formatDistanceToNowStrict, parseISO, startOfMonth, subDays } from "date-fns";
-import { Activity, CalendarCheck, CalendarX2, Camera, Dumbbell, HeartPulse, Mail, MessageCircle, MessagesSquare, Phone, Ruler, Trophy, Users } from "lucide-react";
+import { Activity, HeartPulse, Mail, MessageCircle, MessagesSquare, Phone, Ruler, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 import { GoalCard } from "@/components/goal/GoalCard";
 import { Sparkline } from "@/components/progress/Sparkline";
 import { Badge, Button, Card, Notice, SectionTitle, Stat } from "@/components/ui";
 import { FeelingBadge } from "@/components/workout/FeelingCard";
-import { attendedClass } from "@/lib/attention";
 import { clientThread, requestThread } from "@/lib/chat";
+import { buildFeed } from "@/lib/clientFeed";
 import { useViewer } from "@/lib/hooks";
 import { reservedCount } from "@/lib/scheduling";
 import { doneWorkouts, formatSet, PR_LABELS, weekStreak, workoutVolume } from "@/lib/stats";
 import { useNow } from "@/lib/store";
 import { cn, fmtLength, fmtVolume, fmtWeight, round } from "@/lib/utils";
 import { CoachNotes } from "./CoachNotes";
+import { FeedIcon } from "./FeedIcon";
 import { PctBar, PctPill, ReasonBadges, useStatuses } from "./status";
 
 type JumpTab = "workouts" | "progress" | "plan";
@@ -67,20 +68,10 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
     ].filter((t) => t.values.length > 0);
   }, [metrics, now, unit]);
 
-  const feed = useMemo(() => {
-    type Ev = { id: string; at: Date; icon: ReactNode; text: string; href?: string };
-    const ev: Ev[] = [];
-    for (const w of workouts.slice(-8)) ev.push({ id: `w${w.id}`, at: parseISO(w.startedAt), icon: <Dumbbell size={14} />, text: `Logged “${w.title || "a workout"}”`, href: `/workout/${w.id}` });
-    for (const m of metrics.slice(-4)) ev.push({ id: `m${m.id}`, at: parseISO(m.date), icon: <Activity size={14} />, text: "Updated body metrics" });
-    for (const p of photos.slice(-3)) ev.push({ id: `p${p.id}`, at: parseISO(p.date), icon: <Camera size={14} />, text: `Added a ${p.pose.toLowerCase()} progress photo` });
-    for (const b of db.bookings) {
-      if (b.clientId !== clientId) continue;
-      if (b.status === "COMPLETED") ev.push({ id: `b${b.id}`, at: parseISO(b.start), icon: <CalendarCheck size={14} />, text: "Completed a session" });
-      else if (b.status === "NO_SHOW") ev.push({ id: `b${b.id}`, at: parseISO(b.start), icon: <CalendarX2 size={14} />, text: "Missed a session" });
-    }
-    for (const g of db.groups) if (attendedClass(g, clientId)) ev.push({ id: `g${g.id}`, at: parseISO(g.start), icon: <Users size={14} />, text: `Attended “${g.title}”`, href: `/classes/${g.id}` });
-    return ev.filter((e) => e.at.getTime() <= now.getTime()).sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 8);
-  }, [workouts, metrics, photos, db.bookings, db.groups, clientId, now]);
+  const feed = useMemo(
+    () => buildFeed({ workouts: db.workouts, metrics: db.metrics, photos: db.photos, bookings: db.bookings, groups: db.groups }, clientId, now, 8),
+    [db.workouts, db.metrics, db.photos, db.bookings, db.groups, clientId, now],
+  );
 
   const chat = () => {
     requestThread(clientThread(clientId));
@@ -251,7 +242,9 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
             {feed.map((e) => {
               const row = (
                 <div className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-field text-muted">{e.icon}</span>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-field text-muted">
+                    <FeedIcon kind={e.kind} />
+                  </span>
                   <span className="min-w-0 flex-1 truncate text-sm">{e.text}</span>
                   <span className="shrink-0 text-xs text-muted">{formatDistanceToNowStrict(e.at, { addSuffix: true })}</span>
                 </div>

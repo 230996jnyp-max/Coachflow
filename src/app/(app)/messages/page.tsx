@@ -1,7 +1,7 @@
 "use client";
 
 import { format, isSameDay, parseISO } from "date-fns";
-import { Megaphone, MessageCircle } from "lucide-react";
+import { Megaphone, MessageCircle, Search, X } from "lucide-react";
 import { useState } from "react";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { RoleBadge } from "@/components/chat/RoleBadge";
@@ -24,6 +24,8 @@ export default function MessagesPage() {
   const chat = useChat();
   const [selected, setSelected] = useState<string | null>(() => takeRequestedThread());
   const [broadcast, setBroadcast] = useState(false);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"all" | "unread" | "team">("all");
 
   if (!user) return null;
 
@@ -57,6 +59,22 @@ export default function MessagesPage() {
   const active = sorted.find((r) => r.thread === selected) ?? null;
   const titles = { owner: "App Owner", coaches: "Coaches", clients: "Clients" } as const;
 
+  // Search by name or by what was last said; the chips narrow it to unread conversations or the coaching team.
+  const unreadTotal = sorted.reduce((n, r) => n + (meta(r.thread).unread > 0 ? 1 : 0), 0);
+  const hasTeam = sorted.some((r) => r.section !== "clients");
+  const needle = q.trim().toLowerCase();
+  const visible = sorted.filter((r) => {
+    if (filter === "unread" && meta(r.thread).unread === 0 && r.thread !== active?.thread) return false;
+    if (filter === "team" && r.section === "clients") return false;
+    if (!needle) return true;
+    return r.name.toLowerCase().includes(needle) || (meta(r.thread).last?.text ?? "").toLowerCase().includes(needle);
+  });
+  const chips: { id: typeof filter; label: string; count?: number }[] = [
+    { id: "all", label: "All" },
+    { id: "unread", label: "Unread", count: unreadTotal },
+    ...(hasTeam ? [{ id: "team" as const, label: "Team" }] : []),
+  ];
+
   return (
     <div className="h-[calc(100dvh-12rem)] md:h-[calc(100dvh-5rem)]">
       <div className="grid h-full min-h-0 gap-4 md:grid-cols-[320px_1fr]">
@@ -69,9 +87,50 @@ export default function MessagesPage() {
               </Button>
             )}
           </div>
+          {sorted.length > 0 && (
+            <div className="space-y-2 border-b border-line px-3 py-2.5">
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search people or messages"
+                  aria-label="Search conversations"
+                  className="h-10 w-full rounded-xl border border-line bg-field pl-9 pr-9 text-sm outline-none focus:border-accent"
+                />
+                {q && (
+                  <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted hover:text-ink">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-1.5" role="group" aria-label="Filter conversations">
+                {chips.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setFilter(c.id)}
+                    aria-pressed={filter === c.id}
+                    className={cn(
+                      "flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold",
+                      filter === c.id ? "border-accent bg-accent/15 text-accent" : "border-line text-muted hover:text-ink",
+                    )}
+                  >
+                    {c.label}
+                    {c.count ? <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-on-accent">{c.count}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {sorted.length === 0 && <div className="p-6 text-center text-sm text-muted">Add a client to start chatting.</div>}
+          {sorted.length > 0 && visible.length === 0 && (
+            <div className="p-6 text-center text-sm text-muted">
+              {needle ? `Nothing matches “${q.trim()}”.` : filter === "unread" ? "You're all caught up. No unread messages." : "No conversations here."}
+            </div>
+          )}
           {(["owner", "coaches", "clients"] as const).map((section) => {
-            const items = sorted.filter((r) => r.section === section);
+            const items = visible.filter((r) => r.section === section);
             if (items.length === 0) return null;
             return (
               <div key={section}>
