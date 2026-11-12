@@ -12,6 +12,8 @@ import { CalendarQuickLinks } from "@/components/booking/CalendarActions";
 import { GroupCreditsCard } from "@/components/groups/ClassList";
 import { ApprovalCard } from "@/components/groups/groupUi";
 import { PersonalHome } from "@/components/home/PersonalHome";
+import { GoalCard } from "@/components/goal/GoalCard";
+import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -66,6 +68,8 @@ function ClientHome() {
       <PageHeader title={`${hi}, ${user.name.split(" ")[0]}`} subtitle={profile ? `Goal: ${profile.goal}` : undefined} />
       <PasswordBanner />
 
+      <AssignedWorkouts />
+
       <section>
         <SectionTitle>Next session</SectionTitle>
         {next ? (
@@ -102,6 +106,10 @@ function ClientHome() {
             }
           />
         )}
+      </section>
+
+      <section>
+        <GoalCard clientId={user.id} editable canSetTarget={false} />
       </section>
 
       <section data-tour="home-credits">

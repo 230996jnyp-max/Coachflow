@@ -6,7 +6,7 @@ import { db } from "./db";
 import { ageOn, isMinorAge, trialDaysLeft, trialOver } from "@/lib/signupRules";
 import { trialEnforced } from "./trial";
 import { ensureCoachCode } from "./coachCode";
-import { badRequest, conflict, isUniqueViolation, str } from "./http";
+import { badRequest, conflict, int, isUniqueViolation, str } from "./http";
 import { users, type UserRow } from "./schema";
 
 /** Everything private about a client, stored encrypted in users.profile_enc. */
@@ -33,6 +33,9 @@ export interface ProfileJson {
   weeklyTarget?: number;
   startWeightKg?: number;
   personalGoal?: string;
+  /** The event they are working towards and its date (yyyy-MM-dd): the countdown on their dashboard. */
+  goalEventName?: string;
+  goalEventDate?: string;
   /** When they accepted the Terms and Privacy Policy, and (13 to 17) that a parent or guardian agrees. */
   consent?: { at: string; guardian?: boolean };
   /** A client who signed up with a coach's code: the coach to ask once their email is confirmed. */
@@ -128,7 +131,44 @@ export function toProfile(row: UserRow): ClientProfile {
     ...(p.weeklyTarget ? { weeklyTarget: p.weeklyTarget } : {}),
     ...(p.personalGoal ? { personalGoal: p.personalGoal } : {}),
     ...(p.startWeightKg ? { startWeightKg: p.startWeightKg } : {}),
+    ...(p.goalEventName ? { goalEventName: p.goalEventName } : {}),
+    ...(p.goalEventDate ? { goalEventDate: p.goalEventDate } : {}),
   };
+}
+
+/**
+ * Applies the goal fields found in `src` to a profile: `personalGoal` (what they are working towards), `goalEventName` and
+ * `goalEventDate` (yyyy-MM-dd, a real date), and `weeklyTarget` (1 to 7 sessions a week). Empty text clears a field. Returns true
+ * when anything was present.
+ */
+export function applyGoalFields(p: ProfileJson, src: Record<string, unknown>): boolean {
+  let any = false;
+  const text = (key: "personalGoal" | "goalEventName", label: string, max: number) => {
+    if (!(key in src)) return;
+    any = true;
+    const v = str(src[key], label, { optional: true, max });
+    if (v) p[key] = v;
+    else delete p[key];
+  };
+  text("personalGoal", "Goal", 200);
+  text("goalEventName", "Event", 80);
+  if ("goalEventDate" in src) {
+    any = true;
+    const raw = src.goalEventDate;
+    if (raw === "" || raw === null) delete p.goalEventDate;
+    else {
+      if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw badRequest("The event date should be a real date.");
+      const d = new Date(`${raw}T00:00:00Z`);
+      if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw || d.getUTCFullYear() < 2000 || d.getUTCFullYear() > 2100) throw badRequest("The event date should be a real date.");
+      p.goalEventDate = raw;
+    }
+  }
+  if ("weeklyTarget" in src) {
+    any = true;
+    p.weeklyTarget = int(src.weeklyTarget, "Weekly target", 1, 7);
+  }
+  // An event date with no name is fine; a name with no date is just a label. Dropping both leaves nothing behind.
+  return any;
 }
 
 /** Rows the viewer may see, decrypted into the shapes the app's local store expects. */

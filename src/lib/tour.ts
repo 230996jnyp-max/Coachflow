@@ -31,7 +31,13 @@ export const COACH_STEPS: TourStep[] = [
     route: "/clients",
     targets: ["clients-list", "clients-search"],
     title: "Clients & credits",
-    text: "Add clients, copy their login details in one tap, and manage both 1-on-1 and Group Class credits. Open a client to see their attendance rate and full credit log.",
+    text: "Add clients, copy their login details in one tap, and manage both 1-on-1 and Group Class credits. Open a client to see their training score, attendance rate and full credit log.",
+  },
+  {
+    route: "/clients",
+    targets: ["clients-groups"],
+    title: "Who needs you",
+    text: "Tap a group to see who is behind their weekly target, has gone quiet, missed a session or is low on credits. Each client shows a 7-day and 30-day training score, and Nudge clients messages several people privately in one go.",
   },
   {
     route: "/trainer",
@@ -55,7 +61,7 @@ export const COACH_STEPS: TourStep[] = [
     route: "/schedule",
     targets: ["bell"],
     title: "Notifications",
-    text: "Partner-session requests, waitlist changes and class updates land here. Approve or decline a request in one tap.",
+    text: "Partner-session requests, waitlist changes, class updates, workout comments and new client requests land here. Open See all to find everything sorted into tabs, or approve a request in one tap.",
   },
 ];
 

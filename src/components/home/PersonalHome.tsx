@@ -5,6 +5,7 @@ import { ChevronRight, Dumbbell, Play, Target, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
+import { GoalCard } from "@/components/goal/GoalCard";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -68,6 +69,8 @@ export function PersonalHome() {
           </div>
         </Card>
       </section>
+
+      <GoalCard clientId={user.id} editable canSetTarget />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Stat label="Workouts this week" value={done} sub={`${week?.sets ?? 0} working sets`} tone="accent" />

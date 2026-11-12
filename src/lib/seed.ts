@@ -90,6 +90,7 @@ export function createEmptyDB(): DB {
     groups: [],
     groupRequests: [],
     notifications: [],
+    assignments: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }

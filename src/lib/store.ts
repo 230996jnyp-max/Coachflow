@@ -15,6 +15,7 @@ import { uid } from "./utils";
 import type {
   AppNotification,
   AppSettings,
+  Assignment,
   AttendanceStats,
   AvailabilitySlot,
   BodyMetricLog,
@@ -34,6 +35,7 @@ import type {
   RoutineTemplate,
   SessionFocus,
   SetType,
+  TemplateExercise,
   TrackingSchema,
   UnitSystem,
   User,
@@ -49,8 +51,9 @@ import type {
  *  - Bookings, availability, gyms, workouts, routine templates and custom exercises also live in the database (workouts
  *    and routines are encrypted). The browser edits its copy instantly and a write-behind queue (SyncQueue) saves each
  *    change; a poll brings in changes made on other devices.
- *  - Body logs, progress photos and personal settings are still stored per device (IndexedDB), in a separate dataset
- *    for each signed-in user.
+ *  - Body check-ins and progress photos also live in the database (encrypted; the client and their coach can read them), saved by
+ *    the same kind of write-behind queue. A device uploads whatever it still holds from before, once per sign-in, and then keeps only
+ *    what has not reached the server yet. Personal settings are still stored per device (IndexedDB), in a separate dataset per user.
  */
 
 const localKey = (userId: string) => `coachflow-local-v2:${userId}`;
@@ -74,6 +77,10 @@ let trainingSince: string | undefined;
 let trainingPartial = false;
 /** Set once the first server load finished, so changes made before it are not mistaken for edits. */
 let trainingLoaded = false;
+/** Check-ins and photos: changes are sent to the server once the sync for this sign-in has started; "safe" once everything this device held is on the server. */
+let bodyQueueing = false;
+let bodySafe = false;
+let bodySince: string | undefined;
 
 function emit() {
   listeners.forEach((l) => l());
@@ -89,7 +96,9 @@ function flush() {
   if (!uidNow) return;
   // Once workouts/routines/custom exercises are safely in the database, the device keeps no copy of them.
   const cloud = cloudSafe ? { workouts: [], templates: [], exercises: SEED_EXERCISES } : {};
-  set(localKey(uidNow), { ...state.db, ...cloud, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [] }).catch(() => undefined);
+  // Check-ins and photos: once the server has them, the device keeps only the ones still waiting to be sent.
+  const body = bodySafe ? { metrics: state.db.metrics.filter((m) => metricQ.busy(m.id)), photos: state.db.photos.filter((x) => photoQ.busy(x.id) && x.dataUrl.startsWith("data:")) } : {};
+  set(localKey(uidNow), { ...state.db, ...cloud, ...body, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [], assignments: [] }).catch(() => undefined);
 }
 
 function persist() {
@@ -146,6 +155,31 @@ const exerciseQ = new SyncQueue({
   onDrop: () => void refreshTraining(true),
 });
 
+const metricQ = new SyncQueue({
+  delay: 500,
+  save: async (id, o) => {
+    const m = state.db.metrics.find((x) => x.id === id);
+    if (!m) return "ok";
+    return classify(await api(`/api/progress/metrics/${id}`, { method: "PUT", body: { metric: m }, keepalive: o.keepalive }));
+  },
+  remove: async (id, o) => classify(await api(`/api/progress/metrics/${id}`, { method: "DELETE", keepalive: o.keepalive })),
+  onDrop: () => void refreshBody(true),
+});
+
+const photoQ = new SyncQueue({
+  delay: 200,
+  // A picture is far larger than the 64 KB a page-closing request may carry, so these are never sent with keepalive: a photo that
+  // did not get out stays on this device and is uploaded at the next sign-in.
+  save: async (id) => {
+    const x = state.db.photos.find((p) => p.id === id);
+    if (!x) return "ok";
+    if (!x.dataUrl.startsWith("data:")) return "ok"; // already on the server (this is its address)
+    return classify(await api(`/api/progress/photos/${id}`, { method: "PUT", body: { photo: x } }));
+  },
+  remove: async (id) => classify(await api(`/api/progress/photos/${id}`, { method: "DELETE" })),
+  onDrop: () => void refreshBody(true),
+});
+
 function diffById<T extends { id: string }>(before: T[], after: T[], q: SyncQueue, removals = true) {
   if (before === after) return;
   const old = new Map(before.map((x) => [x.id, x]));
@@ -159,6 +193,16 @@ function diffById<T extends { id: string }>(before: T[], after: T[], q: SyncQueu
 
 /** Queues a save/delete for every workout, routine or custom exercise that this mutation changed. */
 function track(prev: DB, next: DB) {
+  if (state.sessionUserId && bodyQueueing) {
+    diffById(prev.metrics, next.metrics, metricQ);
+    // A photo never changes once it exists, so only new and removed ones are sent (a server copy replacing a local one is not a change).
+    if (prev.photos !== next.photos) {
+      const had = new Set(prev.photos.map((x) => x.id));
+      const has = new Set(next.photos.map((x) => x.id));
+      for (const x of next.photos) if (!had.has(x.id)) photoQ.save(x.id);
+      for (const id of had) if (!has.has(id)) photoQ.remove(id);
+    }
+  }
   if (!state.sessionUserId || !trainingLoaded) return;
   diffById(prev.workouts, next.workouts, workoutQ);
   diffById(prev.templates, next.templates, templateQ);
@@ -169,6 +213,8 @@ function track(prev: DB, next: DB) {
 /** Sends every pending change now (used when the tab is hidden or closed). */
 function flushTraining(keepalive: boolean) {
   void exerciseQ.flush(keepalive).then(() => templateQ.flush(keepalive)).then(() => workoutQ.flush(keepalive));
+  void metricQ.flush(keepalive);
+  void photoQ.flush(keepalive);
 }
 
 /* ---------------- Unsent changes survive a closed tab or a dead connection ---------------- */
@@ -341,6 +387,103 @@ export async function refreshTraining(full = false): Promise<boolean> {
   return true;
 }
 
+/* ---------------- Body check-ins and progress photos ---------------- */
+interface BodyData {
+  metrics: BodyMetricLog[];
+  photos: ProgressPhoto[];
+  metricIds: string[];
+  photoIds: string[];
+  now: string;
+}
+
+/** Folds the server's check-ins and photos into local state, leaving anything with unsent changes alone. */
+function applyBody(data: BodyData) {
+  const cur = state.db;
+  let mChanged = false;
+  const mMap = new Map(cur.metrics.map((m) => [m.id, m]));
+  for (const m of data.metrics) {
+    if (metricQ.busy(m.id)) continue;
+    if (!sameJson(mMap.get(m.id), m)) {
+      mMap.set(m.id, m);
+      mChanged = true;
+    }
+  }
+  const mIds = new Set(data.metricIds);
+  for (const id of [...mMap.keys()]) {
+    if (!mIds.has(id) && !metricQ.busy(id)) {
+      mMap.delete(id);
+      mChanged = true;
+    }
+  }
+
+  let pChanged = false;
+  const pMap = new Map(cur.photos.map((x) => [x.id, x]));
+  for (const x of data.photos) {
+    if (photoQ.busy(x.id)) continue;
+    if (!sameJson(pMap.get(x.id), x)) {
+      pMap.set(x.id, x);
+      pChanged = true;
+    }
+  }
+  const pIds = new Set(data.photoIds);
+  for (const id of [...pMap.keys()]) {
+    if (!pIds.has(id) && !photoQ.busy(id)) {
+      pMap.delete(id);
+      pChanged = true;
+    }
+  }
+  if (!mChanged && !pChanged) return;
+  setState({ ...state, db: { ...cur, metrics: mChanged ? [...mMap.values()] : cur.metrics, photos: pChanged ? [...pMap.values()] : cur.photos } });
+}
+
+/**
+ * Brings this device and the server together: whatever this device holds that the server does not (older data, or something that never
+ * got out) is uploaded without changing anything the server already has, then the server's view is read. Until everything is uploaded the
+ * device keeps showing its own copy, and the next poll tries again.
+ */
+async function syncBody(): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser) return;
+  bodyQueueing = true;
+  const first = await api<BodyData>("/api/progress");
+  if (state.sessionUserId !== forUser) return;
+  if (first.status === 401) return;
+  if (!first.ok || !first.data) return;
+  const haveM = new Set(first.data.metricIds);
+  const haveP = new Set(first.data.photoIds);
+  let complete = true;
+  for (const m of state.db.metrics) {
+    if (haveM.has(m.id) || metricQ.busy(m.id)) continue;
+    const r = classify(await api(`/api/progress/metrics/${m.id}?mode=insert-only`, { method: "PUT", body: { metric: m } }));
+    if (r === "retry") complete = false;
+    if (state.sessionUserId !== forUser) return;
+  }
+  for (const x of state.db.photos) {
+    if (haveP.has(x.id) || photoQ.busy(x.id) || !x.dataUrl.startsWith("data:")) continue;
+    const r = classify(await api(`/api/progress/photos/${x.id}?mode=insert-only`, { method: "PUT", body: { photo: x } }));
+    if (r === "retry") complete = false;
+    if (state.sessionUserId !== forUser) return;
+  }
+  if (!complete) return; // keep this device's copy; try again on the next poll
+  const second = await api<BodyData>("/api/progress");
+  if (state.sessionUserId !== forUser || !second.ok || !second.data) return;
+  bodySafe = true;
+  applyBody(second.data);
+  bodySince = new Date(Date.parse(second.data.now) - 10_000).toISOString();
+  persist();
+}
+
+/** Re-reads check-ins and photos from the server (and finishes the first sync if it has not finished yet). */
+export async function refreshBody(full = false): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser || !bodyQueueing) return;
+  if (!bodySafe) return syncBody();
+  const r = await api<BodyData>(`/api/progress${!full && bodySince ? `?since=${encodeURIComponent(bodySince)}` : ""}`);
+  if (state.sessionUserId !== forUser || !r.ok || !r.data) return;
+  applyBody(r.data);
+  bodySince = new Date(Date.parse(r.data.now) - 10_000).toISOString();
+}
+
 /* ---------------- Server API helper ---------------- */
 interface ApiResult<T> {
   ok: boolean;
@@ -412,10 +555,15 @@ async function establishSession(): Promise<boolean> {
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();
+  metricQ.clear();
+  photoQ.clear();
   trainingSince = undefined;
   trainingLoaded = false;
   trainingPartial = false;
   cloudSafe = false;
+  bodyQueueing = false;
+  bodySafe = false;
+  bodySince = undefined;
 
   // A device that has not uploaded its old local data yet does so first, then reads what the server has.
   let migrated = true;
@@ -444,6 +592,7 @@ async function establishSession(): Promise<boolean> {
     groups: [],
     groupRequests: [],
     notifications: [],
+    assignments: [],
     // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
     workouts: server ? server.workouts : local.workouts,
     templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
@@ -461,6 +610,8 @@ async function establishSession(): Promise<boolean> {
     trainingPartial = true;
     void refreshTraining(true); // the rest of the workout history, quietly
   }
+  void syncBody(); // check-ins and photos, in the background
+  void refreshAssignments(); // workouts the coach assigned
   if (!(sched.ok && sched.data)) await refreshSchedule();
   if (!(grp.ok && grp.data)) await refreshGroups();
   return true;
@@ -533,6 +684,8 @@ export async function initStore() {
       void refreshSchedule();
       void refreshTraining();
       void refreshGroups();
+      void refreshBody();
+      void refreshAssignments();
     }
     if (pendingEnds.length) void sendPendingEnds();
   }, 45_000);
@@ -552,6 +705,8 @@ export async function initStore() {
         void refreshSchedule();
         void refreshTraining();
         void refreshGroups();
+        void refreshBody();
+        void refreshAssignments();
       } else {
         flushTraining(true);
       }
@@ -621,7 +776,7 @@ export async function loginResult(username: string, password: string): Promise<{
 export async function logout() {
   if (persistTimer) clearTimeout(persistTimer);
   // Make sure nothing typed in the last moment is lost before the session ends.
-  await Promise.all([exerciseQ.flush(), templateQ.flush()]);
+  await Promise.all([exerciseQ.flush(), templateQ.flush(), metricQ.flush(), photoQ.flush()]);
   await workoutQ.flush();
   flush();
   await writeOutbox(); // anything still unsent waits on this device for the next sign-in
@@ -630,9 +785,14 @@ export async function logout() {
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();
+  metricQ.clear();
+  photoQ.clear();
   trainingLoaded = false;
   cloudSafe = false;
   trainingSince = undefined;
+  bodyQueueing = false;
+  bodySafe = false;
+  bodySince = undefined;
   await api("/api/auth/logout", { method: "POST", body: {} });
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
 }
@@ -737,6 +897,27 @@ export async function updateClient(id: string, patch: { user?: Partial<User>; pr
   return null;
 }
 
+export interface GoalInfo {
+  personalGoal?: string;
+  goalEventName?: string;
+  goalEventDate?: string;
+  weeklyTarget?: number;
+}
+
+/**
+ * Saves a client's goal, the event they are counting down to and (when allowed) their weekly target. A client edits their own;
+ * their coach edits it from the client page. Empty text or date clears a field.
+ */
+export async function saveGoalInfo(clientId: string, info: GoalInfo): Promise<string | null> {
+  if (state.sessionUserId === clientId) {
+    const r = await api("/api/me", { method: "PATCH", body: { goalInfo: info } });
+    if (!r.ok) return r.error ?? "Could not save your goal.";
+    await refreshAccounts();
+    return null;
+  }
+  return updateClient(clientId, { profile: info });
+}
+
 /** Saves where a client trains at home (their own profile, or the coach editing a client). Private to the client and their coach. */
 export async function saveHomeAddress(clientId: string, home: { place?: PlaceInfo | null; text?: string } | null): Promise<string | null> {
   const body = { homeAddress: home === null ? null : home.place ? { place: home.place } : { text: home.text ?? "" } };
@@ -773,6 +954,7 @@ export async function deleteClient(id: string): Promise<string | null> {
     metrics: db.metrics.filter((m) => m.clientId !== id),
     photos: db.photos.filter((p) => p.clientId !== id),
     bookings: db.bookings.filter((b) => b.clientId !== id),
+    assignments: db.assignments.filter((a) => a.clientId !== id),
     templates: db.templates.filter((t) => t.ownerId !== id),
   }));
   return null;
@@ -873,11 +1055,16 @@ export interface StartWorkoutInput {
   templateId?: string;
   backfill?: boolean;
   gymId?: string | null;
+  /** Start from this list of exercises instead of a routine (used for a workout the coach assigned). */
+  plan?: TemplateExercise[];
+  /** The assigned workout this one belongs to: finishing it ticks the assignment off. */
+  assignmentId?: string;
 }
 
 export function startWorkout(input: StartWorkoutInput): string {
   const { db } = state;
   const tpl = input.templateId ? db.templates.find((t) => t.id === input.templateId) : undefined;
+  const planned: TemplateExercise[] | undefined = input.plan ?? tpl?.exercises;
   const profile = db.clients.find((c) => c.id === input.clientId);
   const now = new Date();
   const w: Workout = {
@@ -893,8 +1080,9 @@ export function startWorkout(input: StartWorkoutInput): string {
     loggedBy: input.loggedBy,
     loggedById: input.loggedById,
     templateId: tpl?.id,
+    ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
     exercises:
-      tpl?.exercises.map((te) => {
+      planned?.map((te) => {
         const ex = db.exercises.find((e) => e.id === te.exerciseId);
         const timed = ex?.type === "DURATION_DISTANCE" || ex?.type === "DURATION_ONLY";
         const we = newWorkoutExercise(te.exerciseId, ex?.type === "DURATION_DISTANCE" ? 1 : te.sets);
@@ -1056,6 +1244,74 @@ export function templateFromWorkout(workoutId: string, name: string, ownerId: st
     }),
   };
   saveTemplate(t);
+}
+
+/* ---------------- Assigned workouts ---------------- */
+function setAssignments(list: Assignment[]) {
+  if (sameJson(state.db.assignments, list)) return;
+  setState({ ...state, db: { ...state.db, assignments: list } });
+}
+
+/** Re-reads the workouts assigned to this client (or, for a coach, to their clients) from the server. */
+export async function refreshAssignments(): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser) return;
+  const r = await api<{ assignments: Assignment[] }>("/api/assignments");
+  if (state.sessionUserId !== forUser || !r.ok || !r.data) return;
+  setAssignments(r.data.assignments);
+}
+
+async function assignmentCall<T extends object = Record<string, never>>(path: string, init: { method?: string; body?: unknown }): Promise<{ error: string | null; data: (T & { assignments: Assignment[] }) | null }> {
+  const r = await api<T & { assignments: Assignment[] }>(path, init);
+  if (!r.ok || !r.data) return { error: r.error ?? "Something went wrong. Try again.", data: null };
+  setAssignments(r.data.assignments);
+  return { error: null, data: r.data };
+}
+
+export interface AssignInput {
+  clientId: string;
+  templateId: string;
+  date: string;
+  note?: string;
+  repeatWeeks?: number;
+}
+
+/** A coach assigns one of their routines to a client on a day (and on the same weekday for some more weeks). */
+export async function assignWorkout(input: AssignInput): Promise<{ error: string | null; created: number; skipped: string[] }> {
+  const r = await assignmentCall<{ created: number; skipped: string[] }>("/api/assignments", { method: "POST", body: input });
+  return { error: r.error, created: r.data?.created ?? 0, skipped: r.data?.skipped ?? [] };
+}
+
+export async function moveAssignment(id: string, date: string): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { date } })).error;
+}
+
+export async function setAssignmentNote(id: string, note: string): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { note } })).error;
+}
+
+/** Ticks an assigned workout off by hand (or takes the tick back), for example when it was done on the gym floor. */
+export async function setAssignmentDone(id: string, done: boolean): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { doneManually: done } })).error;
+}
+
+export async function copyAssignment(id: string, dates: string[]): Promise<{ error: string | null; created: number; skipped: string[] }> {
+  const r = await assignmentCall<{ created: number; skipped: string[] }>(`/api/assignments/${id}`, { method: "POST", body: { dates } });
+  return { error: r.error, created: r.data?.created ?? 0, skipped: r.data?.skipped ?? [] };
+}
+
+export async function removeAssignment(id: string, scope: "one" | "future" = "one"): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}${scope === "future" ? "?scope=future" : ""}`, { method: "DELETE" })).error;
+}
+
+/** A client starts an assigned workout (or picks up the one they already started). Returns the workout to open. */
+export function startAssigned(assignmentId: string): string | null {
+  const a = state.db.assignments.find((x) => x.id === assignmentId);
+  const me = state.sessionUserId;
+  if (!a || !me || a.clientId !== me) return null;
+  const started = state.db.workouts.find((w) => w.assignmentId === a.id && w.status === "ACTIVE");
+  if (started) return started.id;
+  return startWorkout({ clientId: me, loggedBy: "CLIENT", loggedById: me, title: a.title, plan: a.exercises, assignmentId: a.id, ...(a.templateId && state.db.templates.some((t) => t.id === a.templateId) ? { templateId: a.templateId } : {}) });
 }
 
 /* ---------------- Body metrics & photos ---------------- */

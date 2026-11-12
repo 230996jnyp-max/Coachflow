@@ -1,15 +1,21 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
 import { Splash } from "@/components/Providers";
 import { SignupWizard } from "@/components/signup/SignupWizard";
 import { useViewer } from "@/lib/hooks";
+import type { SignupRole } from "@/lib/signupRules";
 
-/** Public: make a Coach, Client or Personal account. */
-export default function SignupPage() {
+/** The welcome page can pre-pick a role: ?role=coach, ?role=personal or ?role=client. */
+function roleFrom(v: string | null): SignupRole | null {
+  return v === "coach" ? "COACH" : v === "personal" ? "PERSONAL" : v === "client" ? "CLIENT" : null;
+}
+
+function Inner() {
   const { ready, user, isTrainer } = useViewer();
   const router = useRouter();
+  const role = roleFrom(useSearchParams().get("role"));
 
   // Someone who is already signed in has no need for this page.
   useEffect(() => {
@@ -17,5 +23,14 @@ export default function SignupPage() {
   }, [ready, user, isTrainer, router]);
 
   if (!ready || user) return <Splash />;
-  return <SignupWizard />;
+  return <SignupWizard initialRole={role} />;
+}
+
+/** Public: make a Coach, Client or Personal account. */
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<Splash />}>
+      <Inner />
+    </Suspense>
+  );
 }

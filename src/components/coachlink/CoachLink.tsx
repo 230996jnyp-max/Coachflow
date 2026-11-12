@@ -17,6 +17,28 @@ interface LinkRequest {
   requestedAt: string;
 }
 
+/** How many people are waiting for this coach to accept them (0 for anyone who is not a coach). Checked every minute. */
+export function useLinkRequestCount(): number {
+  const { isTrainer } = useViewer();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!isTrainer) return;
+    let alive = true;
+    const load = async () => {
+      const r = await api<{ requests: LinkRequest[] }>("/api/coach-link");
+      if (alive && r.ok && r.data) setN(r.data.requests.length);
+    };
+    const first = setTimeout(() => void load(), 0);
+    const t = setInterval(() => void load(), 60_000);
+    return () => {
+      alive = false;
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, [isTrainer]);
+  return isTrainer ? n : 0;
+}
+
 async function copy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);

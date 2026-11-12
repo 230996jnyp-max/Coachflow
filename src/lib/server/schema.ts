@@ -85,6 +85,115 @@ export const rateEvents = pgTable(
 );
 
 /**
+ * A workout a coach assigned to a client for one day. The plan (title, note, a copy of the routine's exercises) is encrypted; the day is
+ * kept in the clear to sort by and to find a client's week. `series_id` ties together the copies made by "repeat weekly".
+ */
+export const assignments = pgTable(
+  "assignments",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    date: text("date").notNull(),
+    seriesId: text("series_id"),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("assignments_client_idx").on(t.clientId, t.date), index("assignments_coach_idx").on(t.coachId, t.date)],
+);
+
+/** A coach's saved reply (a short title and the message, encrypted), inserted into a chat with one tap. Private to that coach. */
+export const savedReplies = pgTable(
+  "saved_replies",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("saved_replies_owner_idx").on(t.ownerId, t.createdAt)],
+);
+
+/** A body check-in (weight, body fat, measurements). The numbers are encrypted; `date` (yyyy-MM-dd) is kept in the clear to sort by. */
+export const bodyLogs = pgTable(
+  "body_logs",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    date: text("date").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("body_logs_client_idx").on(t.clientId, t.date), index("body_logs_updated_idx").on(t.updatedAt)],
+);
+
+/**
+ * A progress photo. The details (pose, weight, notes) and the picture itself are separate encrypted columns, so lists never read
+ * the picture: it is only decrypted when the image address is opened by the client or their coach.
+ */
+export const progressPhotos = pgTable(
+  "progress_photos",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    date: text("date").notNull(),
+    metaEnc: text("meta_enc").notNull(),
+    imageEnc: text("image_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("progress_photos_client_idx").on(t.clientId, t.date), index("progress_photos_created_idx").on(t.createdAt)],
+);
+
+/** A coach's private note about a client (the text is encrypted). Clients never receive these. */
+export const clientNotes = pgTable(
+  "client_notes",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("client_notes_client_idx").on(t.clientId, t.createdAt)],
+);
+
+/** A comment under a workout, between the client and their coach (the text is encrypted). `clientId` is the workout's owner. */
+export const workoutComments = pgTable(
+  "workout_comments",
+  {
+    id: text("id").primaryKey(),
+    workoutId: text("workout_id").notNull(),
+    clientId: text("client_id").notNull(),
+    authorId: text("author_id").notNull(),
+    bodyEnc: text("body_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("workout_comments_workout_idx").on(t.workoutId, t.createdAt), index("workout_comments_client_idx").on(t.clientId)],
+);
+
+/** A quick 👍 / 🔥 on a workout. One row per person per emoji. */
+export const workoutReactions = pgTable(
+  "workout_reactions",
+  {
+    workoutId: text("workout_id").notNull(),
+    userId: text("user_id").notNull(),
+    emoji: text("emoji").notNull(),
+    clientId: text("client_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.workoutId, t.userId, t.emoji] }), index("workout_reactions_client_idx").on(t.clientId)],
+);
+
+/** People who asked to hear when the AI personal trainer is ready. Only an address and which side of the app they came from. */
+export const aiWaitlist = pgTable("ai_waitlist", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  interest: text("interest").notNull().default("train"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * messages — body and email-delivery metadata are encrypted. `thread` is `c:<clientId>` (coach ↔ client) or
  * `o:<coachId>` (owner ↔ coach).
  */
@@ -527,6 +636,77 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
+  `CREATE TABLE IF NOT EXISTS assignments (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    date text NOT NULL,
+    series_id text,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS assignments_client_idx ON assignments (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS assignments_coach_idx ON assignments (coach_id, date)`,
+  `CREATE TABLE IF NOT EXISTS saved_replies (
+    id text PRIMARY KEY,
+    owner_id text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS saved_replies_owner_idx ON saved_replies (owner_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS body_logs (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    date text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS body_logs_client_idx ON body_logs (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS body_logs_updated_idx ON body_logs (updated_at)`,
+  `CREATE TABLE IF NOT EXISTS progress_photos (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    date text NOT NULL,
+    meta_enc text NOT NULL,
+    image_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS progress_photos_client_idx ON progress_photos (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS progress_photos_created_idx ON progress_photos (created_at)`,
+  `CREATE TABLE IF NOT EXISTS client_notes (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    body_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS client_notes_client_idx ON client_notes (client_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS workout_comments (
+    id text PRIMARY KEY,
+    workout_id text NOT NULL,
+    client_id text NOT NULL,
+    author_id text NOT NULL,
+    body_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS workout_comments_workout_idx ON workout_comments (workout_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS workout_comments_client_idx ON workout_comments (client_id)`,
+  `CREATE TABLE IF NOT EXISTS workout_reactions (
+    workout_id text NOT NULL,
+    user_id text NOT NULL,
+    emoji text NOT NULL,
+    client_id text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (workout_id, user_id, emoji)
+  )`,
+  `CREATE INDEX IF NOT EXISTS workout_reactions_client_idx ON workout_reactions (client_id)`,
+  `CREATE TABLE IF NOT EXISTS ai_waitlist (
+    id text PRIMARY KEY,
+    email text NOT NULL UNIQUE,
+    interest text NOT NULL DEFAULT 'train',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS messages (
     id text PRIMARY KEY,
     thread text NOT NULL,

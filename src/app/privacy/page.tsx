@@ -12,6 +12,7 @@ export default function PrivacyPage() {
           <li>Account details: name, username, email, phone / WhatsApp number, date of birth, unit preference and your password (stored only as a one-way hash).</li>
           <li>Training information you enter: workouts, routines, body measurements, progress photos, goals, injury or medical notes, food diary entries and chat messages.</li>
           <li>Booking details if you use a coach: sessions, places, attendance and credits.</li>
+          <li>If you join the waitlist for the AI personal trainer: your email address, which side of the app you came from, and when you joined. We use it only to tell you when the feature is ready.</li>
           <li>Technical data needed to run the service: a sign-in cookie, and network addresses used only for abuse limits (stored in scrambled form).</li>
         </ul>
       </section>
@@ -22,7 +23,7 @@ export default function PrivacyPage() {
       <section>
         <h2>3. How we protect it</h2>
         <p>
-          Personal and health information (workouts, notes, medical notes, food diary, messages, phone numbers) is encrypted before it is stored. Only you, and your coach if you have
+          Personal and health information (workouts, notes, medical notes, food diary, body measurements, progress photos, messages, phone numbers) is encrypted before it is stored. Only you, and your coach if you have
           one, can read your training data. Coaches can only see their own clients.
         </p>
       </section>

@@ -69,6 +69,9 @@ export interface ClientProfile {
   weeklyTarget?: number;
   personalGoal?: string;
   startWeightKg?: number;
+  /** An event the client is working towards ("Sundown Marathon") and its date (yyyy-MM-dd): the countdown on their dashboard. Shared with the coach. */
+  goalEventName?: string;
+  goalEventDate?: string;
 }
 
 export type MuscleGroup =
@@ -241,6 +244,8 @@ export interface Workout {
   feedback?: WorkoutFeedback;
   /** Brought in with the AI / text importer (a person's own notes), rather than logged live. */
   imported?: boolean;
+  /** The workout the coach assigned for a day that this one was started from (finishing it ticks the assignment off). */
+  assignmentId?: string;
   exercises: WorkoutExercise[];
 }
 
@@ -498,8 +503,71 @@ export interface AppNotification {
   title: string;
   body: string;
   link?: string;
+  /** The client this is about (coaches can filter by it); older notifications have none. */
+  about?: string;
   createdAt: string;
   read: boolean;
+}
+
+/** One comment under a finished workout. The text is only ever seen by the client and their coach. */
+export interface WorkoutComment {
+  id: string;
+  workoutId: string;
+  authorId: string;
+  authorName: string;
+  authorRole: "CLIENT" | "COACH";
+  text: string;
+  createdAt: string;
+}
+
+export type WorkoutEmoji = "👍" | "🔥";
+export const WORKOUT_EMOJIS: WorkoutEmoji[] = ["👍", "🔥"];
+
+export interface WorkoutReaction {
+  emoji: WorkoutEmoji;
+  count: number;
+  mine: boolean;
+  /** First names of the people who reacted. */
+  names: string[];
+}
+
+/** The conversation around one workout. `canTalk` is false for someone training without a coach. */
+export interface WorkoutTalk {
+  canTalk: boolean;
+  comments: WorkoutComment[];
+  reactions: WorkoutReaction[];
+}
+
+/** A coach's saved reply: a short title and the message to put in a chat. {first_name} becomes the other person's first name. */
+export interface SavedReply {
+  id: string;
+  title: string;
+  text: string;
+}
+
+/** A private note a coach keeps about a client. Never sent to the client. */
+export interface ClientNote {
+  id: string;
+  clientId: string;
+  text: string;
+  createdAt: string;
+}
+
+/** A workout the coach assigned to a client for one day. The exercises are a copy made when it was assigned, so later changes to the routine do not rewrite it. */
+export interface Assignment {
+  id: string;
+  clientId: string;
+  /** The day it is for (yyyy-MM-dd). */
+  date: string;
+  title: string;
+  note: string;
+  templateId?: string;
+  /** Assignments made together by "repeat weekly" share this. */
+  seriesId?: string;
+  exercises: TemplateExercise[];
+  /** The coach ticked it off by hand (for example it was done on the gym floor, which is logged separately). */
+  doneManually?: boolean;
+  createdAt: string;
 }
 
 export interface DB {
@@ -519,5 +587,7 @@ export interface DB {
   groups: GroupSession[];
   groupRequests: GroupRequest[];
   notifications: AppNotification[];
+  /** Workouts assigned to a client for a day: a client's own, or (for a coach) their clients'. Kept on the server, never on the device. */
+  assignments: Assignment[];
   settings: AppSettings;
 }
