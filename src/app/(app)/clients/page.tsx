@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 
 type View = "cards" | "table";
 const VIEW_KEY = "coachflow-clients-view";
-const GROUPS: AttentionGroup[] = ["all", "attention", "behind", "quiet", "low", "nologin"];
+const GROUPS: AttentionGroup[] = ["all", "attention", "missed", "behind", "quiet", "low", "nologin"];
 
 /** The dashboard links here with ?group=attention so the list opens already filtered. */
 function initialGroup(): AttentionGroup {

@@ -244,6 +244,8 @@ export interface Workout {
   feedback?: WorkoutFeedback;
   /** Brought in with the AI / text importer (a person's own notes), rather than logged live. */
   imported?: boolean;
+  /** The workout the coach assigned for a day that this one was started from (finishing it ticks the assignment off). */
+  assignmentId?: string;
   exercises: WorkoutExercise[];
 }
 
@@ -544,6 +546,23 @@ export interface ClientNote {
   createdAt: string;
 }
 
+/** A workout the coach assigned to a client for one day. The exercises are a copy made when it was assigned, so later changes to the routine do not rewrite it. */
+export interface Assignment {
+  id: string;
+  clientId: string;
+  /** The day it is for (yyyy-MM-dd). */
+  date: string;
+  title: string;
+  note: string;
+  templateId?: string;
+  /** Assignments made together by "repeat weekly" share this. */
+  seriesId?: string;
+  exercises: TemplateExercise[];
+  /** The coach ticked it off by hand (for example it was done on the gym floor, which is logged separately). */
+  doneManually?: boolean;
+  createdAt: string;
+}
+
 export interface DB {
   version: number;
   users: User[];
@@ -561,5 +580,7 @@ export interface DB {
   groups: GroupSession[];
   groupRequests: GroupRequest[];
   notifications: AppNotification[];
+  /** Workouts assigned to a client for a day: a client's own, or (for a coach) their clients'. Kept on the server, never on the device. */
+  assignments: Assignment[];
   settings: AppSettings;
 }

@@ -25,7 +25,7 @@ export function NeedsYou() {
     [active, statuses],
   );
   const lists = useMemo(() => nudgeLists(flagged.map((f) => f.s)), [flagged]);
-  const canNudge = lists.noShow.length + lists.behind.length + lists.quiet.length > 0;
+  const canNudge = lists.noShow.length + lists.missed.length + lists.behind.length + lists.quiet.length > 0;
   const low = flagged.filter((f) => f.s.lowCredits).length;
 
   if (active.length === 0) return null;
@@ -58,6 +58,11 @@ export function NeedsYou() {
           <span>
             <b className="text-ink">{lists.noShow.length}</b> missed a session
           </span>
+          {lists.missed.length > 0 && (
+            <span>
+              <b className="text-ink">{lists.missed.length}</b> missed a workout
+            </span>
+          )}
           <span>
             <b className="text-ink">{lists.behind.length}</b> behind this week
           </span>

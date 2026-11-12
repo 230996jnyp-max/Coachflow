@@ -32,6 +32,7 @@ const BY_KIND: Record<string, NoteCategory> = {
   waitlist_skipped: "class",
 
   client_workout: "training",
+  workout_assigned: "training",
   client_import: "training",
   pain_report: "training",
   workout_comment: "training",

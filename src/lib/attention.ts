@@ -1,7 +1,8 @@
-import { differenceInCalendarDays, format, parseISO, startOfDay } from "date-fns";
+import { addDays, differenceInCalendarDays, format, parseISO, startOfDay, subDays } from "date-fns";
+import { isAssignmentDone, weekStartOf } from "./assignments";
 import { LOW_CREDITS } from "./coachEye";
 import { availableCredits } from "./scheduling";
-import type { ClientProfile, DB, GroupSession, User } from "./types";
+import type { Assignment, ClientProfile, DB, GroupSession, User } from "./types";
 
 /*
  * "Who needs me today?" — pure functions that turn what the app already knows (logged workouts, attended sessions and classes,
@@ -10,6 +11,10 @@ import type { ClientProfile, DB, GroupSession, User } from "./types";
  * Training days. Several things count as training: a finished workout, an attended 1-on-1 session and an attended class. They can
  * be the same real session (the coach logs a workout on the gym floor for a booking), so we count DAYS with any of them, not
  * events. Two sessions on one day count once.
+ *
+ * Assigned workouts. When the coach has assigned workouts, the score becomes "done out of assigned" for the days that have any (a window
+ * with none falls back to training days against the weekly target), this week's goal is the number assigned this week, and an
+ * assigned workout from the last 7 days that was not done counts as "missed" and needs attention.
  */
 
 /** Sessions a week when the coach has not set a target for the client. */
@@ -28,7 +33,7 @@ export function weeklyTargetOf(profile: Pick<ClientProfile, "weeklyTarget"> | un
   return t && t >= 1 && t <= 7 ? Math.round(t) : DEFAULT_WEEKLY_TARGET;
 }
 
-type Source = Pick<DB, "workouts" | "bookings" | "groups">;
+type Source = Pick<DB, "workouts" | "bookings" | "groups"> & Partial<Pick<DB, "assignments">>;
 
 /** Every moment this client trained (finished workout, attended session, attended class). */
 export function activityMoments(db: Source, clientId: string): Date[] {
@@ -104,6 +109,10 @@ export interface ClientStatus {
   pct30: number;
   weekDone: number;
   daysLeft: number;
+  /** The coach has assigned workouts this week: the goal is "done out of assigned", not the weekly target. */
+  assigned: boolean;
+  /** Assigned workouts from the last 7 days that were not done. */
+  missedAssigned: Assignment[];
   /** Needs every remaining day this week to reach the target. */
   behind: boolean;
   lastActivity: Date | null;
@@ -120,14 +129,29 @@ export interface ClientStatus {
   reasons: string[];
 }
 
+/** Done out of assigned over the last `days` days (today included, future days not yet due); `fallback` when nothing was assigned in the window. */
+function windowScore(mine: Assignment[], done: (a: Assignment) => boolean, now: Date, days: number, fallback: () => number): number {
+  const from = dayKey(subDays(now, days - 1));
+  const today = dayKey(now);
+  const list = mine.filter((a) => a.date >= from && a.date <= today);
+  if (!list.length) return fallback();
+  return Math.min(100, Math.round((list.filter(done).length / list.length) * 100));
+}
+
 /** Everything the Clients page and the dashboard need to know about one client. Archived clients never need attention. */
 export function clientStatus(input: { user: User; profile: ClientProfile; db: Source & Pick<DB, "bookings">; now: Date }): ClientStatus {
   const { user, profile, db, now } = input;
   const id = user.id;
-  const target = weeklyTargetOf(profile);
+  const mineA = (db.assignments ?? []).filter((a) => a.clientId === id);
+  const doneA = (a: Assignment) => isAssignmentDone(a, db.workouts);
+  const todayKey = dayKey(now);
+  const monday = weekStartOf(now);
+  const weekA = mineA.filter((a) => a.date >= dayKey(monday) && a.date <= dayKey(addDays(monday, 6)));
+  const assigned = weekA.length > 0;
+  const target = assigned ? weekA.length : weeklyTargetOf(profile);
   const moments = activityMoments(db, id);
   const last = moments.length ? new Date(Math.max(...moments.map((m) => m.getTime()))) : null;
-  const week = thisWeek(moments, now);
+  const week = assigned ? { done: weekA.filter(doneA).length, daysLeft: thisWeek(moments, now).daysLeft } : thisWeek(moments, now);
   const started = [profile.startDate, user.createdAt]
     .map((s) => (s ? parseISO(s) : null))
     .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()))
@@ -138,13 +162,16 @@ export function clientStatus(input: { user: User; profile: ClientProfile; db: So
   const archived = profile.archived;
 
   const needed = Math.max(0, target - week.done);
-  const behind = !archived && !isNew && needed > 0 && needed >= week.daysLeft;
+  // With assigned workouts "missed" says it better, so "behind the weekly target" is only for weeks without any.
+  const behind = !archived && !isNew && !assigned && needed > 0 && needed >= week.daysLeft;
+  const missedAssigned = archived ? [] : mineA.filter((a) => a.date < todayKey && a.date >= dayKey(subDays(now, 7)) && !doneA(a)).sort((a, b) => b.date.localeCompare(a.date));
   const quiet = !archived && !isNew && (daysQuiet === null || daysQuiet >= QUIET_DAYS);
   const noShows = archived ? [] : recentNoShows(db, id, now);
   const lowCredits = !archived && availableCredits(profile, db.bookings) <= LOW_CREDITS;
   const notLoggedIn = !archived && user.mustChangePassword && ageDays >= NO_LOGIN_FLAG_DAYS;
 
   const reasons: string[] = [];
+  if (missedAssigned.length) reasons.push(missedAssigned.length === 1 ? "Missed an assigned workout" : `Missed ${missedAssigned.length} assigned workouts`);
   if (behind) reasons.push(`Behind: ${week.done} of ${target} this week`);
   if (quiet) reasons.push(daysQuiet === null ? "Nothing logged yet" : `Quiet for ${daysQuiet} days`);
   if (noShows.length) reasons.push(noShows.length === 1 ? `No-show ${format(noShows[0].at, "EEE")}` : `${noShows.length} no-shows this week`);
@@ -154,10 +181,12 @@ export function clientStatus(input: { user: User; profile: ClientProfile; db: So
   return {
     clientId: id,
     target,
-    pct7: trainingPct(daysInWindow(moments, now, 7).size, target, 7),
-    pct30: trainingPct(daysInWindow(moments, now, 30).size, target, 30),
+    pct7: windowScore(mineA, doneA, now, 7, () => trainingPct(daysInWindow(moments, now, 7).size, weeklyTargetOf(profile), 7)),
+    pct30: windowScore(mineA, doneA, now, 30, () => trainingPct(daysInWindow(moments, now, 30).size, weeklyTargetOf(profile), 30)),
     weekDone: week.done,
     daysLeft: week.daysLeft,
+    assigned,
+    missedAssigned,
     behind,
     lastActivity: last,
     daysQuiet,
@@ -166,17 +195,18 @@ export function clientStatus(input: { user: User; profile: ClientProfile; db: So
     lowCredits,
     notLoggedIn,
     isNew,
-    attention: behind || quiet || noShows.length > 0 || lowCredits || notLoggedIn,
+    attention: behind || quiet || noShows.length > 0 || missedAssigned.length > 0 || lowCredits || notLoggedIn,
     reasons,
   };
 }
 
-export type AttentionGroup = "all" | "attention" | "behind" | "quiet" | "low" | "nologin";
+export type AttentionGroup = "all" | "attention" | "behind" | "missed" | "quiet" | "low" | "nologin";
 
 export const GROUP_LABEL: Record<AttentionGroup, string> = {
   all: "All",
   attention: "Needs attention",
   behind: "Behind target",
+  missed: "Missed workout",
   quiet: "Quiet 7+ days",
   low: "Low credits",
   nologin: "Not logged in",
@@ -188,6 +218,8 @@ export function inGroup(s: ClientStatus, g: AttentionGroup): boolean {
       return s.attention;
     case "behind":
       return s.behind;
+    case "missed":
+      return s.missedAssigned.length > 0;
     case "quiet":
       return s.quiet;
     case "low":
@@ -207,6 +239,7 @@ export function pctTone(pct: number): "success" | "warn" | "danger" {
 /** The Monday-to-Sunday "behind" / "quiet" / "no-show" lists the nudge panel shows. */
 export interface NudgeLists {
   noShow: ClientStatus[];
+  missed: ClientStatus[];
   behind: ClientStatus[];
   quiet: ClientStatus[];
 }
@@ -214,6 +247,7 @@ export interface NudgeLists {
 export function nudgeLists(statuses: ClientStatus[]): NudgeLists {
   return {
     noShow: statuses.filter((s) => s.noShows.length > 0),
+    missed: statuses.filter((s) => s.missedAssigned.length > 0),
     behind: statuses.filter((s) => s.behind),
     quiet: statuses.filter((s) => s.quiet),
   };
@@ -221,5 +255,5 @@ export function nudgeLists(statuses: ClientStatus[]): NudgeLists {
 
 /** Distinct client ids across the lists, in one pass. */
 export function nudgeIds(lists: NudgeLists): string[] {
-  return [...new Set([...lists.noShow, ...lists.behind, ...lists.quiet].map((s) => s.clientId))];
+  return [...new Set([...lists.noShow, ...lists.missed, ...lists.behind, ...lists.quiet].map((s) => s.clientId))];
 }

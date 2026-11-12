@@ -1,6 +1,6 @@
 "use client";
 
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Send } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Avatar, Button, Modal, Notice, Textarea } from "@/components/ui";
@@ -10,6 +10,7 @@ import { api } from "@/lib/store";
 import { useStatuses } from "./status";
 
 const PRESETS = {
+  missed: "Hi {first_name}, I noticed the workout I set for you wasn't done. No stress. Want me to move it to a day that suits you better?",
   noShow: "Hi {first_name}, I noticed we missed a session recently. Is everything okay? Let me know if you'd like to rebook or change your plan.",
   behind: "Hi {first_name}, quick check-in: you're a little behind on this week's sessions. Can we fit one in? Happy to help find a time that works.",
   quiet: "Hi {first_name}, it's been a little while since your last session. How are you feeling? Let me know if you'd like to get back on track. I'm here to help.",
@@ -42,6 +43,7 @@ function NudgeBody({ onClose }: { onClose: () => void }) {
 
   const sections: { key: SectionKey; title: string; hint: string; rows: ClientStatus[] }[] = [
     { key: "noShow", title: "Missed a session (last 7 days)", hint: "Marked as a no-show", rows: lists.noShow },
+    { key: "missed", title: "Missed an assigned workout", hint: "A workout you assigned in the last 7 days wasn't done", rows: lists.missed },
     { key: "behind", title: "Behind this week", hint: "Needs every remaining day to reach the target", rows: lists.behind },
     { key: "quiet", title: "Quiet for 7+ days", hint: "Nothing logged or attended", rows: lists.quiet },
   ];
@@ -136,7 +138,7 @@ function NudgeBody({ onClose }: { onClose: () => void }) {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold">{nameOf(r.clientId)}</span>
                           <span className="block truncate text-xs text-muted">
-                            {s.key === "noShow" && r.noShows[0] ? `${r.noShows[0].what} on ${format(r.noShows[0].at, "EEE d MMM")}` : s.key === "behind" ? `${r.weekDone} of ${r.target} this week` : r.daysQuiet === null ? "Nothing logged yet" : `${r.daysQuiet} days since last session`}
+                            {s.key === "noShow" && r.noShows[0] ? `${r.noShows[0].what} on ${format(r.noShows[0].at, "EEE d MMM")}` : s.key === "missed" && r.missedAssigned[0] ? `${r.missedAssigned[0].title}, ${format(parseISO(r.missedAssigned[0].date), "EEE d MMM")}` : s.key === "behind" ? `${r.weekDone} of ${r.target} this week` : r.daysQuiet === null ? "Nothing logged yet" : `${r.daysQuiet} days since last session`}
                           </span>
                         </span>
                       </label>
@@ -160,7 +162,7 @@ function NudgeBody({ onClose }: { onClose: () => void }) {
                     setTouched(true);
                   }}
                 >
-                  {k === "noShow" ? "Missed a session" : k === "behind" ? "Behind this week" : "Gone quiet"}
+                  {k === "noShow" ? "Missed a session" : k === "missed" ? "Missed a workout" : k === "behind" ? "Behind this week" : "Gone quiet"}
                 </Button>
               ))}
             </div>

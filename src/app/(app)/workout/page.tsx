@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Avatar, Field, PageHeader, Select } from "@/components/ui";
+import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
 import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
 
@@ -15,6 +16,9 @@ export default function WorkoutPage() {
     return (
       <div>
         <PageHeader title="Workout" subtitle="Log a session, load a routine or review your history" />
+        <div className="mb-8 empty:hidden">
+          <AssignedWorkouts />
+        </div>
         <WorkoutHub clientId={user.id} />
       </div>
     );

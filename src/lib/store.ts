@@ -15,6 +15,7 @@ import { uid } from "./utils";
 import type {
   AppNotification,
   AppSettings,
+  Assignment,
   AttendanceStats,
   AvailabilitySlot,
   BodyMetricLog,
@@ -34,6 +35,7 @@ import type {
   RoutineTemplate,
   SessionFocus,
   SetType,
+  TemplateExercise,
   TrackingSchema,
   UnitSystem,
   User,
@@ -96,7 +98,7 @@ function flush() {
   const cloud = cloudSafe ? { workouts: [], templates: [], exercises: SEED_EXERCISES } : {};
   // Check-ins and photos: once the server has them, the device keeps only the ones still waiting to be sent.
   const body = bodySafe ? { metrics: state.db.metrics.filter((m) => metricQ.busy(m.id)), photos: state.db.photos.filter((x) => photoQ.busy(x.id) && x.dataUrl.startsWith("data:")) } : {};
-  set(localKey(uidNow), { ...state.db, ...cloud, ...body, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [] }).catch(() => undefined);
+  set(localKey(uidNow), { ...state.db, ...cloud, ...body, users: [], clients: [], gyms: [], slots: [], bookings: [], groups: [], groupRequests: [], notifications: [], assignments: [] }).catch(() => undefined);
 }
 
 function persist() {
@@ -590,6 +592,7 @@ async function establishSession(): Promise<boolean> {
     groups: [],
     groupRequests: [],
     notifications: [],
+    assignments: [],
     // If the server could not be reached, keep showing what this device has; it is re-synced on the next poll.
     workouts: server ? server.workouts : local.workouts,
     templates: server ? server.templates : local.templates.filter((t) => t.ownerId === me.id),
@@ -608,6 +611,7 @@ async function establishSession(): Promise<boolean> {
     void refreshTraining(true); // the rest of the workout history, quietly
   }
   void syncBody(); // check-ins and photos, in the background
+  void refreshAssignments(); // workouts the coach assigned
   if (!(sched.ok && sched.data)) await refreshSchedule();
   if (!(grp.ok && grp.data)) await refreshGroups();
   return true;
@@ -681,6 +685,7 @@ export async function initStore() {
       void refreshTraining();
       void refreshGroups();
       void refreshBody();
+      void refreshAssignments();
     }
     if (pendingEnds.length) void sendPendingEnds();
   }, 45_000);
@@ -701,6 +706,7 @@ export async function initStore() {
         void refreshTraining();
         void refreshGroups();
         void refreshBody();
+        void refreshAssignments();
       } else {
         flushTraining(true);
       }
@@ -948,6 +954,7 @@ export async function deleteClient(id: string): Promise<string | null> {
     metrics: db.metrics.filter((m) => m.clientId !== id),
     photos: db.photos.filter((p) => p.clientId !== id),
     bookings: db.bookings.filter((b) => b.clientId !== id),
+    assignments: db.assignments.filter((a) => a.clientId !== id),
     templates: db.templates.filter((t) => t.ownerId !== id),
   }));
   return null;
@@ -1048,11 +1055,16 @@ export interface StartWorkoutInput {
   templateId?: string;
   backfill?: boolean;
   gymId?: string | null;
+  /** Start from this list of exercises instead of a routine (used for a workout the coach assigned). */
+  plan?: TemplateExercise[];
+  /** The assigned workout this one belongs to: finishing it ticks the assignment off. */
+  assignmentId?: string;
 }
 
 export function startWorkout(input: StartWorkoutInput): string {
   const { db } = state;
   const tpl = input.templateId ? db.templates.find((t) => t.id === input.templateId) : undefined;
+  const planned: TemplateExercise[] | undefined = input.plan ?? tpl?.exercises;
   const profile = db.clients.find((c) => c.id === input.clientId);
   const now = new Date();
   const w: Workout = {
@@ -1068,8 +1080,9 @@ export function startWorkout(input: StartWorkoutInput): string {
     loggedBy: input.loggedBy,
     loggedById: input.loggedById,
     templateId: tpl?.id,
+    ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
     exercises:
-      tpl?.exercises.map((te) => {
+      planned?.map((te) => {
         const ex = db.exercises.find((e) => e.id === te.exerciseId);
         const timed = ex?.type === "DURATION_DISTANCE" || ex?.type === "DURATION_ONLY";
         const we = newWorkoutExercise(te.exerciseId, ex?.type === "DURATION_DISTANCE" ? 1 : te.sets);
@@ -1231,6 +1244,74 @@ export function templateFromWorkout(workoutId: string, name: string, ownerId: st
     }),
   };
   saveTemplate(t);
+}
+
+/* ---------------- Assigned workouts ---------------- */
+function setAssignments(list: Assignment[]) {
+  if (sameJson(state.db.assignments, list)) return;
+  setState({ ...state, db: { ...state.db, assignments: list } });
+}
+
+/** Re-reads the workouts assigned to this client (or, for a coach, to their clients) from the server. */
+export async function refreshAssignments(): Promise<void> {
+  const forUser = state.sessionUserId;
+  if (!forUser) return;
+  const r = await api<{ assignments: Assignment[] }>("/api/assignments");
+  if (state.sessionUserId !== forUser || !r.ok || !r.data) return;
+  setAssignments(r.data.assignments);
+}
+
+async function assignmentCall<T extends object = Record<string, never>>(path: string, init: { method?: string; body?: unknown }): Promise<{ error: string | null; data: (T & { assignments: Assignment[] }) | null }> {
+  const r = await api<T & { assignments: Assignment[] }>(path, init);
+  if (!r.ok || !r.data) return { error: r.error ?? "Something went wrong. Try again.", data: null };
+  setAssignments(r.data.assignments);
+  return { error: null, data: r.data };
+}
+
+export interface AssignInput {
+  clientId: string;
+  templateId: string;
+  date: string;
+  note?: string;
+  repeatWeeks?: number;
+}
+
+/** A coach assigns one of their routines to a client on a day (and on the same weekday for some more weeks). */
+export async function assignWorkout(input: AssignInput): Promise<{ error: string | null; created: number; skipped: string[] }> {
+  const r = await assignmentCall<{ created: number; skipped: string[] }>("/api/assignments", { method: "POST", body: input });
+  return { error: r.error, created: r.data?.created ?? 0, skipped: r.data?.skipped ?? [] };
+}
+
+export async function moveAssignment(id: string, date: string): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { date } })).error;
+}
+
+export async function setAssignmentNote(id: string, note: string): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { note } })).error;
+}
+
+/** Ticks an assigned workout off by hand (or takes the tick back), for example when it was done on the gym floor. */
+export async function setAssignmentDone(id: string, done: boolean): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}`, { method: "PATCH", body: { doneManually: done } })).error;
+}
+
+export async function copyAssignment(id: string, dates: string[]): Promise<{ error: string | null; created: number; skipped: string[] }> {
+  const r = await assignmentCall<{ created: number; skipped: string[] }>(`/api/assignments/${id}`, { method: "POST", body: { dates } });
+  return { error: r.error, created: r.data?.created ?? 0, skipped: r.data?.skipped ?? [] };
+}
+
+export async function removeAssignment(id: string, scope: "one" | "future" = "one"): Promise<string | null> {
+  return (await assignmentCall(`/api/assignments/${id}${scope === "future" ? "?scope=future" : ""}`, { method: "DELETE" })).error;
+}
+
+/** A client starts an assigned workout (or picks up the one they already started). Returns the workout to open. */
+export function startAssigned(assignmentId: string): string | null {
+  const a = state.db.assignments.find((x) => x.id === assignmentId);
+  const me = state.sessionUserId;
+  if (!a || !me || a.clientId !== me) return null;
+  const started = state.db.workouts.find((w) => w.assignmentId === a.id && w.status === "ACTIVE");
+  if (started) return started.id;
+  return startWorkout({ clientId: me, loggedBy: "CLIENT", loggedById: me, title: a.title, plan: a.exercises, assignmentId: a.id, ...(a.templateId && state.db.templates.some((t) => t.id === a.templateId) ? { templateId: a.templateId } : {}) });
 }
 
 /* ---------------- Body metrics & photos ---------------- */

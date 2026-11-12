@@ -19,7 +19,7 @@ import { cn, fmtLength, fmtVolume, fmtWeight, round } from "@/lib/utils";
 import { CoachNotes } from "./CoachNotes";
 import { PctBar, PctPill, ReasonBadges, useStatuses } from "./status";
 
-type JumpTab = "workouts" | "progress";
+type JumpTab = "workouts" | "progress" | "plan";
 
 /**
  * A coach's view of one client at a glance: training score against the weekly target, the last workout, this month's highlights,
@@ -129,9 +129,15 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
         <Card className="space-y-3 p-4" data-tour="client-training">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Training</h3>
-            <span className="text-xs text-muted">
-              Target: {st.target} {st.target === 1 ? "session" : "sessions"} a week
-            </span>
+            {st.assigned ? (
+              <Button size="sm" variant="ghost" onClick={() => onTab("plan")}>
+                Assigned this week · open the plan →
+              </Button>
+            ) : (
+              <span className="text-xs text-muted">
+                Target: {st.target} {st.target === 1 ? "session" : "sessions"} a week
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-3">
             <ScoreBox label="Last 7 days" pct={st.pct7} />

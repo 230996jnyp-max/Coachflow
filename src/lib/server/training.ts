@@ -10,7 +10,7 @@ import type { CoachEdit, CoachEditKey, Equipment, Exercise, MeasureType, MuscleG
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, forbidden } from "./http";
-import { coachSettings, customExercises, exerciseTracking, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
+import { assignments, coachSettings, customExercises, exerciseTracking, templates, users, workouts, type CustomExerciseRow, type TemplateRow, type UserRow, type WorkoutRow } from "./schema";
 
 /*
  * Training data (workouts, routine templates, custom exercises). Each record is stored as one AES-256-GCM blob bound to
@@ -179,6 +179,7 @@ export function parseWorkout(raw: unknown): Workout {
   const feedback = parseFeedback(r.feedback);
   if (feedback) w.feedback = feedback;
   if (r.imported === true) w.imported = true;
+  if (typeof r.assignmentId === "string" && r.assignmentId) w.assignmentId = id(r.assignmentId, "Assignment");
   if (r.liveStartedAt) w.liveStartedAt = iso(r.liveStartedAt, "Start time");
   if (typeof r.templateId === "string" && r.templateId) w.templateId = id(r.templateId, "Template");
   if (typeof r.groupId === "string" && r.groupId) w.groupId = id(r.groupId, "Group");
@@ -274,7 +275,7 @@ export function openWorkout(row: WorkoutRow): Workout | null {
     return null;
   }
 }
-function openTemplate(row: TemplateRow): RoutineTemplate | null {
+export function openTemplate(row: TemplateRow): RoutineTemplate | null {
   try {
     const t = decryptJson<RoutineTemplate>(row.dataEnc, aadT(row.id));
     return { ...t, id: row.id, ownerId: row.ownerId, shared: row.shared };
@@ -396,11 +397,19 @@ export async function putWorkout(me: UserRow, raw: unknown, mode: "upsert" | "in
       if (saved?.coachNote) w = { ...w, coachNote: saved.coachNote };
       else delete w.coachNote;
       if (saved?.bookingId) w = { ...w, bookingId: saved.bookingId };
+      // The link to an assigned workout is set once, when it is started; a later save cannot point it somewhere else.
+      if (saved?.assignmentId) w = { ...w, assignmentId: saved.assignmentId };
+      else delete w.assignmentId;
     }
     // A group workout is edited by the client and by the coach at once: keep the coach's edits the client has not seen yet.
     const current = existing.status === "ACTIVE" ? saved : null;
     if (current?.groupId) w = { ...mergeGroupWorkout(current, w, me.role === "CLIENT"), groupId: current.groupId };
   } else if (me.role === "CLIENT") delete w.coachNote;
+  // A workout can only point at an assignment made for the same client.
+  if (w.assignmentId) {
+    const [a] = await d.select({ clientId: assignments.clientId }).from(assignments).where(eq(assignments.id, w.assignmentId)).limit(1);
+    if (!a || a.clientId !== w.clientId) delete w.assignmentId;
+  }
   const values = { id: w.id, clientId: w.clientId, startedAt: new Date(w.startedAt), status: w.status, dataEnc: encryptJson(w, aadW(w.id)), updatedAt: new Date() };
   await d.insert(workouts).values(values).onConflictDoUpdate({ target: workouts.id, set: { startedAt: values.startedAt, status: values.status, dataEnc: values.dataEnc, updatedAt: values.updatedAt } });
   return w;

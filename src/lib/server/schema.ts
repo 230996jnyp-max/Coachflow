@@ -84,6 +84,25 @@ export const rateEvents = pgTable(
   (t) => [index("rate_events_key_idx").on(t.key, t.at)],
 );
 
+/**
+ * A workout a coach assigned to a client for one day. The plan (title, note, a copy of the routine's exercises) is encrypted; the day is
+ * kept in the clear to sort by and to find a client's week. `series_id` ties together the copies made by "repeat weekly".
+ */
+export const assignments = pgTable(
+  "assignments",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    date: text("date").notNull(),
+    seriesId: text("series_id"),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("assignments_client_idx").on(t.clientId, t.date), index("assignments_coach_idx").on(t.coachId, t.date)],
+);
+
 /** A body check-in (weight, body fat, measurements). The numbers are encrypted; `date` (yyyy-MM-dd) is kept in the clear to sort by. */
 export const bodyLogs = pgTable(
   "body_logs",
@@ -605,6 +624,18 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
+  `CREATE TABLE IF NOT EXISTS assignments (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    date text NOT NULL,
+    series_id text,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS assignments_client_idx ON assignments (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS assignments_coach_idx ON assignments (coach_id, date)`,
   `CREATE TABLE IF NOT EXISTS body_logs (
     id text PRIMARY KEY,
     client_id text NOT NULL,
