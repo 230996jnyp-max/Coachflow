@@ -1,5 +1,6 @@
-import { and, desc, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { listPeople, recentActions } from "@/lib/server/accountAdmin";
 import { requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { route } from "@/lib/server/http";
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 type Kind = "coach" | "personal" | "client";
 
 /**
- * GET — owner-only sign-up overview. Counts and dates only: no names, emails or profile data are selected or decrypted.
+ * GET — owner-only sign-up overview: counts per day and type, plus each account's contact details (name, email, phone, type, dates) so
+ * the owner can recognise people. Workouts, notes, food logs, body data and photos are never read here.
  * A "Personal" account is a client with no coach; a "client" has a coach.
  */
 export const GET = route(async () => {
@@ -38,13 +40,6 @@ export const GET = route(async () => {
     .where(and(gte(users.createdAt, since), ne(users.role, "OWNER")))
     .groupBy(sql`1`);
 
-  const recent = await d
-    .select({ kind: kindSql, verified: users.emailVerified, active: users.active, createdAt: users.createdAt })
-    .from(users)
-    .where(ne(users.role, "OWNER"))
-    .orderBy(desc(users.createdAt))
-    .limit(25);
-
   const [waiting] = await d
     .select({ n: sql<number>`count(*)::int` })
     .from(users)
@@ -67,6 +62,7 @@ export const GET = route(async () => {
     unverified: waiting.n,
     waitlist: wl.n,
     days,
-    recent: recent.map((r) => ({ kind: r.kind, verified: r.verified, active: r.active, createdAt: r.createdAt.toISOString() })),
+    people: await listPeople(500),
+    actions: await recentActions(15),
   });
 });

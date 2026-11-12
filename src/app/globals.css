@@ -105,6 +105,28 @@
   color-scheme: dark;
 }
 
+/*
+ * Personal accent colour (Settings → Appearance), set as <html data-accent="...">. Declared after the themes so it wins; the light
+ * theme gets deeper shades so text on the accent stays readable.
+ */
+[data-accent="blue"] { --c-accent: #3b82f6; --c-accent-dim: #1d3a6e; --c-on-accent: #ffffff; }
+[data-accent="green"] { --c-accent: #10b981; --c-accent-dim: #0b3d2e; --c-on-accent: #04261b; }
+[data-accent="orange"] { --c-accent: #f97316; --c-accent-dim: #4a2410; --c-on-accent: #1c0a00; }
+[data-accent="purple"] { --c-accent: #8b5cf6; --c-accent-dim: #2e1f5e; --c-on-accent: #ffffff; }
+[data-accent="pink"] { --c-accent: #ec4899; --c-accent-dim: #541331; --c-on-accent: #ffffff; }
+[data-accent="red"] { --c-accent: #ef4444; --c-accent-dim: #4c1717; --c-on-accent: #ffffff; }
+[data-theme="white"][data-accent="blue"] { --c-accent: #2563eb; --c-accent-dim: #dbeafe; }
+[data-theme="white"][data-accent="green"] { --c-accent: #047857; --c-accent-dim: #d1fae5; --c-on-accent: #ffffff; }
+[data-theme="white"][data-accent="orange"] { --c-accent: #c2410c; --c-accent-dim: #ffedd5; --c-on-accent: #ffffff; }
+[data-theme="white"][data-accent="purple"] { --c-accent: #6d28d9; --c-accent-dim: #ede9fe; }
+[data-theme="white"][data-accent="pink"] { --c-accent: #be185d; --c-accent-dim: #fce7f3; }
+[data-theme="white"][data-accent="red"] { --c-accent: #dc2626; --c-accent-dim: #fee2e2; }
+
+/* Text size (everything is in rem, so this scales the whole app) and a slightly tighter layout. */
+html[data-text="large"] { font-size: 112.5%; }
+html[data-text="xl"] { font-size: 125%; }
+html[data-density="compact"] { --spacing: 0.225rem; }
+
 html,
 body {
   background: var(--c-bg);
@@ -149,6 +171,20 @@ input[type="number"] {
 }
 .no-scrollbar {
   scrollbar-width: none;
+}
+
+@keyframes cf-confetti {
+  from {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate3d(var(--drift, 0px), 105vh, 0) rotate(var(--spin, 360deg));
+    opacity: 0.9;
+  }
+}
+.cf-confetti {
+  animation: cf-confetti 2s ease-in forwards;
 }
 
 @keyframes sheet-up {

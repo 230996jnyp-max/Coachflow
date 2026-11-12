@@ -34,10 +34,44 @@ export const users = pgTable(
     emailVerified: boolean("email_verified").notNull().default(true),
     /** End of the 30-day free trial of a self sign-up (coach or personal). Null = no trial (coach-made clients, older accounts). */
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /** Personal look and feel as JSON (accent, background, text size, bio ...). See lib/prefs.ts. Nothing sensitive. */
+    prefs: text("prefs"),
+    /** When they last signed in (shown to the owner on the Sign-ups tab). */
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    /** Set when the owner disables the account: it can't sign in, and the data is kept. */
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("users_coach_idx").on(t.coachId), index("users_role_idx").on(t.role)],
+);
+
+/** Pictures a person uploaded (profile photo, background, coach banner and logo), already shrunk by the browser. One row per kind. */
+export const userMedia = pgTable(
+  "user_media",
+  {
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(), // avatar | bg | banner | logo
+    mime: text("mime").notNull(),
+    dataB64: text("data_b64").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.kind] })],
+);
+
+/** What the owner did to an account (disable, enable, delete ...). Kept after the account itself is gone; holds no private data. */
+export const adminActions = pgTable(
+  "admin_actions",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id").notNull(),
+    targetId: text("target_id").notNull(),
+    targetLabel: text("target_label").notNull(),
+    action: text("action").notNull(),
+    reason: text("reason"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("admin_actions_at_idx").on(t.at)],
 );
 
 /**
@@ -609,6 +643,27 @@ export const DDL = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz`,
   `CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email))`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs text`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at timestamptz`,
+  `CREATE TABLE IF NOT EXISTS user_media (
+    user_id text NOT NULL,
+    kind text NOT NULL,
+    mime text NOT NULL,
+    data_b64 text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, kind)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_actions (
+    id text PRIMARY KEY,
+    actor_id text NOT NULL,
+    target_id text NOT NULL,
+    target_label text NOT NULL,
+    action text NOT NULL,
+    reason text,
+    at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS admin_actions_at_idx ON admin_actions (at)`,
   `CREATE TABLE IF NOT EXISTS auth_tokens (
     id text PRIMARY KEY,
     user_id text NOT NULL,

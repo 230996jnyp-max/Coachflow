@@ -13,6 +13,7 @@ import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { FeelingBadge } from "@/components/workout/FeelingCard";
+import { HomeSlot } from "@/components/HomeSlot";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { availableCredits } from "@/lib/scheduling";
@@ -47,8 +48,8 @@ export default function TrainerDashboard() {
   const nameOf = (id: string) => db.users.find((u) => u.id === id)?.name ?? "Client";
 
   return (
-    <div className="space-y-8">
-      <PageHeader title={`${now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening"}, ${user.name.split(" ")[1] ?? user.name}`} subtitle={format(now, "EEEE d MMMM yyyy")} />
+    <div className="flex flex-col gap-8">
+      <PageHeader title={`${now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening"}, ${user.prefs?.nick || user.name.split(" ")[1] || user.name}`} subtitle={format(now, "EEEE d MMMM yyyy")} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Active clients" value={active.length} tone="accent" />
@@ -57,15 +58,23 @@ export default function TrainerDashboard() {
         <Stat label="Pending requests" value={pending.length} tone={pending.length ? "pr" : undefined} />
       </div>
 
-      <NeedsYou />
+      <HomeSlot side="coach" id="needs">
+        <NeedsYou />
+      </HomeSlot>
 
-      <LinkRequests />
+      <HomeSlot side="coach" id="requests">
+        <div className="space-y-8 empty:hidden">
+          <LinkRequests />
+          <CoachCodeCard />
+        </div>
+      </HomeSlot>
 
-      <CoachCodeCard />
-
-      <ClientActivityBanner />
-
-      <PendingAttendance />
+      <HomeSlot side="coach" id="activity">
+        <div className="space-y-8 empty:hidden">
+          <ClientActivityBanner />
+          <PendingAttendance />
+        </div>
+      </HomeSlot>
 
       {!(db.settings.specialties ?? []).length && !skipSpecialties && (
         <SpecialtiesCard
@@ -82,6 +91,7 @@ export default function TrainerDashboard() {
       )}
 
       {pending.length > 0 && (
+        <HomeSlot side="coach" id="bookings">
         <section>
           <SectionTitle>Booking requests</SectionTitle>
           <div className="space-y-2">
@@ -104,8 +114,10 @@ export default function TrainerDashboard() {
             ))}
           </div>
         </section>
+        </HomeSlot>
       )}
 
+      <HomeSlot side="coach" id="today">
       <section>
         <SectionTitle action={<Link href="/schedule" className="text-xs font-semibold text-accent">Open schedule →</Link>}>Today’s sessions</SectionTitle>
         {today.length === 0 ? (
@@ -148,8 +160,10 @@ export default function TrainerDashboard() {
           </div>
         )}
       </section>
+      </HomeSlot>
 
       {low.length > 0 && (
+        <HomeSlot side="coach" id="low">
         <section>
           <SectionTitle>Low on credits</SectionTitle>
           <div className="space-y-2">
@@ -166,8 +180,10 @@ export default function TrainerDashboard() {
             ))}
           </div>
         </section>
+        </HomeSlot>
       )}
 
+      <HomeSlot side="coach" id="recent">
       <section>
         <SectionTitle>Recent client workouts</SectionTitle>
         <div className="space-y-2">
@@ -190,6 +206,7 @@ export default function TrainerDashboard() {
           ))}
         </div>
       </section>
+      </HomeSlot>
 
       <BookingDetail bookingId={detail} onClose={() => setDetail(null)} />
     </div>

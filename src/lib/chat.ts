@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { inQuietHours, type Prefs } from "./prefs";
 import type { ChatMessage } from "./types";
 
 /*
@@ -111,10 +112,17 @@ export function showBrowserNotification(title: string, body: string, tag: string
   } else fallback();
 }
 
+let quiet: Prefs["quiet"] = null;
+/** The person's quiet hours (set by the app shell). Messages still arrive and count as unread; only the pop-ups stay silent. */
+export function setQuietHours(q: Prefs["quiet"] | undefined) {
+  quiet = q ?? null;
+}
+
 function onIncoming(added: ChatMessage[]) {
   if (!meId || initial) return;
   for (const m of added) {
     if (m.fromId === meId) continue;
+    if (inQuietHours(quiet, new Date())) continue;
     const viewing = activeThread === m.thread && typeof document !== "undefined" && document.visibilityState === "visible";
     if (viewing) {
       markRead(m.thread);

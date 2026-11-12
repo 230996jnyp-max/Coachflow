@@ -47,7 +47,7 @@ export function PersonalHome() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title={`${hi}, ${user.name.split(" ")[0]}`} subtitle={profile?.personalGoal ? `Goal: ${profile.personalGoal}` : undefined} />
+      <PageHeader title={`${hi}, ${user.prefs?.nick || user.name.split(" ")[0]}`} subtitle={profile?.personalGoal ? `Goal: ${profile.personalGoal}` : undefined} />
       <PasswordBanner />
 
       <section data-tour="home-goal">

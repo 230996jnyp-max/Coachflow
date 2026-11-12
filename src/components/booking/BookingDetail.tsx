@@ -3,7 +3,7 @@
 import { format, isSameDay, parseISO } from "date-fns";
 import { Check, Clock, MapPin, MessageSquare, Pencil, Share2, Target, X } from "lucide-react";
 import { useState } from "react";
-import { Avatar, Button, Field, Modal, Notice, Select } from "@/components/ui";
+import { Button, Field, Modal, Notice, PersonAvatar, Select } from "@/components/ui";
 import { LocationPill, MiniMap } from "@/components/LocationPill";
 import { directionsUrl, isHomeLocation } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
@@ -49,7 +49,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            {client && <Avatar name={client.name} size={40} />}
+            {client && <PersonAvatar user={client} size={40} />}
             <div>
               <div className="font-bold">{isTrainer ? client?.name : "Training session"}</div>
               <div className="text-xs text-muted">Booked by {b.createdBy === "TRAINER" ? "trainer" : "client"}</div>

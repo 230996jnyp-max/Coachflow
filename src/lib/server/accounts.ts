@@ -4,6 +4,7 @@ import type { ClientGoal, ClientProfile, PlaceInfo, UnitSystem, User } from "@/l
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { ageOn, isMinorAge, trialDaysLeft, trialOver } from "@/lib/signupRules";
+import { parsePrefs, publicPrefs } from "@/lib/prefs";
 import { trialEnforced } from "./trial";
 import { ensureCoachCode } from "./coachCode";
 import { badRequest, conflict, int, isUniqueViolation, str } from "./http";
@@ -84,9 +85,10 @@ export const isPersonalRow = (row: UserRow): boolean => row.role === "CLIENT" &&
 export const isClientRow = (r: UserRow) => r.role === "CLIENT";
 
 /** Public/user-facing shape. Clients' names come from the encrypted profile; staff names are plaintext. */
-export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
+export function toUser(row: UserRow, opts: { withEmail?: boolean; self?: boolean } = {}): User {
   const staff = row.role !== "CLIENT";
   const profile = staff ? null : openProfile(row);
+  const prefs = opts.self ? parsePrefs(row.prefs) : publicPrefs(parsePrefs(row.prefs));
   return {
     id: row.id,
     role: staff ? "TRAINER" : "CLIENT",
@@ -102,6 +104,7 @@ export function toUser(row: UserRow, opts: { withEmail?: boolean } = {}): User {
     ...(opts.withEmail && staff && row.email ? { email: row.email } : {}),
     ...(row.role === "CLIENT" && !row.coachId ? { personal: true } : {}),
     ...(isMinorRow(row) ? { isMinor: true } : {}),
+    ...(Object.keys(prefs).length ? { prefs } : {}),
     ...(opts.withEmail && row.coachCode ? { coachCode: row.coachCode } : {}),
     ...(opts.withEmail && row.trialEndsAt
       ? { trial: { endsAt: row.trialEndsAt.toISOString(), daysLeft: trialDaysLeft(row.trialEndsAt) ?? 0, expired: trialOver(row.trialEndsAt), enforced: trialEnforced() } }
@@ -176,7 +179,7 @@ export async function bootstrapFor(me: UserRow): Promise<{ me: User; users: User
   const d = await db();
   // Coaches who existed before coach codes get theirs the first time they load the app.
   if ((me.role === "COACH" || me.role === "OWNER") && !me.coachCode) me = { ...me, coachCode: await ensureCoachCode(me) };
-  const out: User[] = [toUser(me, { withEmail: true })];
+  const out: User[] = [toUser(me, { withEmail: true, self: true })];
   const profiles: ClientProfile[] = [];
 
   if (me.role === "CLIENT") {

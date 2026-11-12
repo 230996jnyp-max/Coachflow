@@ -10,7 +10,7 @@ import { AddClientModal, CredentialsModal, type Credentials } from "@/components
 import { NudgeModal } from "@/components/clients/NudgeModal";
 import { lastSeen, PctBar, PctPill, ReasonBadges, useStatuses } from "@/components/clients/status";
 import { CoachCodeCard, LinkRequests, useLinkRequestCount } from "@/components/coachlink/CoachLink";
-import { Avatar, Badge, Button, Card, EmptyState, Input, PageHeader, Segmented } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Input, PageHeader, PersonAvatar, Segmented } from "@/components/ui";
 import { GROUP_LABEL, inGroup, type AttentionGroup } from "@/lib/attention";
 import { clientThread, requestThread } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
@@ -199,7 +199,7 @@ export default function ClientsPage() {
                 <Card key={user.id} className={cn("flex h-full flex-col gap-3 p-4 transition-colors hover:border-accent/50", s?.attention && "border-pr/40")}>
                   <Link href={`/clients/${user.id}`} className="flex flex-col gap-3" aria-label={`Open ${user.name}`}>
                     <div className="flex items-center gap-3">
-                      <Avatar name={user.name} size={46} />
+                      <PersonAvatar user={user} size={46} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-bold">{user.name}</div>
                         <div className="truncate text-xs text-muted">@{user.username}</div>
@@ -279,7 +279,7 @@ export default function ClientsPage() {
                       <tr key={user.id} className={cn("border-b border-line/60 last:border-0 hover:bg-field/50", s?.attention && "bg-pr/5")}>
                         <td className="px-4 py-3">
                           <Link href={`/clients/${user.id}`} className="flex items-center gap-3" aria-label={`Open ${user.name}`}>
-                            <Avatar name={user.name} size={36} />
+                            <PersonAvatar user={user} size={36} />
                             <span className="min-w-0">
                               <span className="block truncate font-semibold">{user.name}</span>
                               <span className="block truncate text-xs text-muted">{profile.archived ? "Archived" : profile.goal}</span>

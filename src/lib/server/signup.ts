@@ -408,3 +408,6 @@ export async function finishPasswordReset(rawToken: string, password: unknown): 
     })
     .where(and(eq(users.id, userId), eq(users.active, true)));
 }
+
+/** Sends the "confirm your email" link (used when the owner re-sends it from the Sign-ups tab). */
+export const sendVerificationFor = sendVerification;

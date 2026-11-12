@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NumberInput } from "@/components/NumberInput";
@@ -24,10 +24,12 @@ const BLURB: Record<string, string> = {
   "Endurance & Conditioning": "Running, track, HYROX",
 };
 
-const ROLES: { role: SignupRole; title: string; text: string; icon: React.ReactNode }[] = [
-  { role: "COACH", title: "I am a Coach / Trainer", text: "Manage clients, schedules, group classes and programming.", icon: <Dumbbell size={22} /> },
-  { role: "CLIENT", title: "I am training with a Coach", text: "Connect with my coach, book sessions and log workouts.", icon: <Users size={22} /> },
-  { role: "PERSONAL", title: "Training on my own", text: "Track my workouts, routines and progress without a coach.", icon: <UserRound size={22} /> },
+/** The first thing you choose. Titles are two words at most; Gym is on its way. */
+const CARDS: { role: SignupRole | "GYM"; title: string; text: string; icon: React.ReactNode; soon?: boolean }[] = [
+  { role: "COACH", title: "Trainer", text: "Run clients & classes", icon: <Dumbbell size={24} /> },
+  { role: "CLIENT", title: "Client", text: "Train with coach", icon: <Users size={24} /> },
+  { role: "PERSONAL", title: "Solo", text: "Track on my own", icon: <UserRound size={24} /> },
+  { role: "GYM", title: "Gym", text: "Run my academy", icon: <Building2 size={24} />, soon: true },
 ];
 
 function Chips({ options, value, onToggle, label }: { options: { key: string; label: string; hint?: string }[]; value: string[]; onToggle: (k: string) => void; label?: (k: string) => string }) {
@@ -56,9 +58,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** The three-step sign-up: your details, how you'll use CoachFlow, then a few questions for that role. */
+/** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
 export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole | null }) {
-  const [step, setStep] = useState(1);
+  // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
+  const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
   const [role, setRole] = useState<SignupRole | null>(initialRole);
   // Step 1
@@ -194,7 +197,7 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
 
   const next = () => {
     setError(null);
-    const e = step === 1 ? step1Error() : step === 2 ? (role ? null : "Choose how you'll use CoachFlow.") : step3Error();
+    const e = step === 1 ? (role ? null : "Choose how you'll use CoachFlow.") : step === 2 ? step1Error() : step3Error();
     if (e) return setError(e);
     setStep((s) => s + 1);
   };
@@ -286,9 +289,19 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
               ))}
             </div>
 
-            {step === 1 && (
+            {step === 2 && (
               <div className="space-y-4">
-                <h2 className="text-lg font-bold">Your details</h2>
+                <div>
+                  <h2 className="text-lg font-bold">Your details</h2>
+                  {role && (
+                    <p className="text-xs text-muted">
+                      Signing up as {CARDS.find((c) => c.role === role)?.title}.{" "}
+                      <button type="button" className="font-semibold text-accent hover:underline" onClick={() => { setError(null); setStep(1); }}>
+                        Change
+                      </button>
+                    </p>
+                  )}
+                </div>
                 <Field label="Full name">
                   <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" maxLength={100} />
                 </Field>
@@ -333,25 +346,43 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
               </div>
             )}
 
-            {step === 2 && (
-              <div className="space-y-3">
-                <h2 className="text-lg font-bold">How will you use CoachFlow?</h2>
-                {ROLES.map((r) => (
-                  <button
-                    key={r.role}
-                    type="button"
-                    aria-pressed={role === r.role}
-                    onClick={() => { setRole(r.role); setNiches([]); setGoal(""); setLevel(""); }}
-                    className={cn("flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition-colors", role === r.role ? "border-accent bg-accent/10" : "border-line bg-field hover:border-accent/40")}
-                  >
-                    <span className={cn("mt-0.5 shrink-0", role === r.role ? "text-accent" : "text-muted")}>{r.icon}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">{r.title}</span>
-                      <span className="block text-xs text-muted">{r.text}</span>
-                    </span>
-                    {role === r.role && <Check size={18} className="mt-0.5 shrink-0 text-accent" />}
-                  </button>
-                ))}
+            {step === 1 && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold">I am a…</h2>
+                <div className="grid grid-cols-2 gap-3" role="group" aria-label="How will you use CoachFlow?">
+                  {CARDS.map((c) => {
+                    const on = role === c.role;
+                    return (
+                      <button
+                        key={c.role}
+                        type="button"
+                        disabled={c.soon}
+                        aria-pressed={on}
+                        onClick={() => {
+                          if (c.soon || c.role === "GYM") return;
+                          setRole(c.role);
+                          setNiches([]);
+                          setGoal("");
+                          setLevel("");
+                          setError(null);
+                          setStep(2);
+                        }}
+                        className={cn(
+                          "relative flex min-h-44 flex-col items-start justify-between rounded-2xl border p-4 text-left transition-colors",
+                          c.soon ? "cursor-not-allowed border-line bg-field opacity-60" : on ? "border-accent bg-accent/10" : "border-line bg-field hover:border-accent/50",
+                        )}
+                      >
+                        <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", on ? "bg-accent text-on-accent" : "bg-surface text-accent")}>{c.icon}</span>
+                        <span>
+                          <span className="block text-lg font-bold leading-tight">{c.title}</span>
+                          <span className="block min-h-8 text-xs text-muted">{c.text}</span>
+                          {c.soon ? <span className="mt-1 inline-block h-5 rounded-full border border-line bg-surface px-2 text-[10px] font-bold uppercase leading-[18px] tracking-wide text-muted">Coming soon</span> : <span className="mt-1 block h-5" aria-hidden />}
+                        </span>
+                        {on && <Check size={18} className="absolute right-3 top-3 text-accent" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -458,7 +489,7 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
                 </Button>
               )}
               <div className="flex-1" />
-              {step < 3 ? (
+              {step === 1 ? null : step < 3 ? (
                 <Button onClick={next}>
                   Continue <ArrowRight size={16} />
                 </Button>

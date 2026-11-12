@@ -1,4 +1,5 @@
 import type { WorkoutFeedback } from "./feedback";
+import type { Prefs } from "./prefs";
 
 // Domain models. All weights are stored in kg and all lengths in cm;
 // the UI converts to the viewer's preferred unit system.
@@ -30,6 +31,8 @@ export interface User {
   isMinor?: boolean;
   /** A coach's six-digit code (only sent for yourself). */
   coachCode?: string;
+  /** Look and feel. Yourself: everything. Other people: only what their coach / clients may see (bio, nickname, photo versions). */
+  prefs?: Prefs;
   /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */
   trial?: { endsAt: string; daysLeft: number; expired: boolean; enforced: boolean };
 }

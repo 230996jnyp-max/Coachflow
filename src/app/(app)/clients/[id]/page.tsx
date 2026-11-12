@@ -25,7 +25,7 @@ import { GymSelect } from "@/components/GymSelect";
 import { HomeAddressField } from "@/components/HomeAddressField";
 import { FocusPicker } from "@/components/sports/Focus";
 import { NumberInput } from "@/components/NumberInput";
-import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, SectionTitle, Select, Tabs, Textarea } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, Field, Input, PersonAvatar, SectionTitle, Select, Tabs, Textarea } from "@/components/ui";
 import { isGymComplete } from "@/lib/gyms";
 import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
@@ -62,7 +62,7 @@ export default function ClientDetailPage() {
         <ArrowLeft size={16} /> Clients
       </Link>
       <div className="mb-5 flex flex-wrap items-center gap-4">
-        <Avatar name={user.name} size={60} />
+        <PersonAvatar user={user} size={60} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-bold tracking-tight">{user.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
