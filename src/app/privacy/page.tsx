@@ -23,7 +23,7 @@ export default function PrivacyPage() {
       <section>
         <h2>3. How we protect it</h2>
         <p>
-          Personal and health information (workouts, notes, medical notes, food diary, messages, phone numbers) is encrypted before it is stored. Only you, and your coach if you have
+          Personal and health information (workouts, notes, medical notes, food diary, body measurements, progress photos, messages, phone numbers) is encrypted before it is stored. Only you, and your coach if you have
           one, can read your training data. Coaches can only see their own clients.
         </p>
       </section>

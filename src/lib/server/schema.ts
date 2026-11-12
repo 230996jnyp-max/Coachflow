@@ -84,6 +84,36 @@ export const rateEvents = pgTable(
   (t) => [index("rate_events_key_idx").on(t.key, t.at)],
 );
 
+/** A body check-in (weight, body fat, measurements). The numbers are encrypted; `date` (yyyy-MM-dd) is kept in the clear to sort by. */
+export const bodyLogs = pgTable(
+  "body_logs",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    date: text("date").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("body_logs_client_idx").on(t.clientId, t.date), index("body_logs_updated_idx").on(t.updatedAt)],
+);
+
+/**
+ * A progress photo. The details (pose, weight, notes) and the picture itself are separate encrypted columns, so lists never read
+ * the picture: it is only decrypted when the image address is opened by the client or their coach.
+ */
+export const progressPhotos = pgTable(
+  "progress_photos",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    date: text("date").notNull(),
+    metaEnc: text("meta_enc").notNull(),
+    imageEnc: text("image_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("progress_photos_client_idx").on(t.clientId, t.date), index("progress_photos_created_idx").on(t.createdAt)],
+);
+
 /** A coach's private note about a client (the text is encrypted). Clients never receive these. */
 export const clientNotes = pgTable(
   "client_notes",
@@ -575,6 +605,25 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS rate_events_key_idx ON rate_events (key, at)`,
+  `CREATE TABLE IF NOT EXISTS body_logs (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    date text NOT NULL,
+    data_enc text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS body_logs_client_idx ON body_logs (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS body_logs_updated_idx ON body_logs (updated_at)`,
+  `CREATE TABLE IF NOT EXISTS progress_photos (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    date text NOT NULL,
+    meta_enc text NOT NULL,
+    image_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS progress_photos_client_idx ON progress_photos (client_id, date)`,
+  `CREATE INDEX IF NOT EXISTS progress_photos_created_idx ON progress_photos (created_at)`,
   `CREATE TABLE IF NOT EXISTS client_notes (
     id text PRIMARY KEY,
     client_id text NOT NULL,

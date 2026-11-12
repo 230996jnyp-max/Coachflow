@@ -191,7 +191,7 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
               </Button>
             </div>
             {trends.length === 0 ? (
-              <p className="text-sm text-muted">No body metrics on this device yet. Measurements you log for this client in the Progress tab show up here.</p>
+              <p className="text-sm text-muted">No body check-ins yet. Weight, waist and body fat show up here once you or your client log them in the Progress tab.</p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-3">
                 {trends.map((t) => {
@@ -220,7 +220,7 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
               </Button>
             </div>
             {photos.length === 0 ? (
-              <p className="text-sm text-muted">No progress photos on this device yet. Photos you add for this client in the Progress tab show up here.</p>
+              <p className="text-sm text-muted">No progress photos yet. Ask your client to add a front, side and back photo, or add one for them in the Progress tab.</p>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 <PhotoTile label={latest ? "First" : "Only photo"} photo={first} unit={unit} />
