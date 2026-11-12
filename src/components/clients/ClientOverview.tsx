@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { GoalCard } from "@/components/goal/GoalCard";
+import { badgeStatuses } from "@/lib/badges";
 import { Sparkline } from "@/components/progress/Sparkline";
 import { Badge, Button, Card, Notice, SectionTitle, Stat } from "@/components/ui";
 import { FeelingBadge } from "@/components/workout/FeelingCard";
@@ -72,6 +73,9 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
     () => buildFeed({ workouts: db.workouts, metrics: db.metrics, photos: db.photos, bookings: db.bookings, groups: db.groups }, clientId, now, 8),
     [db.workouts, db.metrics, db.photos, db.bookings, db.groups, clientId, now],
   );
+
+  const badges = useMemo(() => badgeStatuses(db.workouts, exMap, clientId, now), [db.workouts, exMap, clientId, now]);
+  const badgesEarned = badges.filter((b) => b.earnedAt);
 
   const chat = () => {
     requestThread(clientThread(clientId));
@@ -229,6 +233,25 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
 
         <div className="order-first min-w-0 space-y-4 lg:order-last">
           <GoalCard clientId={clientId} editable canSetTarget />
+          <Card className="space-y-2 p-4" data-tour="client-badges">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Badges</h3>
+              <Button size="sm" variant="ghost" onClick={() => onTab("progress")}>
+                {badgesEarned.length} of {badges.length} →
+              </Button>
+            </div>
+            {badgesEarned.length === 0 ? (
+              <p className="text-sm text-muted">None yet. The first one comes with the first finished workout.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {badgesEarned.map((b) => (
+                  <span key={b.def.id} title={`${b.def.title} · ${format(parseISO(b.earnedAt!), "d MMM yyyy")}`} className="inline-flex items-center gap-1 rounded-full border border-pr/40 bg-pr/10 px-2.5 py-1 text-xs font-semibold">
+                    <span aria-hidden>{b.def.emoji}</span> {b.def.title}
+                  </span>
+                ))}
+              </div>
+            )}
+          </Card>
           <CoachNotes clientId={clientId} />
         </div>
       </div>

@@ -3,6 +3,7 @@
 import { format, parseISO } from "date-fns";
 import { Pencil, Share2, Trophy } from "lucide-react";
 import { useState } from "react";
+import { NewBadges } from "@/components/progress/NewBadges";
 import { Avatar, Badge, Button, Card, Notice } from "@/components/ui";
 import { hasFeedback, painLevel } from "@/lib/feedback";
 import { volumeComparison } from "@/lib/fun";
@@ -82,6 +83,8 @@ export function WorkoutResult({ workoutId, onEdit }: { workoutId: string; onEdit
           </div>
         )}
       </Card>
+
+      <NewBadges workoutId={w.id} clientId={w.clientId} />
 
       {hasFeedback(fb) && (
         <Card className="space-y-2 p-4" data-tour="result-feeling">

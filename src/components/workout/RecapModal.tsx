@@ -2,6 +2,7 @@
 
 import { Check, Copy, Download, FileText, Mail, Trophy } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { NewBadges } from "@/components/progress/NewBadges";
 import { Badge, Button, Modal, Notice } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { buildRecap, recapText } from "@/lib/recap";
@@ -141,6 +142,8 @@ export function RecapModal({ workoutId, open, onClose, children, title = "Workou
             )}
           </div>
         </div>
+
+        <NewBadges workoutId={w.id} clientId={w.clientId} />
 
         {/* Share */}
         <div className="grid grid-cols-2 gap-2">
