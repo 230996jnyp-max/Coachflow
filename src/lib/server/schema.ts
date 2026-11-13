@@ -816,7 +816,91 @@ export const creditLog = pgTable(
   (t) => [index("credit_log_client_idx").on(t.clientId, t.createdAt)],
 );
 
+/*
+ * Payments between a coach and their clients. The money never touches this app: a client pays into the coach's own Stripe account
+ * (Connect, Standard) or straight to the coach by PayNow / cash, and this only keeps the records and adds the credits.
+ */
+
+/** One row per coach who set up payments: their Stripe account (if any) and the PayNow number they show clients. */
+export const paymentSettings = pgTable("payment_settings", {
+  coachId: text("coach_id").primaryKey(),
+  stripeAccountId: text("stripe_account_id"),
+  chargesEnabled: boolean("charges_enabled").notNull().default(false),
+  detailsSubmitted: boolean("details_submitted").notNull().default(false),
+  payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
+  /** The coach's PayNow mobile number or UEN, shown to a client who chooses the no-fee option. */
+  paynow: text("paynow"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** What a coach sells: a number of session credits (and optional group credits) for a price. */
+export const paymentPackages = pgTable(
+  "payment_packages",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    name: text("name").notNull(),
+    sessions: integer("sessions").notNull(),
+    groupCredits: integer("group_credits").notNull().default(0),
+    priceCents: integer("price_cents").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("payment_packages_coach_idx").on(t.coachId)],
+);
+
+/**
+ * One row per payment (asked for, paid, refunded). The package, price and credits are copied at the time, so changing a package later never
+ * changes what was sold. `applied_*` is what was really added to the client, so a refund takes back exactly that (never more than is left).
+ */
+export const paymentOrders = pgTable(
+  "payment_orders",
+  {
+    id: text("id").primaryKey(),
+    /** An unguessable code for the pay link, so a parent or guardian can pay without an account. */
+    token: text("token").notNull(),
+    /** Short reference the payer types into a PayNow transfer. */
+    ref: text("ref").notNull(),
+    coachId: text("coach_id").notNull(),
+    clientId: text("client_id").notNull(),
+    packageId: text("package_id"),
+    name: text("name").notNull(),
+    sessions: integer("sessions").notNull().default(0),
+    groupCredits: integer("group_credits").notNull().default(0),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("sgd"),
+    /** STRIPE (card, Apple Pay, Google Pay, PayNow through Stripe), PAYNOW (direct to the coach, they confirm) or MANUAL (cash, bank transfer: the coach records it). */
+    method: text("method").notNull().default("STRIPE"),
+    manualKind: text("manual_kind"),
+    /** PENDING, AWAITING (the payer says they paid by PayNow; the coach confirms), PAID, REFUNDED, CANCELLED. */
+    status: text("status").notNull().default("PENDING"),
+    stripeSessionId: text("stripe_session_id"),
+    paymentIntentId: text("payment_intent_id"),
+    receiptUrl: text("receipt_url"),
+    appliedSessions: integer("applied_sessions").notNull().default(0),
+    appliedGroup: integer("applied_group").notNull().default(0),
+    noteEnc: text("note_enc"),
+    createdBy: text("created_by").notNull().default("COACH"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("payment_orders_token_idx").on(t.token), index("payment_orders_coach_idx").on(t.coachId, t.createdAt), index("payment_orders_client_idx").on(t.clientId, t.createdAt)],
+);
+
+/** Stripe event ids already handled, so a webhook that is sent twice only adds credits once. */
+export const paymentEvents = pgTable("payment_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type UserRow = typeof users.$inferSelect;
+export type PaymentOrderRow = typeof paymentOrders.$inferSelect;
+export type PaymentPackageRow = typeof paymentPackages.$inferSelect;
+export type PaymentSettingsRow = typeof paymentSettings.$inferSelect;
 export type AttendanceRow = typeof attendance.$inferSelect;
 export type GroupRow = typeof groupSessions.$inferSelect;
 export type GroupMemberRow = typeof groupMembers.$inferSelect;
@@ -1352,6 +1436,62 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS assessment_photos_view_idx ON assessment_photos (assessment_id, view)`,
+  `CREATE TABLE IF NOT EXISTS payment_settings (
+    coach_id text PRIMARY KEY,
+    stripe_account_id text,
+    charges_enabled boolean NOT NULL DEFAULT false,
+    details_submitted boolean NOT NULL DEFAULT false,
+    payouts_enabled boolean NOT NULL DEFAULT false,
+    paynow text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS payment_packages (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    name text NOT NULL,
+    sessions integer NOT NULL,
+    group_credits integer NOT NULL DEFAULT 0,
+    price_cents integer NOT NULL,
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS payment_packages_coach_idx ON payment_packages (coach_id)`,
+  `CREATE TABLE IF NOT EXISTS payment_orders (
+    id text PRIMARY KEY,
+    token text NOT NULL,
+    ref text NOT NULL,
+    coach_id text NOT NULL,
+    client_id text NOT NULL,
+    package_id text,
+    name text NOT NULL,
+    sessions integer NOT NULL DEFAULT 0,
+    group_credits integer NOT NULL DEFAULT 0,
+    amount_cents integer NOT NULL,
+    currency text NOT NULL DEFAULT 'sgd',
+    method text NOT NULL DEFAULT 'STRIPE',
+    manual_kind text,
+    status text NOT NULL DEFAULT 'PENDING',
+    stripe_session_id text,
+    payment_intent_id text,
+    receipt_url text,
+    applied_sessions integer NOT NULL DEFAULT 0,
+    applied_group integer NOT NULL DEFAULT 0,
+    note_enc text,
+    created_by text NOT NULL DEFAULT 'COACH',
+    expires_at timestamptz,
+    paid_at timestamptz,
+    refunded_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_token_idx ON payment_orders (token)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_coach_idx ON payment_orders (coach_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_client_idx ON payment_orders (client_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS payment_events (
+    id text PRIMARY KEY,
+    type text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS original_coach_id text`,
   `ALTER TABLE group_sessions ADD COLUMN IF NOT EXISTS original_coach_id text`,
 ];

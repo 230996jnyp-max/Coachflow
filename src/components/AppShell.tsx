@@ -70,7 +70,7 @@ const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
 const GYM_NAV: NavItem = { href: "/gym-admin", label: "Gym", icon: <Building2 size={22} /> };
-const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition", "/intake"];
+const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition", "/intake", "/pay"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, user, isTrainer, db, isPersonal, isMinor } = useViewer();
@@ -98,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
       (pathname.startsWith("/gym-admin") && !hasPortalAccess(user.gym)) ||
-      (isPersonal && ["/book", "/messages", "/classes", "/intake"].some((p) => pathname.startsWith(p))) ||
+      (isPersonal && ["/book", "/messages", "/classes", "/intake", "/pay"].some((p) => pathname.startsWith(p))) ||
       (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
