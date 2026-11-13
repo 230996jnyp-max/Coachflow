@@ -16,6 +16,7 @@ import { GoalCard } from "@/components/goal/GoalCard";
 import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
 import { MoveRequests } from "@/components/gym/MoveRequests";
 import { CoachCard } from "@/components/home/CoachCard";
+import { IntakeCard } from "@/components/intake/IntakeCard";
 import { HomeSlot } from "@/components/HomeSlot";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
@@ -72,6 +73,7 @@ function ClientHome() {
       <PasswordBanner />
       <MoveRequests />
       <CoachCard />
+      <IntakeCard />
 
       <HomeSlot side="client" id="assigned">
         <AssignedWorkouts />

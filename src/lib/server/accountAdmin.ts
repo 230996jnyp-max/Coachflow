@@ -4,7 +4,9 @@ import { and, count, eq, inArray, ne, sql } from "drizzle-orm";
 import { SUPPORT_EMAIL } from "@/lib/support";
 import { cleanSports } from "@/lib/sports";
 import { dobOf, openProfile, openStaffProfile } from "./accounts";
+import { purgeClientAssessments } from "./assessments";
 import { purgeClientAssignments } from "./assignments";
+import { purgeClientIntake } from "./intake";
 import { issueToken } from "./authTokens";
 import { purgeClientBody } from "./bodyData";
 import { db } from "./db";
@@ -20,6 +22,8 @@ import { ageOn, isMinorAge } from "@/lib/signupRules";
 import {
   adminActions,
   aiUsage,
+  assessmentPhotos,
+  assessments,
   assignments,
   attendance,
   authTokens,
@@ -35,6 +39,8 @@ import {
   groupRequests,
   groupSessions,
   gymMembers,
+  intakeForms,
+  intakeRequests,
   gymOrgs,
   gyms,
   messages,
@@ -162,6 +168,8 @@ async function purgeClient(id: string): Promise<void> {
   await purgeClientBody(id);
   await purgeClientAssignments(id);
   await purgeClientNutrition(id);
+  await purgeClientIntake(id);
+  await purgeClientAssessments(id);
   await d.delete(attendance).where(eq(attendance.clientId, id));
   await d.delete(creditLog).where(eq(creditLog.clientId, id));
   await d.delete(coachLinks).where(eq(coachLinks.clientId, id));
@@ -170,6 +178,12 @@ async function purgeClient(id: string): Promise<void> {
 /** A coach goes: their clients are kept, as people with no coach (they can ask another coach with a code). Everything the coach owned goes. */
 async function purgeCoach(id: string): Promise<void> {
   const d = await db();
+  // Forms and assessments this coach held go with them; the clients themselves are kept, as people with no coach.
+  const theirs = await d.select({ id: assessments.id }).from(assessments).where(eq(assessments.coachId, id));
+  if (theirs.length) await d.delete(assessmentPhotos).where(inArray(assessmentPhotos.assessmentId, theirs.map((a) => a.id)));
+  await d.delete(assessments).where(eq(assessments.coachId, id));
+  await d.delete(intakeForms).where(eq(intakeForms.coachId, id));
+  await d.delete(intakeRequests).where(eq(intakeRequests.coachId, id));
   await d.update(users).set({ coachId: null, updatedAt: new Date() }).where(and(eq(users.role, "CLIENT"), eq(users.coachId, id)));
   const sessions = await d.select({ id: groupSessions.id }).from(groupSessions).where(eq(groupSessions.coachId, id));
   if (sessions.length) {

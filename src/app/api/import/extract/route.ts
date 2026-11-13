@@ -24,5 +24,6 @@ export const POST = route(async (req) => {
     name = "";
   }
   const brand = new URL(req.url).searchParams.get("brand")?.slice(0, 60) ?? "CoachFlow";
-  return NextResponse.json(await extractFile(name.slice(0, 200), bytes, brand));
+  // ?raw=1 keeps a spreadsheet as a table instead of turning it into workout lines (used by the client-details import).
+  return NextResponse.json(await extractFile(name.slice(0, 200), bytes, brand, { raw: new URL(req.url).searchParams.get("raw") === "1" }));
 });

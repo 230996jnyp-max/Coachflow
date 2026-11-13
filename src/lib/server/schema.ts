@@ -192,6 +192,85 @@ export const aiUsageLog = pgTable(
   (t) => [index("ai_usage_log_at_idx").on(t.at), index("ai_usage_log_user_idx").on(t.userId)],
 );
 
+
+/*
+ * "Before we meet": the pack of forms a coach asks a client to fill in, every submitted version of each form, posture and fitness
+ * assessments, and the posture photos. Everything a person wrote is encrypted in data_enc; only what is needed to list and sort is plain.
+ */
+export const intakeRequests = pgTable(
+  "intake_requests",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    /** JSON array of form kinds asked for (PARQ, DECLARATION, GOALS). */
+    kinds: text("kinds").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Set once the reminder before the first session has gone out. */
+    reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+  },
+  (t) => [index("intake_requests_client_idx").on(t.clientId, t.createdAt)],
+);
+
+/** One row per submitted version of a form. The newest of each kind is the current one; older ones are the history. */
+export const intakeForms = pgTable(
+  "intake_forms",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    kind: text("kind").notNull(),
+    version: integer("version").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    /** Number of "yes" answers on a health questionnaire (0 for the other forms). */
+    flags: integer("flags").notNull().default(0),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    /** The coach has looked at it (with an optional note, kept encrypted) and gave the client a copy. */
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewEnc: text("review_enc"),
+    sharedAt: timestamp("shared_at", { withTimezone: true }),
+    /** The client read the copy and acknowledged it. */
+    ackAt: timestamp("ack_at", { withTimezone: true }),
+  },
+  (t) => [index("intake_forms_client_idx").on(t.clientId, t.kind, t.version)],
+);
+
+/** A posture and fitness assessment. filled_by COACH or CLIENT; status DRAFT or DONE. */
+export const assessments = pgTable(
+  "assessments",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    filledBy: text("filled_by").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    takenAt: text("taken_at").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    /** A coach's assessment given to the client as a copy, and the client's acknowledgement. */
+    sharedAt: timestamp("shared_at", { withTimezone: true }),
+    ackAt: timestamp("ack_at", { withTimezone: true }),
+    /** The coach has opened a client's own assessment. */
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("assessments_client_idx").on(t.clientId, t.takenAt)],
+);
+
+/** A posture photo (front, side or back) of one assessment, encrypted. */
+export const assessmentPhotos = pgTable(
+  "assessment_photos",
+  {
+    id: text("id").primaryKey(),
+    assessmentId: text("assessment_id").notNull(),
+    clientId: text("client_id").notNull(),
+    view: text("view").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("assessment_photos_view_idx").on(t.assessmentId, t.view)],
+);
+
 /** What the owner did to an account (disable, enable, delete ...). Kept after the account itself is gone; holds no private data. */
 export const adminActions = pgTable(
   "admin_actions",
@@ -1224,6 +1303,55 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS credit_log_client_idx ON credit_log (client_id, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS intake_requests (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    kinds text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    reminder_sent_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS intake_requests_client_idx ON intake_requests (client_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS intake_forms (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    kind text NOT NULL,
+    version integer NOT NULL,
+    data_enc text NOT NULL,
+    flags integer NOT NULL DEFAULT 0,
+    submitted_at timestamptz NOT NULL DEFAULT now(),
+    reviewed_at timestamptz,
+    review_enc text,
+    shared_at timestamptz,
+    ack_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS intake_forms_client_idx ON intake_forms (client_id, kind, version)`,
+  `CREATE TABLE IF NOT EXISTS assessments (
+    id text PRIMARY KEY,
+    client_id text NOT NULL,
+    coach_id text NOT NULL,
+    filled_by text NOT NULL,
+    status text NOT NULL DEFAULT 'DRAFT',
+    taken_at text NOT NULL,
+    data_enc text NOT NULL,
+    shared_at timestamptz,
+    ack_at timestamptz,
+    seen_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS assessments_client_idx ON assessments (client_id, taken_at)`,
+  `CREATE TABLE IF NOT EXISTS assessment_photos (
+    id text PRIMARY KEY,
+    assessment_id text NOT NULL,
+    client_id text NOT NULL,
+    view text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS assessment_photos_view_idx ON assessment_photos (assessment_id, view)`,
   `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS original_coach_id text`,
   `ALTER TABLE group_sessions ADD COLUMN IF NOT EXISTS original_coach_id text`,
 ];

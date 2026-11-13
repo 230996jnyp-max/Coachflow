@@ -894,6 +894,10 @@ export interface NewClientInput {
   groupClassCredits?: number;
   defaultGymId: string | null;
   medicalNotes: string;
+  /** Ask the client for the "Before we meet" forms, and email the login (one email covers both) when an address is given. */
+  sendPack?: boolean;
+  /** Email the login to the client's address. */
+  emailLogin?: boolean;
 }
 
 interface ClientResponse {
@@ -909,11 +913,11 @@ function applyClient(res: ClientResponse) {
   }));
 }
 
-export async function createClient(input: NewClientInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  const r = await api<ClientResponse>("/api/clients", { body: input });
+export async function createClient(input: NewClientInput): Promise<{ ok: true; id: string; pack: boolean; emailed: "sent" | "preview" | "failed" | "none" } | { ok: false; error: string }> {
+  const r = await api<ClientResponse & { pack?: boolean; emailed?: "sent" | "preview" | "failed" | "none" }>("/api/clients", { body: input });
   if (!r.ok || !r.data) return { ok: false, error: r.error ?? "Could not create the client." };
   applyClient(r.data);
-  return { ok: true, id: r.data.user.id };
+  return { ok: true, id: r.data.user.id, pack: r.data.pack === true, emailed: r.data.emailed ?? "none" };
 }
 
 export async function updateClient(id: string, patch: { user?: Partial<User>; profile?: Partial<ClientProfile> }): Promise<string | null> {

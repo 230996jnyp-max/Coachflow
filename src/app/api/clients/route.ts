@@ -5,7 +5,9 @@ import { hashPassword, requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, checkPassword, conflict, email, int, isUniqueViolation, readJson, route, str } from "@/lib/server/http";
 import { logCredit } from "@/lib/server/credits";
+import { requestPack } from "@/lib/server/intake";
 import { users } from "@/lib/server/schema";
+import { sendClientLoginEmail } from "@/lib/server/staff";
 import type { ClientGoal } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -52,7 +54,15 @@ export const POST = route(async (req) => {
       .returning();
     if (profile.credits > 0) await logCredit({ clientId: id, coachId: me.id, pool: "SESSION", kind: "OPENING", delta: profile.credits, sessionType: "1-on-1 PT", label: "Starting package", balance: profile.credits });
     if ((profile.groupClassCredits ?? 0) > 0) await logCredit({ clientId: id, coachId: me.id, pool: "GROUP", kind: "OPENING", delta: profile.groupClassCredits ?? 0, sessionType: "Group Class", label: "Starting package", balance: profile.groupClassCredits ?? 0 });
-    return NextResponse.json({ user: toUser(row), profile: toProfile(row) });
+    // Optional: ask for the "Before we meet" forms now, and email the login (one email covers both) when the client has an address.
+    const pack = body.sendPack === true;
+    if (pack) await requestPack(me, id);
+    let emailed: "sent" | "preview" | "failed" | "none" = "none";
+    if ((body.emailLogin === true || pack) && profile.email) {
+      const origin = process.env.APP_URL || new URL(req.url).origin;
+      emailed = (await sendClientLoginEmail({ to: profile.email, name: profile.name, coachName: me.name ?? "Your coach", username, password, origin, pack })).status;
+    }
+    return NextResponse.json({ user: toUser(row), profile: toProfile(row), pack, emailed });
   } catch (e) {
     if (isUniqueViolation(e)) throw conflict("That username is already taken.");
     throw e;

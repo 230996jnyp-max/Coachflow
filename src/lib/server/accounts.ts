@@ -198,6 +198,15 @@ export async function bootstrapFor(me: UserRow): Promise<{ me: User; users: User
       }
     }
     profiles.push(toProfile(me));
+    // Forms still to fill in and copies to acknowledge ("Before we meet"). A reminder goes out when a session is near and forms are owed.
+    try {
+      const { intakeTodoFor, sendIntakeReminders } = await import("./intake");
+      await sendIntakeReminders({ clientId: me.id });
+      const todo = await intakeTodoFor(me);
+      if (todo.hasRequest || todo.toAcknowledge) out[0] = { ...out[0], intake: { missing: todo.missing, toAcknowledge: todo.toAcknowledge } };
+    } catch (e) {
+      console.error("intake todo failed", e);
+    }
     return { me: out[0], users: out, clients: profiles };
   }
 
@@ -219,6 +228,20 @@ export async function bootstrapFor(me: UserRow): Promise<{ me: User; users: User
     } catch (e) {
       console.error("Could not decrypt client row", r.id, e);
     }
+  }
+  // Counts for the "Needs you" list and the client page: health flags, forms owed, self-assessments handed in (never the answers).
+  try {
+    const { intakeFlagsFor, sendIntakeReminders } = await import("./intake");
+    const { unseenSelfAssessments } = await import("./assessments");
+    await sendIntakeReminders({ coachId: me.id });
+    const [flags, unseen] = await Promise.all([intakeFlagsFor(me.id), unseenSelfAssessments(me.id)]);
+    for (const p of profiles) {
+      const f = flags[p.id];
+      const s = unseen[p.id] ?? 0;
+      if (f || s) p.intake = { healthFlags: f?.healthFlags ?? 0, needsReview: f?.needsReview ?? false, pending: f?.pending ?? false, selfAssessments: s };
+    }
+  } catch (e) {
+    console.error("intake flags failed", e);
   }
   if (me.role === "COACH") {
     const [owner] = await d.select().from(users).where(eq(users.role, "OWNER")).limit(1);

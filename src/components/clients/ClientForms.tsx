@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { Check, Copy, FileUp, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { ImportClientsModal } from "@/components/clients/ImportClientsModal";
 import { GymSelect } from "@/components/GymSelect";
 import { NumberInput } from "@/components/NumberInput";
 import { Button, Field, IconButton, Input, Modal, Notice, Select, Textarea } from "@/components/ui";
@@ -32,6 +33,10 @@ export interface Credentials {
   name: string;
   username: string;
   password: string;
+  /** The "Before we meet" forms were asked for. */
+  pack?: boolean;
+  /** What happened to the email with the login (when one was asked for). */
+  emailed?: "sent" | "preview" | "failed" | "none";
 }
 
 export function AddClientModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string, c: Credentials) => void }) {
@@ -51,6 +56,10 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
   const [gym, setGym] = useState<string>("");
   const [medical, setMedical] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sendPack, setSendPack] = useState(false);
+  const [emailLogin, setEmailLogin] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState(false);
 
   const effUser = userTouched ? username : slugUsername(name);
 
@@ -74,13 +83,16 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
       groupClassCredits: Math.max(0, groupCredits),
       defaultGymId: gym || null,
       medicalNotes: medical.trim(),
+      sendPack,
+      emailLogin: emailLogin || sendPack,
     });
     setBusy(false);
     if (!res.ok) return setError(res.error);
-    onCreated(res.id, { name: name.trim(), username: effUser, password });
+    onCreated(res.id, { name: name.trim(), username: effUser, password, pack: res.pack, emailed: res.emailed });
   };
 
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -88,6 +100,9 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
       wide
       footer={
         <>
+          <Button variant="secondary" onClick={() => setImporting(true)} className="mr-auto">
+            <FileUp size={16} /> Import details
+          </Button>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
@@ -146,9 +161,33 @@ function Form({ onClose, onCreated }: { onClose: () => void; onCreated: (id: str
         <Field label="Medical / injury notes">
           <Textarea value={medical} onChange={(e) => setMedical(e.target.value)} placeholder="Injuries, conditions, contraindications…" />
         </Field>
+        <div className="space-y-2 rounded-xl border border-line bg-field/40 p-3">
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" className="mt-0.5 h-5 w-5 accent-accent" checked={sendPack} onChange={(e) => setSendPack(e.target.checked)} />
+            <span>
+              <span className="font-semibold">Ask them to fill in the “Before we meet” forms</span>
+              <span className="block text-xs text-muted">A health questionnaire, a declaration and a goals form, about five minutes. One email covers their login and the forms{email.trim() ? "" : " (add an email address to send it)"}.</span>
+            </span>
+          </label>
+          {!sendPack && (
+            <label className="flex items-start gap-3 text-sm">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 accent-accent" checked={emailLogin} disabled={!email.trim()} onChange={(e) => setEmailLogin(e.target.checked)} />
+              <span>Email the login to the client{email.trim() ? "" : " (needs an email address)"}</span>
+            </label>
+          )}
+        </div>
         {error && <Notice tone="error">{error}</Notice>}
       </div>
     </Modal>
+    <ImportClientsModal
+      open={importing}
+      onClose={() => {
+        setImporting(false);
+        if (imported) onClose();
+      }}
+      onDone={() => setImported(true)}
+    />
+    </>
   );
 }
 
@@ -193,6 +232,10 @@ export function CredentialsModal({ creds, onClose, title = "Client created" }: {
     >
       <div className="space-y-4">
         <Notice tone="success">Account ready. Paste these details into WhatsApp or SMS for {creds.name}.</Notice>
+        {creds.emailed === "sent" && <Notice tone="success">An email with the login{creds.pack ? " and the forms to fill in" : ""} was sent to {creds.name}.</Notice>}
+        {creds.emailed === "preview" && <Notice tone="warn">Email isn’t set up on this server, so nothing was emailed. Copy the details below instead.</Notice>}
+        {creds.emailed === "failed" && <Notice tone="warn">The email couldn’t be sent. Copy the details below instead.</Notice>}
+        {creds.pack && <Notice tone="info">{creds.name.split(" ")[0]} will see the “Before we meet” forms as soon as they sign in. You’ll be told when they’re done.</Notice>}
         <pre className="whitespace-pre-wrap rounded-xl border border-line bg-field p-4 font-mono text-xs leading-relaxed">{text}</pre>
       </div>
     </Modal>

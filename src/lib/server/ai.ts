@@ -587,3 +587,75 @@ FACTS: ${facts.slice(0, 1200)}` },
     return null;
   }
 }
+
+/* ---------------- Client details (import) and assessment summaries ---------------- */
+const CLIENT_SYSTEM = `You read a personal trainer's raw notes about one or more new or existing clients (typed, pasted from WhatsApp or a form, copied from a spreadsheet, or transcribed from a photo) and return them as JSON.
+
+Return ONLY one JSON object, no commentary, with this shape:
+{"clients":[{
+  "name": string,                 // the person's full name as written
+  "phone": string | null,         // as written
+  "email": string | null,
+  "dob": "YYYY-MM-DD" | null,     // ONLY if a birth date is written; read day-first (12/03/1990 = 12 March 1990)
+  "goal": "Hypertrophy" | "Fat Loss" | "Strength" | "Conditioning" | "General Fitness" | null,
+  "level": "Beginner" | "Intermediate" | "Advanced" | null,   // training experience, only if written or clearly implied
+  "medicalNotes": string | null,  // injuries, conditions, medication, anything about health, kept short and faithful
+  "credits": integer | null,      // sessions in a package, only if a number of sessions is written
+  "packageSize": integer | null,
+  "homeAddress": string | null
+}]}
+
+Rules:
+- One object per person. Several people are separated by blank lines, numbering, bullets or table rows.
+- Never invent anything. If a field is not written, use null. Do not guess a goal or level from nothing.
+- Phone numbers and emails keep the form they were written in. Fix obvious spacing only.
+- "goal": map "lose weight", "tone up", "cut" to Fat Loss; "build muscle", "bulk", "size" to Hypertrophy; "get stronger", "powerlifting" to Strength; "cardio", "endurance", "stamina", "sport" to Conditioning; "general fitness", "health" to General Fitness.
+- Ignore greetings and chatter that is not about a client.`;
+
+export async function aiReadClients(text: string): Promise<unknown[]> {
+  const content = await groq(
+    {
+      model: TEXT_MODEL,
+      temperature: 0,
+      reasoning_effort: "low",
+      max_completion_tokens: 6000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: CLIENT_SYSTEM },
+        { role: "user", content: `NOTES:\n"""\n${text.slice(0, 16000)}\n"""` },
+      ],
+    },
+    45_000,
+  );
+  let parsed: unknown;
+  try {
+    parsed = jsonFrom(content);
+  } catch {
+    throw new HttpError(502, "The AI answer couldn't be read.");
+  }
+  const list = (parsed as { clients?: unknown }).clients;
+  return Array.isArray(list) ? list.slice(0, 50) : [];
+}
+
+/** A short plain-English paragraph for the coach from assessment findings (no names are ever sent). */
+export async function aiAssessmentNote(facts: string): Promise<string | null> {
+  try {
+    const content = await groq(
+      {
+        model: TEXT_MODEL,
+        temperature: 0.3,
+        reasoning_effort: "low",
+        max_completion_tokens: 500,
+        messages: [
+          { role: "system", content: "You help a personal trainer. From posture and movement findings, write 2 to 3 plain sentences saying what to work on besides building muscle (mobility, activation, stability, technique) and what to be careful about. No diagnosis, no medical claims, no names. If a finding suggests a doctor's check, say so gently." },
+          { role: "user", content: `FINDINGS: ${facts.slice(0, 1200)}` },
+        ],
+      },
+      20_000,
+    );
+    const text = content.replace(/\s+/g, " ").trim();
+    return text.length >= 20 ? text.slice(0, 700) : null;
+  } catch {
+    return null;
+  }
+}

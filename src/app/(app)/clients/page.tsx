@@ -1,12 +1,13 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { CalendarPlus, ChevronRight, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
+import { CalendarPlus, ChevronRight, FileUp, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/TrainerBookModal";
 import { AddClientModal, CredentialsModal, type Credentials } from "@/components/clients/ClientForms";
+import { ImportClientsModal } from "@/components/clients/ImportClientsModal";
 import { NudgeModal } from "@/components/clients/NudgeModal";
 import { lastSeen, PctBar, PctPill, ReasonBadges, useStatuses } from "@/components/clients/status";
 import { CoachCodeCard, LinkRequests, useLinkRequestCount } from "@/components/coachlink/CoachLink";
@@ -51,6 +52,7 @@ export default function ClientsPage() {
   const [group, setGroup] = useState<AttentionGroup>(initialGroup);
   const [view, setView] = useState<View>(initialView);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [nudging, setNudging] = useState(false);
   const [book, setBook] = useState<TrainerBookInit | null>(null);
   const [creds, setCreds] = useState<Credentials | null>(null);
@@ -105,6 +107,9 @@ export default function ClientsPage() {
           <>
             <Button variant="secondary" onClick={() => setNudging(true)} disabled={active.length === 0}>
               <Send size={16} /> Nudge clients
+            </Button>
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              <FileUp size={16} /> Import clients
             </Button>
             <Button onClick={() => setAdding(true)}>
               <UserPlus size={16} /> Add client
@@ -324,6 +329,7 @@ export default function ClientsPage() {
         }}
       />
       <CredentialsModal creds={creds} onClose={() => setCreds(null)} />
+      <ImportClientsModal open={importing} onClose={() => setImporting(false)} />
       <TrainerBookModal init={book} onClose={() => setBook(null)} />
       <NudgeModal open={nudging} onClose={() => setNudging(false)} />
     </div>

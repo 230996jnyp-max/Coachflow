@@ -36,6 +36,8 @@ export interface User {
   gym?: GymInfo;
   /** A coach's gym as their clients see it (name and logo). */
   publicGym?: PublicGym;
+  /** A client's forms still to fill in and copies waiting for their acknowledgement (only sent for yourself). */
+  intake?: { missing: string[]; toAcknowledge: number };
   /** Look and feel. Yourself: everything. Other people: only what their coach / clients may see (bio, nickname, photo versions). */
   prefs?: Prefs;
   /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */
@@ -52,6 +54,8 @@ export type ClientGoal =
 export interface ClientProfile {
   /** Same as the owning User.id */
   id: string;
+  /** "Before we meet": health flags, forms still owed, and assessments to look at (counts only, never answers). Only sent to the coach. */
+  intake?: { healthFlags: number; needsReview: boolean; pending: boolean; selfAssessments: number };
   phone: string;
   email: string;
   goal: ClientGoal;

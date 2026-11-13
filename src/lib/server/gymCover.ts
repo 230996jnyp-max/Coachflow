@@ -7,7 +7,7 @@ import { badRequest, conflict, forbidden, int, notFound, str } from "./http";
 import { classConflict, insertGroup, newSeriesId, notify, whenText } from "./groups";
 import { audit, type Membership } from "./gymOrg";
 import { hasConflict } from "./schedule";
-import { bookings, groupMembers, groupSessions, gymMembers, gymMoves, users, type UserRow } from "./schema";
+import { assessments, bookings, groupMembers, groupSessions, gymMembers, gymMoves, intakeForms, intakeRequests, users, type UserRow } from "./schema";
 
 const newId = (p: string) => `${p}_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
 const nameOf = (u: UserRow) => (u.role === "CLIENT" ? safeName(u) : (u.name ?? u.username));
@@ -214,6 +214,10 @@ export async function respondToMove(client: UserRow, moveId: string, accept: boo
   const [from] = await d.select().from(users).where(eq(users.id, mv.fromCoachId)).limit(1);
   if (!to || !to.active) throw conflict("That coach isn't available any more.");
   await d.update(users).set({ coachId: to.id, updatedAt: new Date() }).where(eq(users.id, client.id));
+  // Their forms and assessments go with them to the new coach (and only the new coach sees them).
+  await d.update(intakeForms).set({ coachId: to.id }).where(eq(intakeForms.clientId, client.id));
+  await d.update(intakeRequests).set({ coachId: to.id }).where(eq(intakeRequests.clientId, client.id));
+  await d.update(assessments).set({ coachId: to.id }).where(eq(assessments.clientId, client.id));
   const future = await d.select().from(bookings).where(and(eq(bookings.clientId, client.id), eq(bookings.coachId, from.id), gt(bookings.startAt, new Date()), inArray(bookings.status, ["CONFIRMED", "PENDING"])));
   let moved = 0, kept = 0;
   for (const b of future) {

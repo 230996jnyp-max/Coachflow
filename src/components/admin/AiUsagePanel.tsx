@@ -13,7 +13,7 @@ interface Windows {
   month: number;
   all: number;
 }
-type Feature = "workout_import" | "niche_search" | "custom_tracking" | "progression" | "other";
+type Feature = "workout_import" | "niche_search" | "custom_tracking" | "progression" | "client_details_import" | "assessment_summary" | "other";
 interface Row {
   coachId: string;
   name: string;
@@ -34,7 +34,7 @@ interface Report {
   totals: Windows;
 }
 
-const FEATURES: Feature[] = ["workout_import", "niche_search", "custom_tracking", "progression", "other"];
+const FEATURES: Feature[] = ["workout_import", "niche_search", "custom_tracking", "progression", "client_details_import", "assessment_summary", "other"];
 
 /** How much each coach (and gym) uses the AI features: today, 7 days, 30 days and all time, by feature, with the last use. */
 export function AiUsagePanel() {
