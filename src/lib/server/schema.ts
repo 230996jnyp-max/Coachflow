@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * users
@@ -57,6 +57,139 @@ export const userMedia = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.kind] })],
+);
+
+
+/*
+ * Gyms and academies. A gym owner is a coach (a normal coach account) who also runs a gym: one row in gym_orgs, with roles the owner
+ * defines (each a list of permissions), the members (coaches and staff, linked with the 6-digit gym code or an emailed invitation) and
+ * the branches / halls. Coaches keep their own clients; the gym only sees schedules, hours and cover.
+ */
+export const gymOrgs = pgTable(
+  "gym_orgs",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    ownerId: text("owner_id").notNull(),
+    /** Defaults handed to a coach when they link: theme (black | white | navy) and niches (JSON array). */
+    theme: text("theme"),
+    niches: text("niches").notNull().default("[]"),
+    /** Do client no-shows count as worked time in the hours table? */
+    countNoShows: boolean("count_no_shows").notNull().default(false),
+    /** Bumped when the logo / banner is uploaded (the pictures live in user_media under the gym's id). */
+    logoV: integer("logo_v").notNull().default(0),
+    bannerV: integer("banner_v").notNull().default(0),
+    /** The gym's free month. When it ends (and payments are enforced) the platform stops for the gym's coaches and admins. */
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /** ACTIVE | DISABLED (switched off by the platform owner). */
+    status: text("status").notNull().default("ACTIVE"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gym_orgs_code_idx").on(t.code)],
+);
+
+export const gymRoles = pgTable(
+  "gym_roles",
+  {
+    id: text("id").primaryKey(),
+    gymId: text("gym_id").notNull(),
+    name: text("name").notNull(),
+    /** JSON array of permission ids (see lib/gymPerms.ts). */
+    perms: text("perms").notNull().default("[]"),
+    /** The owner's role: all permissions, can't be edited or removed. */
+    locked: boolean("locked").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("gym_roles_gym_idx").on(t.gymId)],
+);
+
+/** A person in a gym. One gym per person (user_id is unique). status: PENDING (asked with the code) | ACTIVE. */
+export const gymMembers = pgTable(
+  "gym_members",
+  {
+    gymId: text("gym_id").notNull(),
+    userId: text("user_id").notNull(),
+    roleId: text("role_id").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    branchId: text("branch_id"),
+    /** Optional hourly rate in cents, to turn hours into an amount on the payroll table. */
+    rateCents: integer("rate_cents"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.gymId, t.userId] }), uniqueIndex("gym_members_user_idx").on(t.userId)],
+);
+
+export const gymBranches = pgTable(
+  "gym_branches",
+  {
+    id: text("id").primaryKey(),
+    gymId: text("gym_id").notNull(),
+    name: text("name").notNull(),
+    address: text("address").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("gym_branches_gym_idx").on(t.gymId)],
+);
+
+/** An emailed invitation: the person joins without waiting for approval, with this role. */
+export const gymInvites = pgTable(
+  "gym_invites",
+  {
+    id: text("id").primaryKey(),
+    gymId: text("gym_id").notNull(),
+    email: text("email").notNull(),
+    roleId: text("role_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("gym_invites_email_idx").on(t.email)],
+);
+
+/** The gym asks to move a client to another coach of the gym for good. The client has to agree. */
+export const gymMoves = pgTable(
+  "gym_moves",
+  {
+    id: text("id").primaryKey(),
+    gymId: text("gym_id").notNull(),
+    clientId: text("client_id").notNull(),
+    fromCoachId: text("from_coach_id").notNull(),
+    toCoachId: text("to_coach_id").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("gym_moves_client_idx").on(t.clientId, t.status)],
+);
+
+/** Who did what in a gym (linked, removed, cover, roles ...). */
+export const gymAudit = pgTable(
+  "gym_audit",
+  {
+    id: text("id").primaryKey(),
+    gymId: text("gym_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    action: text("action").notNull(),
+    detail: text("detail").notNull().default(""),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("gym_audit_gym_idx").on(t.gymId, t.at)],
+);
+
+/** One row per AI call (feature: workout_import | niche_search | custom_tracking | progression | other), for the owner's usage tracker. */
+export const aiUsageLog = pgTable(
+  "ai_usage_log",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    /** The coach the call belongs to (the person themselves for a coach, their coach for a client) and that coach's gym, when they have one. */
+    coachId: text("coach_id"),
+    gymId: text("gym_id"),
+    feature: text("feature").notNull(),
+    units: integer("units").notNull().default(1),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_usage_log_at_idx").on(t.at), index("ai_usage_log_user_idx").on(t.userId)],
 );
 
 /** What the owner did to an account (disable, enable, delete ...). Kept after the account itself is gone; holds no private data. */
@@ -434,6 +567,8 @@ export const bookings = pgTable(
     createdBy: text("created_by").notNull(),
     rev: integer("rev").notNull().default(0),
     detailsEnc: text("details_enc").notNull(),
+    /** Set when a gym arranged cover: the coach this session belonged to before (coach_id is now the cover coach). */
+    originalCoachId: text("original_coach_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("bookings_coach_idx").on(t.coachId, t.startAt), index("bookings_client_idx").on(t.clientId)],
@@ -517,6 +652,7 @@ export const groupSessions = pgTable(
     workoutStartedAt: timestamp("workout_started_at", { withTimezone: true }),
     rev: integer("rev").notNull().default(0),
     detailsEnc: text("details_enc").notNull(),
+    originalCoachId: text("original_coach_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("group_sessions_coach_idx").on(t.coachId, t.startAt), index("group_sessions_booking_idx").on(t.bookingId)],
@@ -664,6 +800,89 @@ export const DDL = [
     at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS admin_actions_at_idx ON admin_actions (at)`,
+  `CREATE TABLE IF NOT EXISTS gym_orgs (
+    id text PRIMARY KEY,
+    name text NOT NULL,
+    code text NOT NULL,
+    owner_id text NOT NULL,
+    theme text,
+    niches text NOT NULL DEFAULT '[]',
+    count_no_shows boolean NOT NULL DEFAULT false,
+    logo_v integer NOT NULL DEFAULT 0,
+    banner_v integer NOT NULL DEFAULT 0,
+    trial_ends_at timestamptz,
+    status text NOT NULL DEFAULT 'ACTIVE',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gym_orgs_code_idx ON gym_orgs (code)`,
+  `CREATE TABLE IF NOT EXISTS gym_roles (
+    id text PRIMARY KEY,
+    gym_id text NOT NULL,
+    name text NOT NULL,
+    perms text NOT NULL DEFAULT '[]',
+    locked boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS gym_roles_gym_idx ON gym_roles (gym_id)`,
+  `CREATE TABLE IF NOT EXISTS gym_members (
+    gym_id text NOT NULL,
+    user_id text NOT NULL,
+    role_id text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    branch_id text,
+    rate_cents integer,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    joined_at timestamptz,
+    PRIMARY KEY (gym_id, user_id)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gym_members_user_idx ON gym_members (user_id)`,
+  `CREATE TABLE IF NOT EXISTS gym_branches (
+    id text PRIMARY KEY,
+    gym_id text NOT NULL,
+    name text NOT NULL,
+    address text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS gym_branches_gym_idx ON gym_branches (gym_id)`,
+  `CREATE TABLE IF NOT EXISTS gym_invites (
+    id text PRIMARY KEY,
+    gym_id text NOT NULL,
+    email text NOT NULL,
+    role_id text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS gym_invites_email_idx ON gym_invites (email)`,
+  `CREATE TABLE IF NOT EXISTS gym_moves (
+    id text PRIMARY KEY,
+    gym_id text NOT NULL,
+    client_id text NOT NULL,
+    from_coach_id text NOT NULL,
+    to_coach_id text NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    decided_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS gym_moves_client_idx ON gym_moves (client_id, status)`,
+  `CREATE TABLE IF NOT EXISTS gym_audit (
+    id text PRIMARY KEY,
+    gym_id text NOT NULL,
+    actor_id text NOT NULL,
+    action text NOT NULL,
+    detail text NOT NULL DEFAULT '',
+    at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS gym_audit_gym_idx ON gym_audit (gym_id, at)`,
+  `CREATE TABLE IF NOT EXISTS ai_usage_log (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    coach_id text,
+    gym_id text,
+    feature text NOT NULL,
+    units integer NOT NULL DEFAULT 1,
+    at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_usage_log_at_idx ON ai_usage_log (at)`,
+  `CREATE INDEX IF NOT EXISTS ai_usage_log_user_idx ON ai_usage_log (user_id)`,
   `CREATE TABLE IF NOT EXISTS auth_tokens (
     id text PRIMARY KEY,
     user_id text NOT NULL,
@@ -1005,4 +1224,6 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS credit_log_client_idx ON credit_log (client_id, created_at)`,
+  `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS original_coach_id text`,
+  `ALTER TABLE group_sessions ADD COLUMN IF NOT EXISTS original_coach_id text`,
 ];

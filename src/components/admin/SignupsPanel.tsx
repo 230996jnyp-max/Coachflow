@@ -44,7 +44,7 @@ interface Overview {
 type Action = "disable" | "enable" | "delete" | "resend_verification" | "force_reset";
 
 const KIND_LABEL: Record<Kind, string> = { coach: "Coach", personal: "Solo", client: "Client" };
-const ACTION_LABEL: Record<string, string> = { disable: "Disabled", enable: "Re-enabled", delete: "Deleted", resend_verification: "Resent confirmation", force_reset: "Forced password reset" };
+const ACTION_LABEL: Record<string, string> = { disable: "Disabled", enable: "Re-enabled", delete: "Deleted", resend_verification: "Resent confirmation", force_reset: "Forced password reset", gym_disable: "Switched off", gym_enable: "Switched on", gym_delete: "Deleted gym" };
 
 /** People who asked to hear when the AI personal trainer is ready. The addresses are fetched only when the owner asks to copy them. */
 function WaitlistRow({ count }: { count: number }) {

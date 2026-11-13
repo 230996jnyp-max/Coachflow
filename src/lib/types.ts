@@ -1,4 +1,5 @@
 import type { WorkoutFeedback } from "./feedback";
+import type { GymInfo, PublicGym } from "./gymPerms";
 import type { Prefs } from "./prefs";
 
 // Domain models. All weights are stored in kg and all lengths in cm;
@@ -31,6 +32,10 @@ export interface User {
   isMinor?: boolean;
   /** A coach's six-digit code (only sent for yourself). */
   coachCode?: string;
+  /** The viewer's own gym: role, permissions and the gym's free month (only sent for yourself). */
+  gym?: GymInfo;
+  /** A coach's gym as their clients see it (name and logo). */
+  publicGym?: PublicGym;
   /** Look and feel. Yourself: everything. Other people: only what their coach / clients may see (bio, nickname, photo versions). */
   prefs?: Prefs;
   /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */

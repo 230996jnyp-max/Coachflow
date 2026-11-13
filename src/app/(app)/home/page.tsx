@@ -14,6 +14,7 @@ import { ApprovalCard } from "@/components/groups/groupUi";
 import { PersonalHome } from "@/components/home/PersonalHome";
 import { GoalCard } from "@/components/goal/GoalCard";
 import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
+import { MoveRequests } from "@/components/gym/MoveRequests";
 import { CoachCard } from "@/components/home/CoachCard";
 import { HomeSlot } from "@/components/HomeSlot";
 import { PasswordBanner } from "@/components/PasswordBanner";
@@ -69,6 +70,7 @@ function ClientHome() {
     <div className="flex flex-col gap-8">
       <PageHeader title={`${hi}, ${user.prefs?.nick || user.name.split(" ")[0]}`} subtitle={profile ? `Goal: ${profile.goal}` : undefined} />
       <PasswordBanner />
+      <MoveRequests />
       <CoachCard />
 
       <HomeSlot side="client" id="assigned">

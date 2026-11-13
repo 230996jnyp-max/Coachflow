@@ -9,9 +9,12 @@ export function CoachCard() {
   const { coach, user } = useViewer();
   if (!coach || !user || coach.id === user.id) return null;
   const p = coach.prefs ?? {};
-  const banner = mediaUrl(coach.id, "banner", p.bannerV);
-  const logo = mediaUrl(coach.id, "logo", p.logoV);
-  if (!banner && !logo && !p.bio && !p.avatarV) return null;
+  const gym = coach.publicGym;
+  // The coach's own banner and logo come first; a gym's fill in when the coach has none.
+  const banner = mediaUrl(coach.id, "banner", p.bannerV) ?? (gym ? mediaUrl(gym.id, "banner", gym.bannerV) : null);
+  const gymLogo = gym ? mediaUrl(gym.id, "logo", gym.logoV) : null;
+  const logo = mediaUrl(coach.id, "logo", p.logoV) ?? gymLogo;
+  if (!banner && !logo && !p.bio && !p.avatarV && !gym) return null;
   const name = p.nick || coach.name;
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-surface">
@@ -30,6 +33,7 @@ export function CoachCard() {
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted">Your coach</div>
           <div className="truncate font-bold">{name}</div>
           {p.bio && <div className="text-sm text-muted">{p.bio}</div>}
+          {gym && <div className="mt-0.5 text-xs font-semibold text-accent">Part of {gym.name}</div>}
         </div>
       </div>
     </div>

@@ -4,7 +4,7 @@ import { MEDIA_KINDS, VERSION_KEY, cleanPrefs, parsePrefs, type MediaKind, type 
 import { isMinorRow } from "./accounts";
 import { db } from "./db";
 import { badRequest, notFound } from "./http";
-import { userMedia, users, type UserRow } from "./schema";
+import { gymMembers, gymOrgs, userMedia, users, type UserRow } from "./schema";
 
 /** Largest accepted picture, as base64 characters. The browser shrinks pictures before sending, so these are generous. */
 const LIMIT: Record<MediaKind, number> = { avatar: 160_000, bg: 1_100_000, banner: 700_000, logo: 260_000 };
@@ -79,6 +79,48 @@ export async function readMedia(viewer: UserRow, targetId: string, kind: MediaKi
   // Same answer whether the person or the picture is missing, so this can't be used to find who exists.
   if (!target || !mayView(viewer, target, kind)) throw notFound();
   const [row] = await d.select().from(userMedia).where(and(eq(userMedia.userId, targetId), eq(userMedia.kind, kind))).limit(1);
+  if (!row) throw notFound();
+  return { mime: row.mime, bytes: Buffer.from(row.dataB64, "base64") };
+}
+
+/* ---------------- A gym's logo and banner ---------------- */
+const GYM_KINDS = ["logo", "banner"] as const;
+export type GymMediaKind = (typeof GYM_KINDS)[number];
+export const isGymKind = (v: unknown): v is GymMediaKind => typeof v === "string" && (GYM_KINDS as readonly string[]).includes(v);
+
+/** Stores a gym's logo or banner (kept under the gym's id) and bumps its version. */
+export async function putGymMedia(gymId: string, kind: GymMediaKind, mime: unknown, data: unknown): Promise<void> {
+  if (typeof mime !== "string" || !MIMES.includes(mime)) throw badRequest("Use a JPEG, PNG or WebP picture.");
+  if (typeof data !== "string" || !/^[A-Za-z0-9+/=]+$/.test(data)) throw badRequest("That picture couldn't be read.");
+  if (data.length > LIMIT[kind]) throw badRequest("That picture is too large. Choose a smaller one.");
+  const d = await db();
+  await d
+    .insert(userMedia)
+    .values({ userId: gymId, kind, mime, dataB64: data })
+    .onConflictDoUpdate({ target: [userMedia.userId, userMedia.kind], set: { mime, dataB64: data, updatedAt: new Date() } });
+  await d.update(gymOrgs).set(kind === "logo" ? { logoV: Date.now() % 2_000_000_000 } : { bannerV: Date.now() % 2_000_000_000 }).where(eq(gymOrgs.id, gymId));
+}
+
+export async function deleteGymMedia(gymId: string, kind: GymMediaKind): Promise<void> {
+  const d = await db();
+  await d.delete(userMedia).where(and(eq(userMedia.userId, gymId), eq(userMedia.kind, kind)));
+  await d.update(gymOrgs).set(kind === "logo" ? { logoV: 0 } : { bannerV: 0 }).where(eq(gymOrgs.id, gymId));
+}
+
+/** A gym's logo or banner is seen by the gym's people and by the clients of its coaches. */
+export async function readGymMedia(viewer: UserRow, gymId: string, kind: GymMediaKind): Promise<{ mime: string; bytes: Buffer }> {
+  const d = await db();
+  const [gym] = await d.select().from(gymOrgs).where(eq(gymOrgs.id, gymId)).limit(1);
+  if (!gym) throw notFound();
+  const coachId = viewer.role === "CLIENT" ? viewer.coachId : viewer.id;
+  let ok = false;
+  if (coachId) {
+    const [m] = await d.select().from(gymMembers).where(and(eq(gymMembers.gymId, gymId), eq(gymMembers.userId, coachId))).limit(1);
+    ok = !!m && (m.status === "ACTIVE" || viewer.role !== "CLIENT");
+  }
+  if (viewer.role === "OWNER") ok = true;
+  if (!ok) throw notFound();
+  const [row] = await d.select().from(userMedia).where(and(eq(userMedia.userId, gymId), eq(userMedia.kind, kind))).limit(1);
   if (!row) throw notFound();
   return { mime: row.mime, bytes: Buffer.from(row.dataB64, "base64") };
 }

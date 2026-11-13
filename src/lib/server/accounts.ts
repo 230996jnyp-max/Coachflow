@@ -50,6 +50,8 @@ export interface StaffProfileJson {
   experienceYears?: number;
   tagline?: string;
   consent?: { at: string };
+  /** A gym code typed at sign-up: used once the email is confirmed. */
+  pendingGymCode?: string;
 }
 
 export const GOALS: ClientGoal[] = ["Hypertrophy", "Fat Loss", "Strength", "Conditioning", "General Fitness"];
@@ -182,17 +184,34 @@ export async function bootstrapFor(me: UserRow): Promise<{ me: User; users: User
   const out: User[] = [toUser(me, { withEmail: true, self: true })];
   const profiles: ClientProfile[] = [];
 
+  // Loaded here, not at the top of the file, because the gym modules import this one.
+  const { gymInfoFor, publicGymOf } = await import("./gymOrg");
+
   if (me.role === "CLIENT") {
     if (me.coachId) {
       const [coach] = await d.select().from(users).where(eq(users.id, me.coachId)).limit(1);
-      if (coach) out.push(toUser(coach));
+      if (coach) {
+        const u = toUser(coach);
+        // The coach's gym (name and logo) shows on their client's home screen.
+        const gym = await publicGymOf(coach.id);
+        out.push(gym ? { ...u, publicGym: gym } : u);
+      }
     }
     profiles.push(toProfile(me));
     return { me: out[0], users: out, clients: profiles };
   }
 
-  // Staff: their own clients only.
-  const mine = await d.select().from(users).where(and(eq(users.role, "CLIENT"), eq(users.coachId, me.id)));
+  // A coach in a gym: their role, permissions and the gym's free month (which replaces their own).
+  const gym = await gymInfoFor(me.id);
+  if (gym) out[0] = { ...out[0], gym, ...(gym.trial ? { trial: gym.trial } : {}) };
+
+  // Staff: their own clients only, plus the clients of any session or class they are covering for their gym.
+  const { coverClientIds } = await import("./gymCover");
+  const covering = await coverClientIds(me.id);
+  const mine = await d
+    .select()
+    .from(users)
+    .where(and(eq(users.role, "CLIENT"), covering.length ? or(eq(users.coachId, me.id), inArray(users.id, covering)) : eq(users.coachId, me.id)));
   for (const r of mine) {
     try {
       out.push(toUser(r));

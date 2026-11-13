@@ -1,9 +1,10 @@
 "use client";
 
-import { LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Building2, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { hasPortalAccess } from "@/lib/gymPerms";
 import { useViewer } from "@/lib/hooks";
 import { logout } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -76,6 +77,11 @@ export function ProfileMenu({ side = "bottom", showName = false }: { side?: "bot
             <Link href="/settings" role="menuitem" onClick={() => setOpen(false)} className={item}>
               <Settings size={18} className="text-muted" /> Settings
             </Link>
+            {hasPortalAccess(user.gym) && (
+              <Link href="/gym-admin" role="menuitem" onClick={() => setOpen(false)} className={item}>
+                <Building2 size={18} className="text-accent" /> Gym admin
+              </Link>
+            )}
             {user.isOwner && (
               <Link href="/admin" role="menuitem" onClick={() => setOpen(false)} className={item}>
                 <ShieldCheck size={18} className="text-pr" /> Admin

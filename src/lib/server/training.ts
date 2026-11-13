@@ -262,7 +262,10 @@ export async function writableClientIds(me: UserRow): Promise<string[]> {
   if (me.role === "CLIENT") return [me.id];
   const d = await db();
   const rows = await d.select({ id: users.id }).from(users).where(and(eq(users.role, "CLIENT"), eq(users.coachId, me.id)));
-  return [me.id, ...rows.map((r) => r.id)];
+  // Plus the clients of a session or class this coach is covering for their gym (close to the session only).
+  const { coverClientIds } = await import("./gymCover");
+  const covering = await coverClientIds(me.id);
+  return [...new Set([me.id, ...rows.map((r) => r.id), ...covering])];
 }
 
 /* ---------------- Row mappers ---------------- */

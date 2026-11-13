@@ -10,6 +10,7 @@ import { purgeClientBody } from "./bodyData";
 import { db } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./http";
 import { purgeClientGroups } from "./groups";
+import { deleteGymEverything } from "./gymOrg";
 import { escapeHtml, layout, sendMail, type MailResult } from "./mail";
 import { purgeClientNutrition } from "./nutrition";
 import { sendVerificationFor } from "./signup";
@@ -33,6 +34,8 @@ import {
   groupMembers,
   groupRequests,
   groupSessions,
+  gymMembers,
+  gymOrgs,
   gyms,
   messages,
   notifications,
@@ -132,7 +135,7 @@ export async function listPeople(limit = 500): Promise<PersonRow[]> {
 /* ---------------- Emails to the person ---------------- */
 const sender = () => `"CoachFlow" <${process.env.SMTP_USER || SUPPORT_EMAIL}>`;
 
-function notice(opts: { subject: string; title: string; lines: string[]; reason?: string; cta?: { label: string; href: string } }) {
+export function notice(opts: { subject: string; title: string; lines: string[]; reason?: string; cta?: { label: string; href: string } }) {
   const reason = opts.reason ? `Reason given: ${opts.reason}` : "";
   const tail = `If you have questions, just reply to this email or write to ${SUPPORT_EMAIL}.`;
   const text = [...opts.lines, reason, opts.cta ? opts.cta.href : "", tail].filter(Boolean).join("\n\n");
@@ -144,7 +147,7 @@ function notice(opts: { subject: string; title: string; lines: string[]; reason?
   return { subject: opts.subject, text, html };
 }
 
-async function tell(to: string, m: ReturnType<typeof notice>): Promise<MailResult> {
+export async function tell(to: string, m: ReturnType<typeof notice>): Promise<MailResult> {
   return sendMail({ ...m, to, from: sender(), replyTo: SUPPORT_EMAIL });
 }
 
@@ -193,6 +196,9 @@ async function purgeCoach(id: string): Promise<void> {
 
 async function purgeAccount(row: UserRow): Promise<void> {
   const d = await db();
+  // A coach who runs a gym takes the gym with them (its other coaches become independent); a member just leaves it.
+  for (const g of await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, row.id))) await deleteGymEverything(g.id);
+  await d.delete(gymMembers).where(eq(gymMembers.userId, row.id));
   if (row.role === "CLIENT") await purgeClient(row.id);
   else await purgeCoach(row.id);
   await d.delete(workoutReactions).where(eq(workoutReactions.userId, row.id));

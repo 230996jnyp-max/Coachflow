@@ -5,6 +5,7 @@ import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   Apple,
+  Building2,
   CalendarDays,
   ChevronsLeft,
   ChevronsRight,
@@ -24,6 +25,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useChat } from "@/lib/chat";
+import { hasPortalAccess } from "@/lib/gymPerms";
 import { useViewer } from "@/lib/hooks";
 import { refreshAccounts, refreshGroups, refreshSchedule } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -67,6 +69,7 @@ const CLIENT_NAV: NavItem[] = [
 const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
+const GYM_NAV: NavItem = { href: "/gym-admin", label: "Gym", icon: <Building2 size={22} /> };
 const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition"];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -94,6 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     ((isTrainer && CLIENT_ONLY.some((p) => pathname.startsWith(p))) ||
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
+      (pathname.startsWith("/gym-admin") && !hasPortalAccess(user.gym)) ||
       (isPersonal && ["/book", "/messages", "/classes"].some((p) => pathname.startsWith(p))) ||
       (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
@@ -130,7 +134,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
   const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
-  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : clientNav;
+  // A coach whose gym role opens the gym portal gets a Gym entry (on phones it is in the profile menu).
+  const withGym = hasPortalAccess(user.gym) ? [...TRAINER_NAV.slice(0, 4), GYM_NAV, ...TRAINER_NAV.slice(4)] : TRAINER_NAV;
+  const nav = isTrainer ? (user.isOwner ? [...withGym.slice(0, withGym.length - 2), ADMIN_NAV, ...withGym.slice(withGym.length - 2)] : withGym) : clientNav;
   const active = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const activeWorkout = db.workouts.find((w) => w.status === "ACTIVE" && w.loggedById === user.id);
   // A workout the coach is logging for a session on the gym floor leads back to that session, not to one person's workout.

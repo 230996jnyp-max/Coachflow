@@ -7,7 +7,8 @@ export const MIN_AGE = 13;
 export const ADULT_AGE = 18;
 export const TRIAL_DAYS = 30;
 
-export type SignupRole = "COACH" | "CLIENT" | "PERSONAL";
+/** GYM is a coach account that also runs a gym (the Gym card on the sign-up screen). */
+export type SignupRole = "COACH" | "CLIENT" | "PERSONAL" | "GYM";
 export const LEVELS = ["Beginner", "Intermediate", "Advanced"] as const;
 export type Level = (typeof LEVELS)[number];
 export const WEEKLY_TARGETS = [2, 3, 4, 5, 6] as const; // 6 means "6 or more"

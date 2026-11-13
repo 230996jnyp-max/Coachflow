@@ -13,6 +13,7 @@ import { BookingDetail } from "@/components/booking/BookingDetail";
 import { LocationPill } from "@/components/LocationPill";
 import { bookingLocation, StatusBadge, timeRange } from "@/components/booking/bookingUi";
 import { FeelingBadge } from "@/components/workout/FeelingCard";
+import { GymChip } from "@/components/gym/GymChip";
 import { HomeSlot } from "@/components/HomeSlot";
 import { Avatar, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -50,6 +51,8 @@ export default function TrainerDashboard() {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader title={`${now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening"}, ${user.prefs?.nick || user.name.split(" ")[1] || user.name}`} subtitle={format(now, "EEEE d MMMM yyyy")} />
+
+      <GymChip />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Active clients" value={active.length} tone="accent" />

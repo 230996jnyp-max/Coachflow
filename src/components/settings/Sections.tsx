@@ -4,6 +4,7 @@ import { Bell, Compass, KeyRound, LifeBuoy, Mail, MapPin, Moon, Pencil, Plus, Tr
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
+import { GymAffiliation } from "@/components/gym/GymAffiliation";
 import { HaveACoachCard } from "@/components/coachlink/CoachLink";
 import { HomeAddressField } from "@/components/HomeAddressField";
 import { InstallButton } from "@/components/InstallButton";
@@ -234,6 +235,7 @@ export function CoachingSection() {
   const [delGym, setDelGym] = useState<GymLocation | null>(null);
   return (
     <div className="space-y-6">
+      <GymAffiliation />
       <Card className="space-y-3 p-5">
         <Block title="Niche and sports" hint="Your exercise library and starter routines are built around these. You choose once and it is saved to your account.">
           <SpecialtiesCard />

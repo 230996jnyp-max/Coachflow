@@ -5,6 +5,8 @@ import { Check, Copy, KeyRound, Megaphone, MessageSquare, Plus, Power, ShieldChe
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { PendingApprovals } from "@/components/admin/PendingApprovals";
+import { AiUsagePanel } from "@/components/admin/AiUsagePanel";
+import { GymsPanel } from "@/components/admin/GymsPanel";
 import { SignupsPanel } from "@/components/admin/SignupsPanel";
 import { BroadcastModal } from "@/components/chat/BroadcastModal";
 import { RoleBadge } from "@/components/chat/RoleBadge";
@@ -49,7 +51,7 @@ export default function AdminPage() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [toggle, setToggle] = useState<CoachRow | null>(null);
   const [reset, setReset] = useState<CoachRow | null>(null);
-  const [tab, setTab] = useState<"coaches" | "signups" | "pending">("coaches");
+  const [tab, setTab] = useState<"coaches" | "signups" | "gyms" | "ai" | "pending">("coaches");
   const pending = usePendingCoachRequests();
 
   const load = useCallback(async () => {
@@ -109,12 +111,16 @@ export default function AdminPage() {
             ? [
                 ["coaches", "Coaches"],
                 ["signups", "Sign-ups"],
+                ["gyms", "Gyms"],
+                ["ai", "AI usage"],
                 ["pending", "Earlier requests"],
               ]
             : [
                 ["coaches", "Coaches"],
                 ["signups", "Sign-ups"],
-              ]) as ["coaches" | "signups" | "pending", string][]
+                ["gyms", "Gyms"],
+                ["ai", "AI usage"],
+              ]) as ["coaches" | "signups" | "gyms" | "ai" | "pending", string][]
         ).map(([key, label]) => (
           <button
             key={key}
@@ -131,6 +137,8 @@ export default function AdminPage() {
 
       {tab === "pending" && <PendingApprovals onApproved={() => void load()} />}
       {tab === "signups" && <SignupsPanel />}
+      {tab === "gyms" && <GymsPanel />}
+      {tab === "ai" && <AiUsagePanel />}
 
       {tab === "coaches" && (
       <>

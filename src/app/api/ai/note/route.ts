@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { aiConfigured, aiShortNote } from "@/lib/server/ai";
+import { logAiUsage } from "@/lib/server/aiLog";
 import { takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
 import { isMinorRow } from "@/lib/server/accounts";
@@ -35,6 +36,7 @@ export const POST = route(async (req) => {
   } catch {
     return NextResponse.json({ text: null });
   }
+  await logAiUsage({ userId: me.id, feature: "progression" });
   const text = await aiShortNote(kind, facts);
   if (text) await d.insert(aiNotes).values({ key, text }).onConflictDoNothing();
   return NextResponse.json({ text });

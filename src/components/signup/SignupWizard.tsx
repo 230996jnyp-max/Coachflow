@@ -7,6 +7,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Button, Card, Field, Input, Notice, Segmented, Select, Textarea } from "@/components/ui";
 import { CATALOG } from "@/lib/gyms";
+import { cleanGymCode } from "@/lib/gymPerms";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, coachTitle, LEVELS, PERSONAL_GOALS, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import { CORE_SPORTS, sportLabel } from "@/lib/sports";
 import { api } from "@/lib/store";
@@ -29,7 +30,7 @@ const CARDS: { role: SignupRole | "GYM"; title: string; text: string; icon: Reac
   { role: "COACH", title: "Trainer", text: "Run clients & classes", icon: <Dumbbell size={24} /> },
   { role: "CLIENT", title: "Client", text: "Train with coach", icon: <Users size={24} /> },
   { role: "PERSONAL", title: "Solo", text: "Track on my own", icon: <UserRound size={24} /> },
-  { role: "GYM", title: "Gym", text: "Run my academy", icon: <Building2 size={24} />, soon: true },
+  { role: "GYM", title: "Gym", text: "Run my academy", icon: <Building2 size={24} /> },
 ];
 
 function Chips({ options, value, onToggle, label }: { options: { key: string; label: string; hint?: string }[]; value: string[]; onToggle: (k: string) => void; label?: (k: string) => string }) {
@@ -59,7 +60,7 @@ const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
-export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole | null }) {
+export function SignupWizard({ initialRole = null, initialGymCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string }) {
   // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
   const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
@@ -92,6 +93,11 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
   const [goal, setGoal] = useState("");
   const [years, setYears] = useState<number | undefined>(0);
   const [tagline, setTagline] = useState("");
+  const [gymName, setGymName] = useState("");
+  // A gym code from an invitation link (?gym=123456), or typed here. Looked up as soon as it is complete.
+  const [gymCode, setGymCode] = useState(cleanGymCode(initialGymCode) ?? "");
+  const [gymFound, setGymFound] = useState<string | null>(null);
+  const [gymError, setGymError] = useState<string | null>(null);
   const [gymChoice, setGymChoice] = useState<string[]>([]);
   const [gymText, setGymText] = useState("");
   // A coach code typed on the welcome page arrives through this tab's session storage (once). It is looked up below so the coach's name shows.
@@ -132,6 +138,21 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
       alive = false;
     };
     // Only for the code present when the form opens; typing a code is handled by onCode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A gym code that came in with the address is checked straight away, so step 3 already names the gym.
+  useEffect(() => {
+    if (gymCode.length !== 6) return;
+    let alive = true;
+    void api<{ name: string }>("/api/signup/gym-code", { body: { code: gymCode } }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.data) setGymFound(r.data.name);
+      else setGymError(r.error ?? "We couldn't find a gym with that code.");
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -180,8 +201,29 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
     return null;
   };
 
+  const onGymCode = (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 6);
+    setGymCode(digits);
+    setGymFound(null);
+    setGymError(null);
+    if (digits.length === 6) {
+      void api<{ name: string }>("/api/signup/gym-code", { body: { code: digits } }).then((r) => {
+        if (r.ok && r.data) setGymFound(r.data.name);
+        else setGymError(r.error ?? "We couldn't find a gym with that code.");
+      });
+    }
+  };
+
   const step3Error = (): string | null => {
-    if (role === "COACH") return niches.length === 0 ? "Pick at least one thing you coach." : null;
+    if (role === "GYM") {
+      if (gymName.trim().length < 2) return "Enter the name of your gym or academy.";
+      return niches.length === 0 ? "Pick at least one thing you coach." : null;
+    }
+    if (role === "COACH") {
+      if (niches.length === 0) return "Pick at least one thing you coach.";
+      if (gymCode && !gymFound) return gymError ?? (gymCode.length === 6 ? "Checking the gym code…" : "A gym code is six digits. Clear it if you coach independently.");
+      return null;
+    }
     if (role === "CLIENT") {
       if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
       if (!coach) return codeError ?? "Checking your coach's code…";
@@ -227,6 +269,8 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
         tagline: tagline.trim(),
         gyms,
         coachCode: cleanCoachCode(code) ?? "",
+        gymName: role === "GYM" ? gymName.trim() : undefined,
+        gymCode: role === "COACH" ? gymCode : undefined,
         medicalNotes: medical.trim(),
         focuses,
         weeklyTarget: weekly,
@@ -359,7 +403,7 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
                         disabled={c.soon}
                         aria-pressed={on}
                         onClick={() => {
-                          if (c.soon || c.role === "GYM") return;
+                          if (c.soon) return;
                           setRole(c.role);
                           setNiches([]);
                           setGoal("");
@@ -386,9 +430,17 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
               </div>
             )}
 
-            {step === 3 && role === "COACH" && (
+            {step === 3 && (role === "COACH" || role === "GYM") && (
               <div className="space-y-4">
-                <h2 className="text-lg font-bold">About your coaching</h2>
+                <h2 className="text-lg font-bold">{role === "GYM" ? "About your gym" : "About your coaching"}</h2>
+                {role === "GYM" && (
+                  <>
+                    <Field label="Gym or academy name">
+                      <Input value={gymName} onChange={(e) => setGymName(e.target.value)} maxLength={80} placeholder="e.g. Iron Academy" />
+                    </Field>
+                    <p className="-mt-2 text-xs text-muted">You will also coach, with your own clients and schedule. After sign-up you get a gym code to share, and can invite coaches, set roles and see the whole gym&apos;s schedule.</p>
+                  </>
+                )}
                 <div>
                   <div className="mb-2 text-sm font-semibold">What do you coach? <span className="font-normal text-muted">(first is your main one)</span></div>
                   <Chips options={sportOptions} value={niches} onToggle={(k) => toggle(setNiches, k)} />
@@ -406,6 +458,19 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
                   <Input className="mt-2" value={gymText} onChange={(e) => setGymText(e.target.value)} maxLength={200} placeholder="Other places, separated by commas" />
                   <p className="mt-1 text-xs text-muted">You can pick exact branches on the map in Settings later.</p>
                 </div>
+                {role === "COACH" && (
+                  <div>
+                    <Field label="Gym or academy code (optional)" hint={gymError ? undefined : "Working with a gym or coaching academy? Enter its 6-digit code. Leave it blank if you are an independent freelance coach."} error={gymError}>
+                      <Input value={gymCode} onChange={(e) => onGymCode(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={6} placeholder="6 digits" className="font-mono tracking-widest" />
+                    </Field>
+                    {gymFound && (
+                      <p className="mt-2 text-sm font-semibold text-success">
+                        ✓ Linked to {gymFound}
+                        <span className="mt-0.5 block text-xs font-normal text-muted">The gym will see your schedule and completed hours, and approves you once you confirm your email. Your clients and their data stay yours.</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

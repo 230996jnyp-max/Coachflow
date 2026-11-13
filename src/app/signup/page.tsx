@@ -15,7 +15,10 @@ function roleFrom(v: string | null): SignupRole | null {
 function Inner() {
   const { ready, user, isTrainer } = useViewer();
   const router = useRouter();
-  const role = roleFrom(useSearchParams().get("role"));
+  const params = useSearchParams();
+  const gymCode = params.get("gym") ?? "";
+  // An invitation link (?role=coach&gym=123456) opens the coach sign-up with the gym code already in.
+  const role = roleFrom(params.get("role")) ?? (gymCode ? "COACH" : null);
 
   // Someone who is already signed in has no need for this page.
   useEffect(() => {
@@ -23,7 +26,7 @@ function Inner() {
   }, [ready, user, isTrainer, router]);
 
   if (!ready || user) return <Splash />;
-  return <SignupWizard initialRole={role} />;
+  return <SignupWizard initialRole={role} initialGymCode={gymCode} />;
 }
 
 /** Public: make a Coach, Client or Personal account. */
