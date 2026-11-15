@@ -4,6 +4,7 @@ import { Bell, ChevronRight, HelpCircle, Handshake, LogOut, Palette, ShieldCheck
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { BillingCard } from "@/components/billing/BillingCard";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { categoriesFor } from "@/components/settings/categories";
 import { Card, PageHeader, PersonAvatar } from "@/components/ui";
@@ -43,6 +44,13 @@ export default function SettingsPage() {
           <ChevronRight size={18} className="text-muted" />
         </Card>
       </Link>
+
+      {isTrainer && (
+        <section className="space-y-2">
+          <h2 className="px-1 text-sm font-semibold text-muted">Subscription &amp; billing</h2>
+          <BillingCard />
+        </section>
+      )}
 
       <Card className="divide-y divide-line overflow-hidden p-0" data-tour="settings-list">
         {cats.map((c) => (

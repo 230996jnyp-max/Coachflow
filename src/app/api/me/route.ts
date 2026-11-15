@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export const PATCH = route(async (req) => {
   const body = await readJson(req);
-  const me = await requireUser();
+  const me = await requireUser(undefined, { skipBilling: true });
   const set: { unit?: string; onboarded?: boolean; theme?: string; profileEnc?: string; updatedAt: Date } = { updatedAt: new Date() };
   if ("unit" in body) {
     if (body.unit !== "metric" && body.unit !== "imperial") throw badRequest("Unit must be metric or imperial.");

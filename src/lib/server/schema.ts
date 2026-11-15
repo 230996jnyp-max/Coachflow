@@ -520,6 +520,31 @@ export const coachSignupRequests = pgTable(
 );
 export type CoachSignupRow = typeof coachSignupRequests.$inferSelect;
 
+/**
+ * A coach's subscription. `exempt` coaches (the owner, and coaches the owner added as testers) never pay. Everyone else starts with a
+ * 30-day free trial tracked here (no card); subscribing in Stripe adds the Stripe ids. Webhooks keep `status`, `tier_cents` and
+ * `period_end` in step with Stripe.
+ */
+export const coachBilling = pgTable("coach_billing", {
+  coachId: text("coach_id").primaryKey(),
+  exempt: boolean("exempt").notNull().default(false),
+  /** TRIALING | ACTIVE | PAST_DUE | CANCELED | EXPIRED */
+  status: text("status").notNull().default("TRIALING"),
+  trialStart: timestamp("trial_start", { withTimezone: true }),
+  trialEnd: timestamp("trial_end", { withTimezone: true }),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  /** The monthly price (cents) the subscription is set to charge on its next renewal. */
+  tierCents: integer("tier_cents").notNull().default(1500),
+  periodEnd: timestamp("period_end", { withTimezone: true }),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  warned7: boolean("warned_7").notNull().default(false),
+  warned1: boolean("warned_1").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type CoachBillingRow = typeof coachBilling.$inferSelect;
+
 /** How many AI calls a person made today, by kind (limits protect the shared free AI quota). */
 export const aiUsage = pgTable(
   "ai_usage",
@@ -1175,6 +1200,23 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS coach_signup_status_idx ON coach_signup_requests (status, created_at)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS coach_signup_pending_email ON coach_signup_requests (email) WHERE status = 'PENDING'`,
+  `CREATE TABLE IF NOT EXISTS coach_billing (
+    coach_id text PRIMARY KEY,
+    exempt boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'TRIALING',
+    trial_start timestamptz,
+    trial_end timestamptz,
+    stripe_customer_id text,
+    stripe_subscription_id text,
+    tier_cents integer NOT NULL DEFAULT 1500,
+    period_end timestamptz,
+    cancel_at_period_end boolean NOT NULL DEFAULT false,
+    warned_7 boolean NOT NULL DEFAULT false,
+    warned_1 boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS coach_billing_customer ON coach_billing (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS ai_usage (
     user_id text NOT NULL,
     day text NOT NULL,

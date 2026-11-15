@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { pictureToUpload } from "./image";
 import type { MediaKind, Prefs } from "./prefs";
+import { showBillingNotice } from "./billingNotice";
 import { del, get, set } from "idb-keyval";
 import { parseISO } from "date-fns";
 import { SEED_EXERCISES } from "@/data/exercises";
@@ -511,6 +512,7 @@ export async function api<T = Record<string, unknown>>(path: string, init: { met
     } catch {
       data = null;
     }
+    if (res.status === 402 && typeof window !== "undefined") window.dispatchEvent(new Event("coachflow-billing")); // paused: the paywall will show
     return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`), code: res.ok ? undefined : data?.code };
   } catch {
     return { ok: false, status: 0, data: null, error: "Can not reach the server. Check your connection." };
@@ -914,6 +916,8 @@ export interface NewClientInput {
 interface ClientResponse {
   user: User;
   profile: ClientProfile;
+  /** What the roster now costs, when adding / archiving a client changed it (shown as a toast). */
+  billing?: { message: string | null };
 }
 
 function applyClient(res: ClientResponse) {
@@ -928,6 +932,7 @@ export async function createClient(input: NewClientInput): Promise<{ ok: true; i
   const r = await api<ClientResponse & { pack?: boolean; emailed?: "sent" | "preview" | "failed" | "none" }>("/api/clients", { body: input });
   if (!r.ok || !r.data) return { ok: false, error: r.error ?? "Could not create the client." };
   applyClient(r.data);
+  showBillingNotice(r.data.billing?.message);
   return { ok: true, id: r.data.user.id, pack: r.data.pack === true, emailed: r.data.emailed ?? "none" };
 }
 
@@ -940,6 +945,7 @@ export async function updateClient(id: string, patch: { user?: Partial<User>; pr
   const r = await api<ClientResponse>(`/api/clients/${id}`, { method: "PATCH", body });
   if (!r.ok || !r.data) return r.error ?? "Could not save changes.";
   applyClient(r.data);
+  showBillingNotice(r.data.billing?.message);
   return null;
 }
 

@@ -4,6 +4,7 @@ import { format, parseISO } from "date-fns";
 import { Check, Copy, KeyRound, Megaphone, MessageSquare, Plus, Power, ShieldCheck, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { BillingStats, CoachBillingLine, useBillingOverview } from "@/components/admin/BillingAdmin";
 import { PendingApprovals } from "@/components/admin/PendingApprovals";
 import { AiUsagePanel } from "@/components/admin/AiUsagePanel";
 import { GymsPanel } from "@/components/admin/GymsPanel";
@@ -53,6 +54,7 @@ export default function AdminPage() {
   const [reset, setReset] = useState<CoachRow | null>(null);
   const [tab, setTab] = useState<"coaches" | "signups" | "gyms" | "ai" | "pending">("coaches");
   const pending = usePendingCoachRequests();
+  const billing = useBillingOverview();
 
   const load = useCallback(async () => {
     const r = await api<Roster>("/api/admin/coaches");
@@ -148,6 +150,7 @@ export default function AdminPage() {
         <Stat label="Active" value={roster?.totals.activeCoaches ?? "—"} tone="success" />
         <Stat label="Clients" value={roster?.totals.clients ?? "—"} sub="across all coaches" />
       </div>
+      <BillingStats data={billing.data} />
 
       <section>
         <SectionTitle>Coaches</SectionTitle>
@@ -176,6 +179,7 @@ export default function AdminPage() {
                     <div className="text-[11px] text-muted">{c.activeClientCount === c.clientCount ? "clients" : `clients · ${c.activeClientCount} active`}</div>
                   </div>
                 </div>
+                <CoachBillingLine line={billing.data?.coaches.find((l) => l.coachId === c.id)} onChanged={() => void billing.reload()} />
                 {me ? (
                   <div className="flex items-center gap-1.5 text-xs text-muted">
                     <ShieldCheck size={14} className="text-pr" /> This is you — you coach your own clients and manage the platform.
