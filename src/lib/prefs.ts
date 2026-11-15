@@ -70,10 +70,15 @@ export interface Prefs {
   bgV?: number;
   bannerV?: number;
   logoV?: number;
+  /** The guided tours (parts) this person has watched or skipped, so a part is never offered twice. */
+  tours?: string[];
 }
 
 /** The part other people may see (their coach / clients). */
 export const PUBLIC_KEYS = ["bio", "nick", "avatarV", "bannerV", "logoV"] as const;
+
+/** The tour parts. The basics are tracked by the account itself (hasCompletedOnboarding); the rest are listed in prefs.tours once seen. */
+export const TOUR_IDS = ["basics", "clients", "forms", "gym", "admin"] as const;
 
 export const MEDIA_KINDS = ["avatar", "bg", "banner", "logo"] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
@@ -99,6 +104,7 @@ export function cleanPrefs(raw: unknown): Prefs {
   if (typeof r.celebrate === "boolean") out.celebrate = r.celebrate;
   if (typeof r.bio === "string") out.bio = r.bio.trim().slice(0, 140);
   if (typeof r.nick === "string") out.nick = r.nick.trim().slice(0, 30);
+  if (Array.isArray(r.tours)) out.tours = [...new Set(r.tours.filter((t): t is string => typeof t === "string" && (TOUR_IDS as readonly string[]).includes(t)))];
   for (const k of ["avatarV", "bgV", "bannerV", "logoV"] as const) if (typeof r[k] === "number" && Number.isFinite(r[k])) out[k] = Math.max(0, Math.floor(r[k] as number));
   if (r.home && typeof r.home === "object" && !Array.isArray(r.home)) {
     const h = r.home as Record<string, unknown>;

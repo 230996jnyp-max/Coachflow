@@ -34,6 +34,7 @@ import { NotificationBell } from "./groups/NotificationBell";
 import { Personalize, hasBackground } from "./Personalize";
 import { ProfileMenu } from "./ProfileMenu";
 import { OnboardingTour } from "./tour/OnboardingTour";
+import { WhatsNew } from "./tour/WhatsNew";
 import { InstallPrompt } from "./InstallPrompt";
 import { Splash } from "./Providers";
 import { TrialBar, TrialGate } from "./TrialBar";
@@ -224,6 +225,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <ChatSync userId={user.id} threads={threads} />
       <OnboardingTour />
+      <WhatsNew />
       {user.hasCompletedOnboarding && <InstallPrompt />}
       <ToastHost toasts={chat.toasts} onOpen={(thread) => { dismissToast(thread); router.push("/messages"); }} />
 

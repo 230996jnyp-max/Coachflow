@@ -838,6 +838,17 @@ export function completeOnboarding() {
   void api("/api/me", { method: "PATCH", body: { hasCompletedOnboarding: true } });
 }
 
+/** Remembers on the account that these tour parts were watched or skipped, so they are not offered again. */
+export function markToursSeen(ids: string[]) {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  const me = state.db.users.find((u) => u.id === uid);
+  const cur = me?.prefs?.tours ?? [];
+  const next = [...new Set([...cur, ...ids])];
+  if (next.length === cur.length) return;
+  savePrefs({ tours: next });
+}
+
 /** Saves the chosen theme on the account (the device copy is written by applyTheme). */
 export function saveThemePreference(id: "black" | "white" | "navy") {
   const uid = state.sessionUserId;

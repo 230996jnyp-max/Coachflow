@@ -237,13 +237,14 @@ export function Tabs<T extends string>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  tabs: { value: T; label: string; icon?: ReactNode }[];
+  tabs: { value: T; label: string; icon?: ReactNode; /** For the guided tour: marks this tab as something it can point at. */ tourId?: string }[];
 }) {
   return (
     <div className="no-scrollbar -mx-4 mb-5 flex gap-1 overflow-x-auto border-b border-line px-4 md:mx-0 md:px-0">
       {tabs.map((t) => (
         <button
           key={t.value}
+          data-tour={t.tourId}
           onClick={() => onChange(t.value)}
           className={cn(
             "flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors",

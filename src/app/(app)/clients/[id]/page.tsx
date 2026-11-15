@@ -88,7 +88,7 @@ export default function ClientDetailPage() {
           { value: "workouts", label: "Workouts" },
           { value: "progress", label: "Progress" },
           { value: "nutrition", label: "Nutrition" },
-          { value: "intake", label: "Intake", icon: profile.intake && (profile.intake.needsReview || profile.intake.selfAssessments > 0) ? <span aria-label="Needs your attention" className="h-2 w-2 rounded-full bg-danger" /> : undefined },
+          { value: "intake", tourId: "client-tab-intake", label: "Intake", icon: profile.intake && (profile.intake.needsReview || profile.intake.selfAssessments > 0) ? <span aria-label="Needs your attention" className="h-2 w-2 rounded-full bg-danger" /> : undefined },
           { value: "sessions", label: "Sessions" },
           { value: "profile", label: "Profile" },
         ]}

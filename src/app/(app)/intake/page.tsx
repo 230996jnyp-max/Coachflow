@@ -93,7 +93,7 @@ export default function IntakePage() {
       )}
 
       {state && !detail && (
-        <section className="space-y-3">
+        <section className="space-y-3" data-tour="intake-forms">
           <SectionTitle>Your forms</SectionTitle>
           {!state.request && <p className="text-sm text-muted">Your coach hasn’t asked for these yet, but you can fill them in any time.</p>}
           {FORM_KINDS.map((k) => {

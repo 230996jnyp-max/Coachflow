@@ -108,10 +108,10 @@ export default function ClientsPage() {
             <Button variant="secondary" onClick={() => setNudging(true)} disabled={active.length === 0}>
               <Send size={16} /> Nudge clients
             </Button>
-            <Button variant="secondary" onClick={() => setImporting(true)}>
+            <Button variant="secondary" data-tour="clients-import" onClick={() => setImporting(true)}>
               <FileUp size={16} /> Import clients
             </Button>
-            <Button onClick={() => setAdding(true)}>
+            <Button data-tour="clients-add" onClick={() => setAdding(true)}>
               <UserPlus size={16} /> Add client
             </Button>
           </>

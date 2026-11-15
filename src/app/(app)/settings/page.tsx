@@ -44,7 +44,7 @@ export default function SettingsPage() {
         </Card>
       </Link>
 
-      <Card className="divide-y divide-line overflow-hidden p-0">
+      <Card className="divide-y divide-line overflow-hidden p-0" data-tour="settings-list">
         {cats.map((c) => (
           <Link key={c.slug} href={c.slug === "administration" ? "/admin" : `/settings/${c.slug}`} className={row} data-tour={`settings-${c.slug}`}>
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-field text-accent">{ICONS[c.slug]}</span>

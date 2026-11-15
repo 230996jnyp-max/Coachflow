@@ -5,6 +5,7 @@ import { Check, Circle, ClipboardCheck, Gift, LoaderCircle, Send, ShieldAlert } 
 import { useEffect, useMemo, useState } from "react";
 import { AssessmentHub } from "@/components/assessment/AssessmentHub";
 import { FormView } from "@/components/intake/FormParts";
+import { FormPreviewModal, FormsPreviewRows } from "@/components/intake/FormsPreview";
 import { Badge, Button, Card, Field, Notice, SectionTitle, Select, Textarea } from "@/components/ui";
 import { FORM_BLURB, FORM_KINDS, FORM_LABEL, PRIVACY_NOTE_COACH, type FormKind } from "@/lib/intakeForms";
 import type { AssessmentRec, FormRec, IntakeStateRec } from "@/lib/intakeApi";
@@ -33,6 +34,7 @@ export function CoachIntake({ clientId, clientName, minor }: { clientId: string;
   const [asking, setAsking] = useState(false);
   const [asked, setAsked] = useState(false);
   const [detail, setDetail] = useState(false);
+  const [preview, setPreview] = useState<FormKind | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -119,6 +121,12 @@ export function CoachIntake({ clientId, clientName, minor }: { clientId: string;
         {asked && <p className="mt-2 text-sm text-success">{clientName.split(" ")[0]} was sent a message asking them to fill in the forms. They sign in to their own account to do it. You’ll be told as they finish, and reminded if they haven’t done them 24 hours before a session.</p>}
         {state.request && missing.length > 0 && <p className="mt-2 text-sm text-muted">Still to do: {missing.map((k) => FORM_LABEL[k].toLowerCase()).join(", ")}.</p>}
         {minor && <p className="mt-2 text-sm text-muted">{clientName.split(" ")[0]} is under 18, so the declaration needs a parent or guardian’s name.</p>}
+        <details className="mt-3 rounded-xl border border-line p-3 text-sm">
+          <summary className="cursor-pointer font-semibold">See the forms {clientName.split(" ")[0]} gets</summary>
+          <div className="mt-3">
+            <FormsPreviewRows onPreview={setPreview} />
+          </div>
+        </details>
       </section>
 
       <section>
@@ -137,6 +145,7 @@ export function CoachIntake({ clientId, clientName, minor }: { clientId: string;
       <section>
         <AssessmentHub clientId={clientId} clientName={clientName} role="COACH" minor={minor} onChanged={reload} onDetail={setDetail} />
       </section>
+      <FormPreviewModal kind={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }

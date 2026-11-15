@@ -39,6 +39,7 @@ export function FormFill<K extends FormKind>({
   clientName,
   onSubmit,
   onCancel,
+  preview = false,
 }: {
   kind: K;
   minor: boolean;
@@ -47,6 +48,8 @@ export function FormFill<K extends FormKind>({
   /** Resolves to an error message, or null when it was saved. */
   onSubmit: (data: FormData[K]) => Promise<string | null>;
   onCancel: () => void;
+  /** A coach looking at the form the way a client sees it: everything works, nothing is saved or sent. */
+  preview?: boolean;
 }) {
   const [data, setData] = useState<FormData[K]>(() => (initial ? structuredClone(initial) : (kind === "PARQ" ? emptyParq() : kind === "GOALS" ? emptyGoals() : { agreed: false, typedName: "", date: "", emergencyName: "", emergencyPhone: "" }) as FormData[K]));
   const [error, setError] = useState<string | null>(null);
@@ -68,14 +71,21 @@ export function FormFill<K extends FormKind>({
       {kind === "DECLARATION" && <DeclarationFields value={data as DeclarationData} onChange={(v) => setData(v as FormData[K])} minor={minor} clientName={clientName} />}
       {kind === "GOALS" && <GoalsFields value={data as GoalsData} onChange={(v) => setData(v as FormData[K])} />}
       {error && <Notice tone="error">{error}</Notice>}
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={() => void submit()} disabled={busy}>
-          <Check size={16} /> {busy ? "Saving…" : initial ? "Save a new version" : "Submit"}
-        </Button>
-      </div>
+      {preview ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-muted">Preview only: your client’s Submit button is here, but nothing is saved or sent.</span>
+          <Button onClick={onCancel}>Close preview</Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} disabled={busy}>
+            <Check size={16} /> {busy ? "Saving…" : initial ? "Save a new version" : "Submit"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
 import { GymAffiliation } from "@/components/gym/GymAffiliation";
 import { HaveACoachCard } from "@/components/coachlink/CoachLink";
+import { FormPreviewModal, FormsPreviewRows } from "@/components/intake/FormsPreview";
 import { HomeAddressField } from "@/components/HomeAddressField";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
@@ -17,9 +18,12 @@ import { Badge, Button, Card, ConfirmDialog, Field, IconButton, Input, Modal, Se
 import { showBrowserNotification } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
 import type { InviteResult } from "@/lib/notify";
+import type { FormKind } from "@/lib/intakeForms";
 import { requestNicheStep } from "@/lib/nicheGate";
 import { SUPPORT_EMAIL } from "@/lib/support";
+import { useTourWho } from "@/components/tour/useTourWho";
 import { startTour } from "@/lib/tour";
+import { sectionsFor } from "@/lib/tourSteps";
 import { deleteGym, saveGym, savePrefs, setUnit, updateSettings } from "@/lib/store";
 import type { GymLocation } from "@/lib/types";
 import { AccentPicker, BackgroundPicker, CoachBranding, HomeLayoutEditor, PhotoField } from "./Personal";
@@ -233,9 +237,16 @@ export function CoachingSection() {
   const s = db.settings;
   const [gymModal, setGymModal] = useState<Partial<GymLocation> | null>(null);
   const [delGym, setDelGym] = useState<GymLocation | null>(null);
+  const [previewing, setPreviewing] = useState<FormKind | null>(null);
   return (
     <div className="space-y-6">
       <GymAffiliation />
+      <Card className="space-y-3 p-5" data-tour="forms-preview">
+        <Block title="Client forms" hint="The health questionnaire, health declaration and goals form your clients fill in before they meet you. Preview shows each one exactly as a client sees it. You can click through, but nothing is saved or sent.">
+          <FormsPreviewRows onPreview={setPreviewing} highlight />
+        </Block>
+      </Card>
+      <FormPreviewModal kind={previewing} onClose={() => setPreviewing(null)} />
       <Card className="space-y-3 p-5">
         <Block title="Niche and sports" hint="Your exercise library and starter routines are built around these. You choose once and it is saved to your account.">
           <SpecialtiesCard />
@@ -389,12 +400,29 @@ export function MyCoachSection() {
 
 /* ---------------- Legal & help ---------------- */
 export function HelpSection() {
+  const { who } = useTourWho();
+  const parts = sectionsFor(who);
   return (
     <Card className="space-y-5 p-5">
-      <Block title="Guided tour" hint="A quick walkthrough of the main screens, any time you want a refresher.">
-        <Button variant="secondary" onClick={() => startTour()}>
-          <Compass size={16} /> Replay onboarding tour
-        </Button>
+      <Block title="Guided tour" hint="Watch the tour again, or just the part you want.">
+        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+          {parts.map((p) => (
+            <li key={p.id} className="flex items-center gap-3 p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold">{p.label}</div>
+                <div className="text-xs text-muted">{p.blurb}</div>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => startTour([p.id])} aria-label={`Watch the tour: ${p.label}`}>
+                <Compass size={14} /> Watch
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {parts.length > 1 && (
+          <Button variant="ghost" size="sm" onClick={() => startTour(parts.map((p) => p.id))}>
+            Watch everything, start to finish
+          </Button>
+        )}
       </Block>
       <Block title="Install the app" hint="Add CoachFlow to your home screen so it opens full-screen, like a normal app.">
         <InstallButton />

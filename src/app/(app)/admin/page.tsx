@@ -124,6 +124,7 @@ export default function AdminPage() {
         ).map(([key, label]) => (
           <button
             key={key}
+            data-tour={`admin-tab-${key}`}
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}

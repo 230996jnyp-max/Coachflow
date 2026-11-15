@@ -93,6 +93,7 @@ export default function GymAdminPage() {
           .map((t) => (
             <button
               key={t.id}
+              data-tour={`gym-tab-${t.id}`}
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
