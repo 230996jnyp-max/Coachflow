@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { GOALS, sealProfile, toProfile, toUser, type ProfileJson } from "@/lib/server/accounts";
 import { hashPassword, requireUser } from "@/lib/server/auth";
+import { previewTier, syncTier, tierMessage } from "@/lib/server/billing";
 import { db } from "@/lib/server/db";
 import { badRequest, checkPassword, conflict, email, int, isUniqueViolation, readJson, route, str } from "@/lib/server/http";
 import { logCredit } from "@/lib/server/credits";
@@ -62,7 +63,10 @@ export const POST = route(async (req) => {
       const origin = process.env.APP_URL || new URL(req.url).origin;
       emailed = (await sendClientLoginEmail({ to: profile.email, name: profile.name, coachName: me.name ?? "Your coach", username, password, origin, pack })).status;
     }
-    return NextResponse.json({ user: toUser(row), profile: toProfile(row), pack, emailed });
+    // The price follows the active roster, from the next renewal: say so now, and tell Stripe in the background.
+    const tier = await previewTier(me.id);
+    after(() => syncTier(me.id).catch((e) => console.error("syncTier failed", e instanceof Error ? e.message : "")));
+    return NextResponse.json({ user: toUser(row), profile: toProfile(row), pack, emailed, billing: { ...tier, message: tierMessage(tier, "added") } });
   } catch (e) {
     if (isUniqueViolation(e)) throw conflict("That username is already taken.");
     throw e;

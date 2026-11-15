@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { applyGoalFields, GOALS, loadClientFor, openProfile, parseUsername, sealProfile, setUsername, toProfile, toUser } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
+import { previewTier, syncTier, tierMessage } from "@/lib/server/billing";
 import { db } from "@/lib/server/db";
 import { badRequest, email, int, notFound, readJson, route, str } from "@/lib/server/http";
 import { logCredit } from "@/lib/server/credits";
@@ -80,7 +81,14 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   // Credit changes made by the coach go in the client's credit log.
   if (p.credits !== before.credits) await logCredit({ clientId: id, coachId: me.id, pool: "SESSION", kind: "ADJUSTMENT", delta: p.credits - before.credits, sessionType: "1-on-1 PT", label: "Coach manual adjustment", balance: p.credits });
   if ((p.groupClassCredits ?? 0) !== before.group) await logCredit({ clientId: id, coachId: me.id, pool: "GROUP", kind: "ADJUSTMENT", delta: (p.groupClassCredits ?? 0) - before.group, sessionType: "Group Class", label: "Coach manual adjustment", balance: p.groupClassCredits ?? 0 });
-  return NextResponse.json({ user: toUser(updated), profile: toProfile(updated) });
+  // Archiving or restoring a client changes the active roster, so the subscription price may move on the next renewal.
+  let billing: unknown;
+  if (typeof body.archived === "boolean" && body.archived !== !row.active) {
+    const tier = await previewTier(me.id);
+    after(() => syncTier(me.id).catch((e) => console.error("syncTier failed", e instanceof Error ? e.message : "")));
+    billing = { ...tier, message: tierMessage(tier, body.archived ? "removed" : "added") };
+  }
+  return NextResponse.json({ user: toUser(updated), profile: toProfile(updated), ...(billing ? { billing } : {}) });
 });
 
 /** DELETE — permanently remove one of the coach's clients and their chat history. */
@@ -101,5 +109,6 @@ export const DELETE = route<Ctx>(async (req, ctx) => {
   await purgeClientIntake(id);
   await purgeClientAssessments(id);
   await d.delete(users).where(and(eq(users.id, id), eq(users.coachId, me.id)));
+  after(() => syncTier(me.id).catch((e) => console.error("syncTier failed", e instanceof Error ? e.message : "")));
   return NextResponse.json({ ok: true });
 });

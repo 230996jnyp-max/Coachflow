@@ -1,7 +1,10 @@
 "use client";
 
 import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
+import { BillingBar } from "@/components/billing/BillingBar";
+import { BillingGate } from "@/components/billing/BillingGate";
 import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
+import { useBilling, useBillingLoader } from "@/lib/billingState";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   Apple,
@@ -110,6 +113,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!acceptedUnread) return;
     void Promise.all([refreshAccounts(), refreshSchedule(), refreshGroups()]);
   }, [acceptedUnread]);
+  const billing = useBilling();
+  useBillingLoader(user?.id);
   const pendingCoaches = usePendingCoachRequests();
   const isOwner = !!user?.isOwner;
   // The owner sees how many coach sign-up requests are waiting (a badge on Admin), refreshed every minute.
@@ -128,7 +133,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [ready, user, forbidden, mustChange, isTrainer, router]);
 
   if (!ready || !user || forbidden || mustChange) return <Splash />;
-  if (user.trial?.enforced && user.trial.expired && !user.isOwner) return <TrialGate />;
+  // Someone training on their own keeps the free-month rule; coaches and their clients use the subscription (BillingGate) instead.
+  if (!isTrainer && user.trial?.enforced && user.trial.expired && !user.isOwner) return <TrialGate />;
+  // A coach without a trial or subscription (and that coach's clients) is paused; nothing is deleted.
+  if (billing?.blocked && !user.mustChangePassword) return <BillingGate info={billing} />;
   // A coach who has not chosen a niche yet picks one (after the set-your-password screen) before reaching the dashboard. It is saved to the
   // account, so signing in again does not ask; Settings → Coaching can reopen it to change it.
   if (isTrainer && (nicheStep || (db.settings.specialties ?? []).length === 0) && !user.mustChangePassword) return <NicheStep />;
@@ -216,7 +224,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className={cn("pb-28 md:pb-10", slim ? "md:pl-[72px]" : "md:pl-64")}>
         <div className={cn("mx-auto w-full px-4 py-5 md:px-8 md:py-8", pathname.startsWith("/floor/") ? "max-w-7xl" : "max-w-5xl")}>
-          {user.trial && <TrialBar trial={user.trial} />}
+          {user.trial && !isTrainer && <TrialBar trial={user.trial} />}
+          <BillingBar />
           {isTrainer && !pathname.startsWith("/floor/") && <FloorBanner />}
           {children}
         </div>

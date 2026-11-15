@@ -3,10 +3,11 @@ import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
+import { assertBillingOk } from "./billing";
 import { db } from "./db";
 import { forbidden, HttpError, unauthorized } from "./http";
 import { users, type UserRow } from "./schema";
-import { trialBlocked, trialEnforced } from "./trial";
+import { trialBlocked } from "./trial";
 
 const COOKIE = "cf_session";
 const MAX_AGE = 7 * 24 * 60 * 60;
@@ -101,14 +102,26 @@ export async function requireTrainerOrPersonal(): Promise<UserRow> {
   throw forbidden();
 }
 
-/** Requires a signed-in user, optionally restricted to certain roles. */
-export async function requireUser(roles?: DbRole[]): Promise<UserRow> {
+/**
+ * Requires a signed-in user, optionally restricted to certain roles. Then the paywall, in this order (skipped on the few routes that
+ * must keep working so a paused person can fix it):
+ * - A coach in a gym is covered by the gym's free month (gym plans come later): when it ends and TRIAL_ENFORCED=1, it stops for them.
+ * - An independent coach, and that coach's clients, need a trial or a Stripe subscription once BILLING_ENFORCED=1.
+ * - Someone training on their own ("Personal") keeps the free-month rule (TRIAL_ENFORCED=1).
+ */
+export async function requireUser(roles?: DbRole[], opts: { skipBilling?: boolean } = {}): Promise<UserRow> {
   const u = await currentUser();
   if (!u) throw unauthorized();
   if (roles && !roles.includes(u.role as DbRole)) throw forbidden();
-  // Someone in a gym is covered by the gym's free month, not their own: when the gym's ends, the platform stops for its coaches and admins.
+  if (opts.skipBilling || u.role === "OWNER") return u;
   const { gymTrialBlocks } = await import("./gymOrg");
-  const byGym = u.role === "COACH" && trialEnforced() ? await gymTrialBlocks(u.id) : null;
-  if (byGym === null ? trialBlocked(u) : byGym) throw new HttpError(402, "Your free month has ended. Subscriptions are opening soon.", "trial_over");
+  const byGym = u.role === "COACH" ? await gymTrialBlocks(u.id) : null;
+  if (byGym !== null) {
+    if (byGym) throw new HttpError(402, "Your gym's free month has ended. Subscriptions are opening soon.", "trial_over");
+  } else if (u.role === "COACH" || (u.role === "CLIENT" && u.coachId)) {
+    await assertBillingOk(u);
+  } else if (trialBlocked(u)) {
+    throw new HttpError(402, "Your free month has ended. Subscriptions are opening soon.", "trial_over");
+  }
   return u;
 }

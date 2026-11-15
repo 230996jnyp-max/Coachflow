@@ -6,6 +6,7 @@ import { hashPassword, requireUser } from "@/lib/server/auth";
 import { tempPassword } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
 import { conflict, email, isUniqueViolation, readJson, route, str } from "@/lib/server/http";
+import { markExempt } from "@/lib/server/billing";
 import { users } from "@/lib/server/schema";
 import { sendCredentialsEmail } from "@/lib/server/staff";
 
@@ -74,6 +75,7 @@ export const POST = route(async (req) => {
     if (isUniqueViolation(e)) throw conflict("A coach with that email already exists.");
     throw e;
   }
+  await markExempt(id); // coaches the owner adds are testers: they never pay
   const origin = process.env.APP_URL || new URL(req.url).origin;
   const mail = await sendCredentialsEmail({ to: address, name, username: address, password, origin });
   return NextResponse.json({ coach: { id, name, email: address }, temporaryPassword: password, email: { status: mail.status, error: mail.error } });
