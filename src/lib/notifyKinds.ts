@@ -44,6 +44,14 @@ const BY_KIND: Record<string, NoteCategory> = {
   coach_request: "clients",
   coach_accepted: "clients",
   coach_declined: "clients",
+  intake_request: "clients",
+  intake_submitted: "clients",
+  intake_reviewed: "clients",
+  intake_ack: "clients",
+  intake_reminder: "clients",
+  assessment_submitted: "clients",
+  assessment_shared: "clients",
+  assessment_ack: "clients",
 };
 
 export function categoryOf(kind: string): NoteCategory {

@@ -5,6 +5,9 @@ import { Check, Copy, KeyRound, Megaphone, MessageSquare, Plus, Power, ShieldChe
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { PendingApprovals } from "@/components/admin/PendingApprovals";
+import { AiUsagePanel } from "@/components/admin/AiUsagePanel";
+import { GymsPanel } from "@/components/admin/GymsPanel";
+import { SignupsPanel } from "@/components/admin/SignupsPanel";
 import { BroadcastModal } from "@/components/chat/BroadcastModal";
 import { RoleBadge } from "@/components/chat/RoleBadge";
 import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, Modal, Notice, PageHeader, SectionTitle, Stat } from "@/components/ui";
@@ -48,7 +51,7 @@ export default function AdminPage() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [toggle, setToggle] = useState<CoachRow | null>(null);
   const [reset, setReset] = useState<CoachRow | null>(null);
-  const [tab, setTab] = useState<"coaches" | "signups" | "pending">("coaches");
+  const [tab, setTab] = useState<"coaches" | "signups" | "gyms" | "ai" | "pending">("coaches");
   const pending = usePendingCoachRequests();
 
   const load = useCallback(async () => {
@@ -108,15 +111,20 @@ export default function AdminPage() {
             ? [
                 ["coaches", "Coaches"],
                 ["signups", "Sign-ups"],
+                ["gyms", "Gyms"],
+                ["ai", "AI usage"],
                 ["pending", "Earlier requests"],
               ]
             : [
                 ["coaches", "Coaches"],
                 ["signups", "Sign-ups"],
-              ]) as ["coaches" | "signups" | "pending", string][]
+                ["gyms", "Gyms"],
+                ["ai", "AI usage"],
+              ]) as ["coaches" | "signups" | "gyms" | "ai" | "pending", string][]
         ).map(([key, label]) => (
           <button
             key={key}
+            data-tour={`admin-tab-${key}`}
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
@@ -130,6 +138,8 @@ export default function AdminPage() {
 
       {tab === "pending" && <PendingApprovals onApproved={() => void load()} />}
       {tab === "signups" && <SignupsPanel />}
+      {tab === "gyms" && <GymsPanel />}
+      {tab === "ai" && <AiUsagePanel />}
 
       {tab === "coaches" && (
       <>
@@ -230,120 +240,6 @@ export default function AdminPage() {
         }}
       />
       <IssuedModal issued={issued} onClose={() => setIssued(null)} />
-    </div>
-  );
-}
-
-interface Bucket {
-  total: number;
-  verified: number;
-  trial: number;
-}
-interface SignupOverview {
-  coaches: Bucket;
-  personal: Bucket;
-  clients: Bucket;
-  unverified: number;
-  waitlist: number;
-  days: { day: string; n: number }[];
-  recent: { kind: "coach" | "personal" | "client"; verified: boolean; active: boolean; createdAt: string }[];
-}
-
-const KIND_LABEL = { coach: "Coach", personal: "Personal", client: "Coached client" } as const;
-
-/** People who asked to hear when the AI personal trainer is ready. The addresses are fetched only when the owner asks to copy them. */
-function WaitlistRow({ count }: { count: number }) {
-  const [state, setState] = useState<"idle" | "busy" | "copied" | "error">("idle");
-  const copy = async () => {
-    setState("busy");
-    const r = await api<{ list: { email: string }[] }>("/api/admin/waitlist");
-    if (!r.ok || !r.data) return setState("error");
-    try {
-      await navigator.clipboard.writeText(r.data.list.map((x) => x.email).join("\n"));
-      setState("copied");
-    } catch {
-      setState("error");
-    }
-    setTimeout(() => setState("idle"), 2500);
-  };
-  return (
-    <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
-      <div>
-        <div className="font-semibold">AI trainer waitlist</div>
-        <div className="text-sm text-muted">{count === 1 ? "1 person is" : `${count} people are`} waiting to hear when it&apos;s ready.</div>
-      </div>
-      <Button size="sm" variant="secondary" onClick={() => void copy()} disabled={count === 0 || state === "busy"}>
-        {state === "copied" ? "Copied" : state === "error" ? "Could not copy" : state === "busy" ? "Getting them" : "Copy emails"}
-      </Button>
-    </Card>
-  );
-}
-
-/** Counts and dates only — never names or emails. */
-function SignupsPanel() {
-  const [data, setData] = useState<SignupOverview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    api<SignupOverview>("/api/admin/signups").then((r) => {
-      if (!alive) return;
-      if (r.ok && r.data) setData(r.data);
-      else setError(r.error ?? "Could not load sign-ups.");
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <Card className="p-6 text-center text-sm text-muted">Loading…</Card>;
-  const max = Math.max(1, ...data.days.map((x) => x.n));
-  const week = data.days.slice(-7).reduce((n, x) => n + x.n, 0);
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label="Coaches" value={data.coaches.total} sub={`${data.coaches.verified} verified`} tone="accent" />
-        <Stat label="Personal" value={data.personal.total} sub={`${data.personal.trial} on free trial`} />
-        <Stat label="Coached clients" value={data.clients.total} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Stat label="Last 7 days" value={week} sub="new accounts" tone="success" />
-        <Stat label="Not verified" value={data.unverified} sub="Personal accounts waiting on the email link" />
-      </div>
-      <WaitlistRow count={data.waitlist} />
-      <section>
-        <SectionTitle>New accounts, last 14 days</SectionTitle>
-        <Card className="p-4">
-          <div className="flex h-28 items-end gap-1.5" role="img" aria-label="New accounts per day for the last 14 days">
-            {data.days.map((x) => (
-              <div key={x.day} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={`${x.day}: ${x.n}`}>
-                <span className="text-[10px] tabular-nums text-muted">{x.n || ""}</span>
-                <div className="w-full rounded-t bg-accent" style={{ height: `${Math.max(x.n ? 6 : 2, (x.n / max) * 80)}%`, opacity: x.n ? 1 : 0.25 }} />
-              </div>
-            ))}
-          </div>
-          <div className="mt-1 flex justify-between text-[10px] text-muted">
-            <span>{format(parseISO(data.days[0].day), "d MMM")}</span>
-            <span>{format(parseISO(data.days[data.days.length - 1].day), "d MMM")}</span>
-          </div>
-        </Card>
-      </section>
-      <section>
-        <SectionTitle>Latest 25</SectionTitle>
-        <div className="space-y-2">
-          {data.recent.length === 0 && <Card className="p-6 text-center text-sm text-muted">No sign-ups yet.</Card>}
-          {data.recent.map((r, i) => (
-            <Card key={i} className="flex items-center justify-between gap-3 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold">{KIND_LABEL[r.kind]}</span>
-                {!r.verified && <Badge className="border-pr/30 bg-pr/15 text-pr">Email not verified</Badge>}
-                {!r.active && <Badge className="border-danger/30 bg-danger/15 text-danger">Closed</Badge>}
-              </div>
-              <span className="text-xs text-muted">{format(parseISO(r.createdAt), "d MMM yyyy, h:mm a")}</span>
-            </Card>
-          ))}
-        </div>
-      </section>
-      <p className="text-xs text-muted">Only counts and dates are shown. Names, emails and training data stay private.</p>
     </div>
   );
 }

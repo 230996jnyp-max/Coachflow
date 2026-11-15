@@ -338,7 +338,18 @@ async function scannedPdfRows(bytes: Uint8Array): Promise<{ rows: Row[]; pages: 
 /* ---------------- Entry point ---------------- */
 const ext = (name: string) => name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
 
-function finish(rows: Row[], kind: string, pages?: number): Extracted {
+/** Rows kept as a plain table (tab between cells), for imports that are not workouts, such as a list of clients. */
+function finishRaw(rows: Row[], kind: string, pages?: number): Extracted {
+  const text = rows
+    .map((r) => r.map((c) => c.replace(/[\t\r\n]+/g, " ").trim()).join("\t").replace(/\t+$/, ""))
+    .filter((l) => l.trim())
+    .join("\n")
+    .trim();
+  if (!text) throw unsupported("I couldn't find any text in that file.");
+  return { text: text.slice(0, MAX_TEXT), kind, pages };
+}
+
+function finishText(rows: Row[], kind: string, pages?: number): Extracted {
   const lines: string[] = [];
   for (const l of rowsToLines(rows)) lines.push(...splitLabelGroups(l));
   const text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -346,7 +357,8 @@ function finish(rows: Row[], kind: string, pages?: number): Extracted {
   return { text: text.slice(0, MAX_TEXT), kind, pages };
 }
 
-export async function extractFile(name: string, bytes: Uint8Array, brand: string): Promise<Extracted> {
+export async function extractFile(name: string, bytes: Uint8Array, brand: string, opts: { raw?: boolean } = {}): Promise<Extracted> {
+  const finish = (rows: Row[], kind: string, pages?: number) => (opts.raw ? finishRaw(rows, kind, pages) : finishText(rows, kind, pages));
   const e = ext(name);
   const head = String.fromCharCode(...bytes.subarray(0, 8));
 

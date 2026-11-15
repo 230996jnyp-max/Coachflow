@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { requestNicheStep } from "./nicheGate";
+import { pictureToUpload } from "./image";
+import type { MediaKind, Prefs } from "./prefs";
 import { del, get, set } from "idb-keyval";
 import { parseISO } from "date-fns";
 import { SEED_EXERCISES } from "@/data/exercises";
@@ -765,10 +766,9 @@ export async function loginResult(username: string, password: string): Promise<{
   if (!r.ok) return { error: r.error ?? "Login failed.", code: r.code };
   markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
-  if (ok) {
-    rememberUsername(username); // only the username is remembered on this device, never the password
-    requestNicheStep(); // a coach chooses their niche after every sign-in (clients never see it)
-  }
+  // Only the username is remembered on this device, never the password. A coach with no niche saved yet is asked for one by the
+  // app shell (once: it is saved to the account), so signing in doesn't ask again.
+  if (ok) rememberUsername(username);
   if (!ok) clearActive();
   return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
@@ -838,12 +838,54 @@ export function completeOnboarding() {
   void api("/api/me", { method: "PATCH", body: { hasCompletedOnboarding: true } });
 }
 
+/** Remembers on the account that these tour parts were watched or skipped, so they are not offered again. */
+export function markToursSeen(ids: string[]) {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  const me = state.db.users.find((u) => u.id === uid);
+  const cur = me?.prefs?.tours ?? [];
+  const next = [...new Set([...cur, ...ids])];
+  if (next.length === cur.length) return;
+  savePrefs({ tours: next });
+}
+
 /** Saves the chosen theme on the account (the device copy is written by applyTheme). */
 export function saveThemePreference(id: "black" | "white" | "navy") {
   const uid = state.sessionUserId;
   if (!uid) return;
   mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, themePreference: id } : u)) }));
   void api("/api/me", { method: "PATCH", body: { themePreference: id } });
+}
+
+/** Saves look-and-feel choices (accent, background, text size, bio ...). Applied at once; the server keeps them for every device. */
+export function savePrefs(patch: Partial<Prefs>) {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, prefs: { ...u.prefs, ...patch } } : u)) }));
+  void api("/api/me", { method: "PATCH", body: { prefs: patch } });
+}
+
+/** Uploads one of your pictures (already shrunk by pictureToUpload). Returns an error message, or null on success. */
+export async function uploadPicture(kind: MediaKind, file: File): Promise<string | null> {
+  const uid = state.sessionUserId;
+  if (!uid) return "Please sign in again.";
+  let up: { mime: string; data: string };
+  try {
+    up = await pictureToUpload(file, kind);
+  } catch (e) {
+    return e instanceof Error ? e.message : "That picture couldn't be read.";
+  }
+  const r = await api<{ prefs: Prefs }>(`/api/media/me/${kind}`, { method: "PUT", body: up });
+  if (!r.ok || !r.data) return r.error ?? "Couldn't save the picture.";
+  mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, prefs: r.data!.prefs } : u)) }));
+  return null;
+}
+
+export async function removePicture(kind: MediaKind): Promise<void> {
+  const uid = state.sessionUserId;
+  if (!uid) return;
+  const r = await api<{ prefs: Prefs }>(`/api/media/me/${kind}`, { method: "DELETE" });
+  if (r.ok && r.data) mutate((db) => ({ ...db, users: db.users.map((u) => (u.id === uid ? { ...u, prefs: r.data!.prefs } : u)) }));
 }
 
 export function setUnit(userId: string, unit: UnitSystem) {
@@ -863,6 +905,10 @@ export interface NewClientInput {
   groupClassCredits?: number;
   defaultGymId: string | null;
   medicalNotes: string;
+  /** Ask the client for the "Before we meet" forms, and email the login (one email covers both) when an address is given. */
+  sendPack?: boolean;
+  /** Email the login to the client's address. */
+  emailLogin?: boolean;
 }
 
 interface ClientResponse {
@@ -878,11 +924,11 @@ function applyClient(res: ClientResponse) {
   }));
 }
 
-export async function createClient(input: NewClientInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  const r = await api<ClientResponse>("/api/clients", { body: input });
+export async function createClient(input: NewClientInput): Promise<{ ok: true; id: string; pack: boolean; emailed: "sent" | "preview" | "failed" | "none" } | { ok: false; error: string }> {
+  const r = await api<ClientResponse & { pack?: boolean; emailed?: "sent" | "preview" | "failed" | "none" }>("/api/clients", { body: input });
   if (!r.ok || !r.data) return { ok: false, error: r.error ?? "Could not create the client." };
   applyClient(r.data);
-  return { ok: true, id: r.data.user.id };
+  return { ok: true, id: r.data.user.id, pack: r.data.pack === true, emailed: r.data.emailed ?? "none" };
 }
 
 export async function updateClient(id: string, patch: { user?: Partial<User>; profile?: Partial<ClientProfile> }): Promise<string | null> {

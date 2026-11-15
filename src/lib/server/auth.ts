@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { db } from "./db";
 import { forbidden, HttpError, unauthorized } from "./http";
 import { users, type UserRow } from "./schema";
-import { trialBlocked } from "./trial";
+import { trialBlocked, trialEnforced } from "./trial";
 
 const COOKIE = "cf_session";
 const MAX_AGE = 7 * 24 * 60 * 60;
@@ -106,6 +106,9 @@ export async function requireUser(roles?: DbRole[]): Promise<UserRow> {
   const u = await currentUser();
   if (!u) throw unauthorized();
   if (roles && !roles.includes(u.role as DbRole)) throw forbidden();
-  if (trialBlocked(u)) throw new HttpError(402, "Your free month has ended. Subscriptions are opening soon.", "trial_over");
+  // Someone in a gym is covered by the gym's free month, not their own: when the gym's ends, the platform stops for its coaches and admins.
+  const { gymTrialBlocks } = await import("./gymOrg");
+  const byGym = u.role === "COACH" && trialEnforced() ? await gymTrialBlocks(u.id) : null;
+  if (byGym === null ? trialBlocked(u) : byGym) throw new HttpError(402, "Your free month has ended. Subscriptions are opening soon.", "trial_over");
   return u;
 }

@@ -3,7 +3,7 @@
 import { CheckCircle2, ChevronRight, Send } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Avatar, Button, Card, SectionTitle } from "@/components/ui";
+import { Button, Card, PersonAvatar, SectionTitle } from "@/components/ui";
 import { nudgeLists } from "@/lib/attention";
 import { useViewer } from "@/lib/hooks";
 import { NudgeModal } from "./NudgeModal";
@@ -77,7 +77,7 @@ export function NeedsYou() {
           {flagged.slice(0, 5).map(({ c, s }) => (
             <li key={c.user.id}>
               <Link href={`/clients/${c.user.id}`} className="flex items-center gap-3 rounded-xl border border-line bg-field/40 p-2.5 hover:border-accent/50" aria-label={`Open ${c.user.name}`}>
-                <Avatar name={c.user.name} size={34} />
+                <PersonAvatar user={c.user} size={34} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{c.user.name}</div>
                   <ReasonBadges status={s} max={2} />

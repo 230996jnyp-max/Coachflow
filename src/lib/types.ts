@@ -1,4 +1,6 @@
 import type { WorkoutFeedback } from "./feedback";
+import type { GymInfo, PublicGym } from "./gymPerms";
+import type { Prefs } from "./prefs";
 
 // Domain models. All weights are stored in kg and all lengths in cm;
 // the UI converts to the viewer's preferred unit system.
@@ -30,6 +32,14 @@ export interface User {
   isMinor?: boolean;
   /** A coach's six-digit code (only sent for yourself). */
   coachCode?: string;
+  /** The viewer's own gym: role, permissions and the gym's free month (only sent for yourself). */
+  gym?: GymInfo;
+  /** A coach's gym as their clients see it (name and logo). */
+  publicGym?: PublicGym;
+  /** A client's forms still to fill in and copies waiting for their acknowledgement (only sent for yourself). */
+  intake?: { missing: string[]; toAcknowledge: number };
+  /** Look and feel. Yourself: everything. Other people: only what their coach / clients may see (bio, nickname, photo versions). */
+  prefs?: Prefs;
   /** The free month of a self sign-up (only sent for yourself). `enforced` is false until payments are switched on. */
   trial?: { endsAt: string; daysLeft: number; expired: boolean; enforced: boolean };
 }
@@ -44,6 +54,8 @@ export type ClientGoal =
 export interface ClientProfile {
   /** Same as the owning User.id */
   id: string;
+  /** "Before we meet": health flags, forms still owed, and assessments to look at (counts only, never answers). Only sent to the coach. */
+  intake?: { healthFlags: number; needsReview: boolean; pending: boolean; selfAssessments: number };
   phone: string;
   email: string;
   goal: ClientGoal;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SEED_EXERCISES } from "@/data/exercises";
 import { aiConfigured, aiSportExercises } from "@/lib/server/ai";
+import { logAiUsage } from "@/lib/server/aiLog";
 import { requireTrainerOrPersonal } from "@/lib/server/auth";
 import { requireAdult } from "@/lib/server/minors";
 import { badRequest, HttpError, int, readJson, route, str } from "@/lib/server/http";
@@ -20,6 +21,7 @@ export const POST = route(async (req) => {
   const me = await requireTrainerOrPersonal();
   requireAdult(me);
   if (!aiConfigured()) throw new HttpError(503, "AI isn't set up.");
+  await logAiUsage({ userId: me.id, feature: "niche_search" });
   const sport = str(body.sport, "Sport", { min: 2, max: 60 });
   if (/[<>{}]/.test(sport)) throw badRequest("Please type just the name of a sport or discipline.");
   const count = "count" in body ? int(body.count, "How many", 6, 24) : 20;

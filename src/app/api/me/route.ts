@@ -4,6 +4,7 @@ import { applyGoalFields, openProfile, parseUsername, sealProfile, setUsername, 
 import { isStaff, requireUser } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { badRequest, forbidden, readJson, route } from "@/lib/server/http";
+import { savePrefs } from "@/lib/server/media";
 import { applyHomeAddress } from "@/lib/server/schedule";
 import { users } from "@/lib/server/schema";
 
@@ -48,12 +49,21 @@ export const PATCH = route(async (req) => {
     applyGoalFields(profile, g as Record<string, unknown>);
   }
   if (profile) set.profileEnc = sealProfile(me.id, profile);
+  let prefsSaved = false;
+  if ("prefs" in body) {
+    if (!body.prefs || typeof body.prefs !== "object" || Array.isArray(body.prefs)) throw badRequest("Preferences are missing.");
+    await savePrefs(me, body.prefs as Record<string, unknown>);
+    prefsSaved = true;
+  }
   if ("username" in body) {
     const username = parseUsername(body.username, isStaff(me));
     if (username !== me.username) await setUsername(me.id, username);
     if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined && set.profileEnc === undefined) return NextResponse.json({ ok: true, username });
   }
-  if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined && set.profileEnc === undefined) throw badRequest("Nothing to change.");
+  if (set.unit === undefined && set.onboarded === undefined && set.theme === undefined && set.profileEnc === undefined) {
+    if (prefsSaved) return NextResponse.json({ ok: true });
+    throw badRequest("Nothing to change.");
+  }
   const d = await db();
   await d.update(users).set(set).where(eq(users.id, me.id));
   return NextResponse.json({ ok: true });

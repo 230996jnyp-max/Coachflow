@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { CoachNotes } from "@/components/clients/CoachNotes";
 import { FeedIcon } from "@/components/clients/FeedIcon";
 import { PctBar, PctPill, ReasonBadges, useStatuses } from "@/components/clients/status";
-import { Avatar, Notice } from "@/components/ui";
+import { Notice, PersonAvatar } from "@/components/ui";
 import { buildFeed } from "@/lib/clientFeed";
 import { useViewer } from "@/lib/hooks";
 import { useNow } from "@/lib/store";
@@ -43,7 +43,7 @@ export function ClientSidePanel({ clientId }: { clientId: string }) {
   return (
     <div className="space-y-4 p-4">
       <div className="flex items-center gap-3">
-        <Avatar name={person.name} size={48} />
+        <PersonAvatar user={person} size={48} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-bold">{person.name}</div>
           {profile.phone ? (

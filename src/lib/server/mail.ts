@@ -30,6 +30,8 @@ function throttled(): boolean {
 export interface MailInput {
   /** Overrides the default sender (Gmail only delivers from the signed-in address, so only the display name can differ). */
   from?: string;
+  /** Where a reply goes (Gmail only sends from the signed-in address, so replies are pointed at the owner instead). */
+  replyTo?: string;
   to: string;
   subject: string;
   text: string;
@@ -68,6 +70,7 @@ export async function sendMail(input: MailInput): Promise<MailResult> {
   const from = input.from || process.env.MAIL_FROM || (process.env.SMTP_USER ? `CoachFlow <${process.env.SMTP_USER}>` : "CoachFlow <no-reply@coachflow.local>");
   const message = {
     from,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     to: input.to,
     subject: input.subject,
     text: input.text,

@@ -177,6 +177,8 @@ export function clientStatus(input: { user: User; profile: ClientProfile; db: So
   if (noShows.length) reasons.push(noShows.length === 1 ? `No-show ${format(noShows[0].at, "EEE")}` : `${noShows.length} no-shows this week`);
   if (lowCredits) reasons.push("Low on credits");
   if (notLoggedIn) reasons.push("Hasn't logged in yet");
+  if (profile.intake?.needsReview) reasons.push("Health form needs your review");
+  if (profile.intake?.selfAssessments) reasons.push("Filled in a self-assessment");
 
   return {
     clientId: id,

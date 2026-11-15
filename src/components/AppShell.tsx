@@ -5,6 +5,7 @@ import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   Apple,
+  Building2,
   CalendarDays,
   ChevronsLeft,
   ChevronsRight,
@@ -13,7 +14,6 @@ import {
   LayoutDashboard,
   LineChart,
   ListChecks,
-  LogOut,
   MessageCircle,
   Settings,
   ShieldCheck,
@@ -25,17 +25,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { clientThread, coachThread, dismissToast, startChatSync, unreadFor, useChat } from "@/lib/chat";
+import { hasPortalAccess } from "@/lib/gymPerms";
 import { useViewer } from "@/lib/hooks";
-import { logout, refreshAccounts, refreshGroups, refreshSchedule } from "@/lib/store";
+import { refreshAccounts, refreshGroups, refreshSchedule } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { FloorBanner } from "./floor/FloorBanner";
 import { NotificationBell } from "./groups/NotificationBell";
-import { ThemeMenu } from "./ThemeSwitcher";
+import { Personalize, hasBackground } from "./Personalize";
+import { ProfileMenu } from "./ProfileMenu";
 import { OnboardingTour } from "./tour/OnboardingTour";
-import { InstallButton } from "./InstallButton";
+import { WhatsNew } from "./tour/WhatsNew";
+import { InstallPrompt } from "./InstallPrompt";
 import { Splash } from "./Providers";
 import { TrialBar, TrialGate } from "./TrialBar";
-import { Avatar } from "./ui";
 
 interface NavItem {
   href: string;
@@ -49,9 +51,9 @@ const TRAINER_NAV: NavItem[] = [
   { href: "/clients", label: "Clients", icon: <Users size={22} />, mobile: true },
   { href: "/schedule", label: "Schedule", icon: <CalendarDays size={22} />, mobile: true },
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
-  { href: "/messages", label: "Messages", icon: <MessageCircle size={22} /> },
+  { href: "/messages", label: "Messages", icon: <MessageCircle size={22} />, mobile: true },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
-  { href: "/settings", label: "Settings", icon: <Settings size={22} />, mobile: true },
+  { href: "/settings", label: "Settings", icon: <Settings size={22} /> },
 ];
 
 const CLIENT_NAV: NavItem[] = [
@@ -60,15 +62,16 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/progress", label: "Progress", icon: <LineChart size={22} />, mobile: true },
   { href: "/nutrition", label: "Nutrition", icon: <Apple size={22} />, mobile: true },
   { href: "/book", label: "Book", icon: <CalendarDays size={22} />, mobile: true },
-  { href: "/messages", label: "Messages", icon: <MessageCircle size={22} /> },
+  { href: "/messages", label: "Messages", icon: <MessageCircle size={22} />, mobile: true },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
-  { href: "/settings", label: "Profile", icon: <UserRound size={22} />, mobile: true },
+  { href: "/settings", label: "Profile", icon: <UserRound size={22} /> },
 ];
 
 const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
-const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition"];
+const GYM_NAV: NavItem = { href: "/gym-admin", label: "Gym", icon: <Building2 size={22} /> };
+const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition", "/intake"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, user, isTrainer, db, isPersonal, isMinor } = useViewer();
@@ -95,7 +98,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     ((isTrainer && CLIENT_ONLY.some((p) => pathname.startsWith(p))) ||
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
-      (isPersonal && ["/book", "/messages", "/classes"].some((p) => pathname.startsWith(p))) ||
+      (pathname.startsWith("/gym-admin") && !hasPortalAccess(user.gym)) ||
+      (isPersonal && ["/book", "/messages", "/classes", "/intake"].some((p) => pathname.startsWith(p))) ||
       (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
@@ -125,12 +129,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (!ready || !user || forbidden || mustChange) return <Splash />;
   if (user.trial?.enforced && user.trial.expired && !user.isOwner) return <TrialGate />;
-  // Right after sign-in (and after the set-your-password screen), a coach chooses their niche before reaching the dashboard.
-  if (isTrainer && nicheStep && !user.mustChangePassword) return <NicheStep />;
+  // A coach who has not chosen a niche yet picks one (after the set-your-password screen) before reaching the dashboard. It is saved to the
+  // account, so signing in again does not ask; Settings → Coaching can reopen it to change it.
+  if (isTrainer && (nicheStep || (db.settings.specialties ?? []).length === 0) && !user.mustChangePassword) return <NicheStep />;
 
   // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
   const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
-  const nav = isTrainer ? (user.isOwner ? [...TRAINER_NAV.slice(0, 5), ADMIN_NAV, ...TRAINER_NAV.slice(5)] : TRAINER_NAV) : clientNav;
+  // A coach whose gym role opens the gym portal gets a Gym entry (on phones it is in the profile menu).
+  const withGym = hasPortalAccess(user.gym) ? [...TRAINER_NAV.slice(0, 4), GYM_NAV, ...TRAINER_NAV.slice(4)] : TRAINER_NAV;
+  const nav = isTrainer ? (user.isOwner ? [...withGym.slice(0, withGym.length - 2), ADMIN_NAV, ...withGym.slice(withGym.length - 2)] : withGym) : clientNav;
   const active = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const activeWorkout = db.workouts.find((w) => w.status === "ACTIVE" && w.loggedById === user.id);
   // A workout the coach is logging for a session on the gym floor leads back to that session, not to one person's workout.
@@ -142,7 +149,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const slim = collapsed || onFloor;
 
   return (
-    <div className="animate-fade-in min-h-dvh bg-bg">
+    <div className={cn("animate-fade-in min-h-dvh", !hasBackground(user.prefs) && "bg-bg")}>
+      <Personalize userId={user.id} prefs={user.prefs} />
       {/* Desktop / tablet sidebar */}
       <aside
         className={cn(
@@ -154,7 +162,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
             <Dumbbell size={20} />
           </div>
-          {!slim && <span className="text-lg font-bold tracking-tight">{db.settings.brandName}</span>}
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {nav.map((n) => (
@@ -181,32 +188,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="space-y-2 border-t border-line p-3">
           <div className={cn("flex items-center gap-2", slim && "flex-col")}>
             <NotificationBell />
-            <ThemeMenu align="left" up />
             {!slim && <span className="text-xs font-semibold text-muted">Notifications</span>}
           </div>
-          {!slim && <InstallButton className="w-full" />}
-          <div className={cn("flex items-center gap-3 rounded-xl p-2", slim && "justify-center")}>
-            <Avatar name={user.name} size={36} />
-            {!slim && (
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{user.name}</div>
-                <div className="text-xs text-muted">{user.isOwner ? "App Owner" : isTrainer ? "Coach" : "Client"}</div>
-              </div>
-            )}
-            {!slim && (
-              <button
-                aria-label="Log out"
-                title="Log out"
-                onClick={async () => {
-                  await logout();
-                  router.replace("/login");
-                }}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-field hover:text-danger"
-              >
-                <LogOut size={18} />
-              </button>
-            )}
-          </div>
+          <ProfileMenu side="top" showName={!slim} />
           <button
             onClick={() => setCollapsed((c) => !c)}
             aria-label={slim ? "Expand sidebar" : "Collapse sidebar"}
@@ -220,35 +204,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Mobile top bar */}
       <header className="pt-safe sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur md:hidden">
         <div className="flex h-14 items-center justify-between px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-on-accent">
-              <Dumbbell size={18} />
-            </div>
-            <span className="truncate font-bold tracking-tight">{db.settings.brandName}</span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {user.isOwner && (
-              <Link href="/admin" aria-label="Admin" className="flex h-10 w-10 items-center justify-center rounded-xl border border-pr/40 bg-pr/10 text-pr">
-                <ShieldCheck size={20} />
-              </Link>
-            )}
-            {!isPersonal && (
-            <Link
-              href="/messages"
-              data-tour="nav-messages"
-              aria-label={unread ? `Messages, ${unread} unread` : "Messages"}
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-field text-ink"
-            >
-              <MessageCircle size={20} />
-              {unread > 0 && <Badge count={unread} />}
-            </Link>
-            )}
+          <Link href={isTrainer ? "/trainer" : "/home"} aria-label="CoachFlow home" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
+            <Dumbbell size={20} />
+          </Link>
+          <div className="flex shrink-0 items-center gap-2">
             <NotificationBell />
-            <ThemeMenu />
-            <InstallButton compact />
-            <Link href="/settings" aria-label="Profile">
-              <Avatar name={user.name} size={32} />
-            </Link>
+            <ProfileMenu />
           </div>
         </div>
       </header>
@@ -264,6 +225,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <ChatSync userId={user.id} threads={threads} />
       <OnboardingTour />
+      <WhatsNew />
+      {user.hasCompletedOnboarding && <InstallPrompt />}
       <ToastHost toasts={chat.toasts} onOpen={(thread) => { dismissToast(thread); router.push("/messages"); }} />
 
       {showBanner && activeWorkout && (
@@ -289,12 +252,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link
                 key={n.href}
                 href={n.href}
+                data-tour={`nav-${n.href.slice(1)}`}
                 className={cn(
                   "flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition-colors",
                   active(n.href) ? "text-accent" : "text-muted",
                 )}
               >
-                {n.icon}
+                <span className="relative">
+                  {n.icon}
+                  {n.href === "/messages" && unread > 0 && <Badge count={unread} />}
+                </span>
                 {n.label}
               </Link>
             ))}

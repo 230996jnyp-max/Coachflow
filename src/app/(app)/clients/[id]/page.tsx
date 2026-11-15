@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ArrowLeft,
   CalendarPlus,
+  FileUp,
   KeyRound,
   Minus,
   Plus,
@@ -18,6 +19,8 @@ import { BookingList } from "@/components/booking/BookingList";
 import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/TrainerBookModal";
 import { CredentialsModal, genPassword, GOALS, type Credentials } from "@/components/clients/ClientForms";
 import { ClientOverview } from "@/components/clients/ClientOverview";
+import { ImportClientsModal } from "@/components/clients/ImportClientsModal";
+import { CoachIntake } from "@/components/intake/CoachIntake";
 import { PlanTab } from "@/components/plan/PlanTab";
 import { CoachNutrition } from "@/components/nutrition/CoachNutrition";
 import { ProgressHub } from "@/components/progress/ProgressHub";
@@ -25,7 +28,7 @@ import { GymSelect } from "@/components/GymSelect";
 import { HomeAddressField } from "@/components/HomeAddressField";
 import { FocusPicker } from "@/components/sports/Focus";
 import { NumberInput } from "@/components/NumberInput";
-import { Avatar, Badge, Button, Card, ConfirmDialog, Field, Input, SectionTitle, Select, Tabs, Textarea } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, Field, Input, PersonAvatar, SectionTitle, Select, Tabs, Textarea } from "@/components/ui";
 import { isGymComplete } from "@/lib/gyms";
 import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
@@ -34,7 +37,7 @@ import { CreditHistory } from "@/components/attendance/CreditHistory";
 import { adjustCredits, adjustGroupCreditsBy, deleteClient, resetClientPassword, updateClient } from "@/lib/store";
 import type { ClientGoal } from "@/lib/types";
 
-type Tab = "overview" | "plan" | "workouts" | "progress" | "nutrition" | "sessions" | "profile";
+type Tab = "overview" | "plan" | "workouts" | "progress" | "nutrition" | "intake" | "sessions" | "profile";
 
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,7 +65,7 @@ export default function ClientDetailPage() {
         <ArrowLeft size={16} /> Clients
       </Link>
       <div className="mb-5 flex flex-wrap items-center gap-4">
-        <Avatar name={user.name} size={60} />
+        <PersonAvatar user={user} size={60} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-bold tracking-tight">{user.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -85,6 +88,7 @@ export default function ClientDetailPage() {
           { value: "workouts", label: "Workouts" },
           { value: "progress", label: "Progress" },
           { value: "nutrition", label: "Nutrition" },
+          { value: "intake", tourId: "client-tab-intake", label: "Intake", icon: profile.intake && (profile.intake.needsReview || profile.intake.selfAssessments > 0) ? <span aria-label="Needs your attention" className="h-2 w-2 rounded-full bg-danger" /> : undefined },
           { value: "sessions", label: "Sessions" },
           { value: "profile", label: "Profile" },
         ]}
@@ -95,6 +99,7 @@ export default function ClientDetailPage() {
       {tab === "workouts" && <WorkoutHub clientId={id} />}
       {tab === "progress" && <ProgressHub clientId={id} />}
       {tab === "nutrition" && <CoachNutrition key={id} clientId={id} />}
+      {tab === "intake" && <CoachIntake key={id} clientId={id} clientName={user.name} minor={!!user.isMinor} />}
       {tab === "sessions" && <Sessions clientId={id} />}
       {tab === "profile" && <ProfileTab key={id} clientId={id} />}
     </div>
@@ -117,9 +122,8 @@ function Sessions({ clientId }: { clientId: string }) {
   );
 }
 
-function ProfileTab({ clientId }: { clientId: string }) {
-  const { db, clients } = useViewer();
-  const router = useRouter();
+function DetailsCard({ clientId, onImport }: { clientId: string; onImport: () => void }) {
+  const { clients } = useViewer();
   const found = clients.find((c) => c.user.id === clientId)!;
   const { user, profile } = found;
   const [name, setName] = useState(user.name);
@@ -131,16 +135,18 @@ function ProfileTab({ clientId }: { clientId: string }) {
   const [medical, setMedical] = useState(profile.medicalNotes);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [creds, setCreds] = useState<Credentials | null>(null);
-  const [confirmDel, setConfirmDel] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [topUp, setTopUp] = useState(10);
-  const [groupTopUp, setGroupTopUp] = useState(5);
 
   return (
-    <div className="space-y-8">
-      <section>
-        <SectionTitle>Client details</SectionTitle>
+    <section>
+        <SectionTitle
+          action={
+            <Button variant="secondary" size="sm" onClick={onImport}>
+              <FileUp size={14} /> Update from details
+            </Button>
+          }
+        >
+          Client details
+        </SectionTitle>
         <Card className="space-y-4 p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Full name">
@@ -196,6 +202,26 @@ function ProfileTab({ clientId }: { clientId: string }) {
           </div>
         </Card>
       </section>
+  );
+}
+
+function ProfileTab({ clientId }: { clientId: string }) {
+  const [importing, setImporting] = useState(false);
+  const [importRev, setImportRev] = useState(0);
+  const { db, clients } = useViewer();
+  const router = useRouter();
+  const found = clients.find((c) => c.user.id === clientId)!;
+  const { user, profile } = found;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [creds, setCreds] = useState<Credentials | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [topUp, setTopUp] = useState(10);
+  const [groupTopUp, setGroupTopUp] = useState(5);
+
+  return (
+    <div className="space-y-8">
+      <DetailsCard key={importRev} clientId={clientId} onImport={() => setImporting(true)} />
 
       <section>
         <SectionTitle>Session package</SectionTitle>
@@ -273,8 +299,9 @@ function ProfileTab({ clientId }: { clientId: string }) {
             </Button>
           </div>
           <p className="text-xs text-muted">
-            Archived clients can’t log in but keep all their history. Deleting permanently removes the account and every workout, check-in, photo and booking.
+            Archived clients can’t log in but keep all their history. Deleting permanently removes the account and every workout, check-in, photo and booking. It also removes any health forms, assessments and posture photos.
           </p>
+          {actionError && <p className="text-sm text-danger">{actionError}</p>}
         </Card>
       </section>
 
@@ -296,7 +323,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
         onClose={() => setConfirmDel(false)}
         danger
         title={`Delete ${user.name}?`}
-        message="This permanently deletes the client and all of their workouts, body metrics, progress photos and bookings. This cannot be undone."
+        message="This permanently deletes the client and all of their workouts, body metrics, progress photos, bookings, health forms and assessments. This cannot be undone."
         confirmLabel="Delete permanently"
         onConfirm={async () => {
           const err = await deleteClient(clientId);
@@ -305,6 +332,7 @@ function ProfileTab({ clientId }: { clientId: string }) {
         }}
       />
       <CredentialsModal creds={creds} onClose={() => setCreds(null)} title="Password reset" />
+      <ImportClientsModal open={importing} onClose={() => setImporting(false)} targetClientId={clientId} onDone={() => setImportRev((n) => n + 1)} />
     </div>
   );
 }

@@ -14,6 +14,10 @@ import { ApprovalCard } from "@/components/groups/groupUi";
 import { PersonalHome } from "@/components/home/PersonalHome";
 import { GoalCard } from "@/components/goal/GoalCard";
 import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
+import { MoveRequests } from "@/components/gym/MoveRequests";
+import { CoachCard } from "@/components/home/CoachCard";
+import { IntakeCard } from "@/components/intake/IntakeCard";
+import { HomeSlot } from "@/components/HomeSlot";
 import { PasswordBanner } from "@/components/PasswordBanner";
 import { Badge, Button, Card, EmptyState, PageHeader, SectionTitle, Stat } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
@@ -64,12 +68,18 @@ function ClientHome() {
   };
 
   return (
-    <div className="space-y-8">
-      <PageHeader title={`${hi}, ${user.name.split(" ")[0]}`} subtitle={profile ? `Goal: ${profile.goal}` : undefined} />
+    <div className="flex flex-col gap-8">
+      <PageHeader title={`${hi}, ${user.prefs?.nick || user.name.split(" ")[0]}`} subtitle={profile ? `Goal: ${profile.goal}` : undefined} />
       <PasswordBanner />
+      <MoveRequests />
+      <CoachCard />
+      <IntakeCard />
 
-      <AssignedWorkouts />
+      <HomeSlot side="client" id="assigned">
+        <AssignedWorkouts />
+      </HomeSlot>
 
+      <HomeSlot side="client" id="next">
       <section>
         <SectionTitle>Next session</SectionTitle>
         {next ? (
@@ -108,10 +118,15 @@ function ClientHome() {
         )}
       </section>
 
+      </HomeSlot>
+
+      <HomeSlot side="client" id="goal">
       <section>
         <GoalCard clientId={user.id} editable canSetTarget={false} />
       </section>
+      </HomeSlot>
 
+      <HomeSlot side="client" id="classes">
       <section data-tour="home-credits">
         <SectionTitle action={<Link href="/book" className="text-xs font-semibold text-accent">Group classes →</Link>}>Group classes</SectionTitle>
         <div className="space-y-2">
@@ -134,13 +149,18 @@ function ClientHome() {
         </div>
       </section>
 
+      </HomeSlot>
+
+      <HomeSlot side="client" id="numbers">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Session credits" value={profile?.credits ?? 0} tone="accent" sub={`${avail} bookable · ${profile ? reservedCount(db.bookings, user.id) : 0} reserved`} />
         <Stat label="Workouts this week" value={week.workouts} sub={`${week.sets} working sets`} />
         <Stat label="Volume this week" value={fmtVolume(week.volume, unit)} />
         <Stat label="Week streak" value={`${weekStreak(workouts, now)} 🔥`} tone="pr" />
       </div>
+      </HomeSlot>
 
+      <HomeSlot side="client" id="start">
       <section>
         <SectionTitle>Quick start</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -160,7 +180,10 @@ function ClientHome() {
         </div>
       </section>
 
+      </HomeSlot>
+
       {prs.length > 0 && (
+        <HomeSlot side="client" id="records">
         <section>
           <SectionTitle>Latest personal records</SectionTitle>
           <div className="space-y-2">
@@ -180,8 +203,10 @@ function ClientHome() {
             ))}
           </div>
         </section>
+        </HomeSlot>
       )}
 
+      <HomeSlot side="client" id="recent">
       <section>
         <SectionTitle action={<Link href="/workout" className="text-xs font-semibold text-accent">See all →</Link>}>Recent workouts</SectionTitle>
         <div className="space-y-2">
@@ -208,6 +233,7 @@ function ClientHome() {
           {workouts.length === 0 && <EmptyState title="No workouts yet" hint="Start your first workout to see stats here." />}
         </div>
       </section>
+      </HomeSlot>
 
       <BookingDetail bookingId={detail} onClose={() => setDetail(null)} />
     </div>

@@ -9,11 +9,13 @@ import { issueToken, consumeToken } from "./authTokens";
 import { coachByCode, ensureCoachCode } from "./coachCode";
 import { requestCoach } from "./coachLinks";
 import { hashPassword } from "./auth";
+import { createGym, deleteGymEverything, joinWithCode, lookupGym } from "./gymOrg";
+import { cleanGymCode } from "@/lib/gymPerms";
 import { db, isLocalTestMode } from "./db";
 import { badRequest, checkPassword, conflict, email as parseEmail, HttpError, int, isUniqueViolation, str } from "./http";
 import { escapeHtml, layout, sendMail, type MailResult } from "./mail";
 import { hit } from "./rateLimit";
-import { authTokens, coachSettings, gyms, users, type UserRow } from "./schema";
+import { authTokens, coachSettings, gymOrgs, gyms, users, type UserRow } from "./schema";
 
 /*
  * Self sign-up. Anyone can make a Coach, Client or Personal account from /signup. The account exists straight away but can't sign in
@@ -57,6 +59,9 @@ export interface SignupInput {
   tagline: string;
   gyms: string[];
   coachCode: string;
+  /** GYM sign-ups: the name of the gym or academy they run. COACH sign-ups: an optional gym code to join. */
+  gymName: string;
+  gymCode: string;
   medicalNotes: string;
   focuses: string[];
   weeklyTarget: number;
@@ -68,7 +73,7 @@ const presetNiches = (v: unknown, max: number): string[] => cleanSports(v, max).
 /** Checks everything the sign-up form sends. Throws a plain-language 400 for the first problem. */
 export function parseSignup(body: Record<string, unknown>, now: Date = new Date()): SignupInput {
   const role = body.role;
-  if (role !== "COACH" && role !== "CLIENT" && role !== "PERSONAL") throw badRequest("Choose how you'll use CoachFlow.");
+  if (role !== "COACH" && role !== "CLIENT" && role !== "PERSONAL" && role !== "GYM") throw badRequest("Choose how you'll use CoachFlow.");
   const fullName = str(body.fullName, "Full name", { min: 2, max: 100 });
   const username = parseUsername(body.username, false);
   const address = parseEmail(body.email, "Email address");
@@ -100,15 +105,23 @@ export function parseSignup(body: Record<string, unknown>, now: Date = new Date(
     tagline: "",
     gyms: [],
     coachCode: "",
+    gymName: "",
+    gymCode: "",
     medicalNotes: "",
     focuses: [],
     weeklyTarget: 3,
     weightKg: 0,
   };
 
-  if (role === "COACH") {
+  if (role === "COACH" || role === "GYM") {
     base.niches = presetNiches(body.niches, 6);
     if (base.niches.length === 0) throw badRequest("Pick at least one thing you coach.");
+    if (role === "GYM") base.gymName = str(body.gymName, "Gym or academy name", { min: 2, max: 80 });
+    else if (body.gymCode !== undefined && body.gymCode !== "") {
+      const gc = cleanGymCode(body.gymCode);
+      if (!gc) throw badRequest("A gym code is six digits.");
+      base.gymCode = gc;
+    }
     base.experienceYears = int(body.experienceYears ?? 0, "Years of experience", 0, 60);
     base.tagline = str(body.tagline, "Tagline", { optional: true, max: 140 });
     const places = Array.isArray(body.gyms) ? body.gyms : [];
@@ -239,8 +252,10 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
   const consent = { at: new Date().toISOString(), ...(input.guardian ? { guardian: true } : {}) };
   const today = new Date().toISOString().slice(0, 10);
   let profile: ProfileJson | StaffProfileJson;
-  if (input.role === "COACH") {
-    profile = { phone: input.phone, dob: input.dob, experienceYears: input.experienceYears, ...(input.tagline ? { tagline: input.tagline } : {}), consent: { at: consent.at } };
+  const isCoach = input.role === "COACH" || input.role === "GYM";
+  if (input.gymCode && !(await lookupGym(input.gymCode))) throw new HttpError(404, "We couldn't find a gym with that code. Check it with your gym.");
+  if (isCoach) {
+    profile = { phone: input.phone, dob: input.dob, experienceYears: input.experienceYears, ...(input.tagline ? { tagline: input.tagline } : {}), ...(input.gymCode ? { pendingGymCode: input.gymCode } : {}), consent: { at: consent.at } };
   } else {
     const personal = input.role === "PERSONAL";
     profile = {
@@ -269,10 +284,10 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
       .insert(users)
       .values({
         id,
-        role: input.role === "COACH" ? "COACH" : "CLIENT",
+        role: isCoach ? "COACH" : "CLIENT",
         username: input.username,
         passwordHash: await hashPassword(input.password),
-        name: input.role === "COACH" ? input.fullName : null,
+        name: isCoach ? input.fullName : null,
         email: input.email,
         profileEnc: sealProfile(id, profile),
         coachId: null,
@@ -289,15 +304,18 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
 
   const undo = async () => {
     await d.delete(authTokens).where(eq(authTokens.userId, id));
+    const owned = await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, id));
+    for (const g of owned) await deleteGymEverything(g.id);
     await d.delete(gyms).where(eq(gyms.coachId, id));
     await d.delete(coachSettings).where(eq(coachSettings.coachId, id));
     await d.delete(users).where(eq(users.id, id));
   };
   try {
     if (input.niches.length) await d.insert(coachSettings).values({ coachId: id, specialties: JSON.stringify(input.niches) }).onConflictDoNothing();
-    if (input.role === "COACH") {
+    if (isCoach) {
       for (const name of input.gyms) await d.insert(gyms).values({ id: `g_${randomUUID()}`, coachId: id, name });
       await ensureCoachCode(row);
+      if (input.role === "GYM") await createGym(row, input.gymName);
     }
     const mail = await sendVerification(row, input.email, input.fullName, origin);
     if (!delivered(mail)) {
@@ -333,6 +351,19 @@ export async function confirmEmail(rawToken: string): Promise<{ role: SignupRole
       }
     } catch (e) {
       console.error("Could not send the coach request after confirming", e);
+    }
+  }
+  // A coach who typed a gym code at sign-up joins (or asks to join) now that the address is confirmed.
+  if (row.role === "COACH") {
+    try {
+      const sp = openStaffProfile(row);
+      if (sp.pendingGymCode) {
+        await joinWithCode(row, sp.pendingGymCode);
+        delete sp.pendingGymCode;
+        await d.update(users).set({ profileEnc: sealProfile(row.id, sp) }).where(eq(users.id, row.id));
+      }
+    } catch (e) {
+      console.error("Could not join the gym after confirming", e);
     }
   }
   const personalOrClient: SignupRole = row.role === "COACH" || row.role === "OWNER" ? "COACH" : joinedCoach ? "CLIENT" : "PERSONAL";
@@ -408,3 +439,6 @@ export async function finishPasswordReset(rawToken: string, password: unknown): 
     })
     .where(and(eq(users.id, userId), eq(users.active, true)));
 }
+
+/** Sends the "confirm your email" link (used when the owner re-sends it from the Sign-ups tab). */
+export const sendVerificationFor = sendVerification;

@@ -1,7 +1,9 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { mediaUrl } from "@/lib/prefs";
+import type { User } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
 
 /* ---------- Button ---------- */
@@ -114,9 +116,14 @@ export function Badge({ children, className }: { children: ReactNode; className?
   );
 }
 
-export function Avatar({ name, size = 40, className }: { name: string; size?: number; className?: string }) {
+export function Avatar({ name, size = 40, className, photo }: { name: string; size?: number; className?: string; photo?: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  if (photo && failed !== photo) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={photo} alt={name} width={size} height={size} onError={() => setFailed(photo)} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
+  }
   return (
     <div
       className={cn("flex shrink-0 items-center justify-center rounded-full font-bold text-white", className)}
@@ -125,6 +132,11 @@ export function Avatar({ name, size = 40, className }: { name: string; size?: nu
       {initials(name)}
     </div>
   );
+}
+
+/** A person's avatar: their uploaded photo when they have one (and the viewer may see it), otherwise coloured initials. */
+export function PersonAvatar({ user, size = 40, className }: { user: Pick<User, "id" | "name" | "prefs">; size?: number; className?: string }) {
+  return <Avatar name={user.name} size={size} className={className} photo={mediaUrl(user.id, "avatar", user.prefs?.avatarV)} />;
 }
 
 export function EmptyState({ icon, title, hint, action }: { icon?: ReactNode; title: string; hint?: string; action?: ReactNode }) {
@@ -225,13 +237,14 @@ export function Tabs<T extends string>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  tabs: { value: T; label: string; icon?: ReactNode }[];
+  tabs: { value: T; label: string; icon?: ReactNode; /** For the guided tour: marks this tab as something it can point at. */ tourId?: string }[];
 }) {
   return (
     <div className="no-scrollbar -mx-4 mb-5 flex gap-1 overflow-x-auto border-b border-line px-4 md:mx-0 md:px-0">
       {tabs.map((t) => (
         <button
           key={t.value}
+          data-tour={t.tourId}
           onClick={() => onChange(t.value)}
           className={cn(
             "flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors",

@@ -40,6 +40,8 @@ export const POST = route(async (req) => {
   }
 
   const ok = await verifyPassword(password, user.passwordHash);
+  // The right password on an account the owner disabled: say so (and where to ask), instead of the generic message.
+  if (ok && !user.active && user.disabledAt) throw new HttpError(403, "This account has been disabled. Please contact c.darshstrength@gmail.com.", "disabled");
   if (!ok || !user.active) {
     if (!ok) {
       const fails = user.failedAttempts + 1;
@@ -55,9 +57,7 @@ export const POST = route(async (req) => {
   if (!user.emailVerified) throw new HttpError(403, "Please confirm your email first: open the link we sent you. Didn't get it? Resend it below.", "unverified");
 
   const upgrade = (await needsRehash(user.passwordHash)) ? { passwordHash: await hashPassword(password) } : {};
-  if (user.failedAttempts || user.lockedUntil || upgrade.passwordHash) {
-    await d.update(users).set({ failedAttempts: 0, lockedUntil: null, ...upgrade }).where(eq(users.id, user.id));
-  }
+  await d.update(users).set({ failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), ...upgrade }).where(eq(users.id, user.id));
   await createSession(user);
   return NextResponse.json({ ok: true });
 });

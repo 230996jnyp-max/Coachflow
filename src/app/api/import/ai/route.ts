@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { aiConfigured, aiReadWorkouts, shortlistLibrary } from "@/lib/server/ai";
+import { logAiUsage } from "@/lib/server/aiLog";
 import { takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
 import { requireAdult } from "@/lib/server/minors";
@@ -29,6 +30,7 @@ export const POST = route(async (req) => {
   const today = typeof body.today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
   const client = me.role === "CLIENT";
   await takeAiQuota(me.id, "import", client ? CLIENT_AI_IMPORTS_PER_DAY : COACH_AI_IMPORTS_PER_DAY, "AI imports");
+  await logAiUsage({ userId: me.id, feature: "workout_import" });
   const library = shortlistLibrary(text, [...(await libraryFor(me)).values()].map((e) => ({ id: e.id, name: e.name })));
   const workouts = await aiReadWorkouts({ text, unit, today, library });
   return NextResponse.json({ workouts, model: "ai" });

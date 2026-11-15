@@ -14,6 +14,8 @@ import { purgeClientTraining } from "@/lib/server/training";
 import { purgeClientTalk } from "@/lib/server/workoutTalk";
 import { purgeClientBody } from "@/lib/server/bodyData";
 import { purgeClientAssignments } from "@/lib/server/assignments";
+import { purgeClientAssessments } from "@/lib/server/assessments";
+import { purgeClientIntake } from "@/lib/server/intake";
 import type { ClientGoal } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -96,6 +98,8 @@ export const DELETE = route<Ctx>(async (req, ctx) => {
   await purgeClientBody(id);
   await purgeClientAssignments(id);
   await purgeClientNutrition(id);
+  await purgeClientIntake(id);
+  await purgeClientAssessments(id);
   await d.delete(users).where(and(eq(users.id, id), eq(users.coachId, me.id)));
   return NextResponse.json({ ok: true });
 });

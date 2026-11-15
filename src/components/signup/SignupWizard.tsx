@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NumberInput } from "@/components/NumberInput";
 import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Button, Card, Field, Input, Notice, Segmented, Select, Textarea } from "@/components/ui";
 import { CATALOG } from "@/lib/gyms";
+import { cleanGymCode } from "@/lib/gymPerms";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, coachTitle, LEVELS, PERSONAL_GOALS, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import { CORE_SPORTS, sportLabel } from "@/lib/sports";
 import { api } from "@/lib/store";
@@ -24,10 +25,12 @@ const BLURB: Record<string, string> = {
   "Endurance & Conditioning": "Running, track, HYROX",
 };
 
-const ROLES: { role: SignupRole; title: string; text: string; icon: React.ReactNode }[] = [
-  { role: "COACH", title: "I am a Coach / Trainer", text: "Manage clients, schedules, group classes and programming.", icon: <Dumbbell size={22} /> },
-  { role: "CLIENT", title: "I am training with a Coach", text: "Connect with my coach, book sessions and log workouts.", icon: <Users size={22} /> },
-  { role: "PERSONAL", title: "Training on my own", text: "Track my workouts, routines and progress without a coach.", icon: <UserRound size={22} /> },
+/** The first thing you choose. Titles are two words at most; Gym is on its way. */
+const CARDS: { role: SignupRole | "GYM"; title: string; text: string; icon: React.ReactNode; soon?: boolean }[] = [
+  { role: "COACH", title: "Trainer", text: "Run clients & classes", icon: <Dumbbell size={24} /> },
+  { role: "CLIENT", title: "Client", text: "Train with coach", icon: <Users size={24} /> },
+  { role: "PERSONAL", title: "Solo", text: "Track on my own", icon: <UserRound size={24} /> },
+  { role: "GYM", title: "Gym", text: "Run my academy", icon: <Building2 size={24} /> },
 ];
 
 function Chips({ options, value, onToggle, label }: { options: { key: string; label: string; hint?: string }[]; value: string[]; onToggle: (k: string) => void; label?: (k: string) => string }) {
@@ -56,9 +59,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** The three-step sign-up: your details, how you'll use CoachFlow, then a few questions for that role. */
-export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole | null }) {
-  const [step, setStep] = useState(1);
+/** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
+export function SignupWizard({ initialRole = null, initialGymCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string }) {
+  // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
+  const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
   const [role, setRole] = useState<SignupRole | null>(initialRole);
   // Step 1
@@ -89,6 +93,11 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
   const [goal, setGoal] = useState("");
   const [years, setYears] = useState<number | undefined>(0);
   const [tagline, setTagline] = useState("");
+  const [gymName, setGymName] = useState("");
+  // A gym code from an invitation link (?gym=123456), or typed here. Looked up as soon as it is complete.
+  const [gymCode, setGymCode] = useState(cleanGymCode(initialGymCode) ?? "");
+  const [gymFound, setGymFound] = useState<string | null>(null);
+  const [gymError, setGymError] = useState<string | null>(null);
   const [gymChoice, setGymChoice] = useState<string[]>([]);
   const [gymText, setGymText] = useState("");
   // A coach code typed on the welcome page arrives through this tab's session storage (once). It is looked up below so the coach's name shows.
@@ -129,6 +138,21 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
       alive = false;
     };
     // Only for the code present when the form opens; typing a code is handled by onCode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A gym code that came in with the address is checked straight away, so step 3 already names the gym.
+  useEffect(() => {
+    if (gymCode.length !== 6) return;
+    let alive = true;
+    void api<{ name: string }>("/api/signup/gym-code", { body: { code: gymCode } }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.data) setGymFound(r.data.name);
+      else setGymError(r.error ?? "We couldn't find a gym with that code.");
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -177,8 +201,29 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
     return null;
   };
 
+  const onGymCode = (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 6);
+    setGymCode(digits);
+    setGymFound(null);
+    setGymError(null);
+    if (digits.length === 6) {
+      void api<{ name: string }>("/api/signup/gym-code", { body: { code: digits } }).then((r) => {
+        if (r.ok && r.data) setGymFound(r.data.name);
+        else setGymError(r.error ?? "We couldn't find a gym with that code.");
+      });
+    }
+  };
+
   const step3Error = (): string | null => {
-    if (role === "COACH") return niches.length === 0 ? "Pick at least one thing you coach." : null;
+    if (role === "GYM") {
+      if (gymName.trim().length < 2) return "Enter the name of your gym or academy.";
+      return niches.length === 0 ? "Pick at least one thing you coach." : null;
+    }
+    if (role === "COACH") {
+      if (niches.length === 0) return "Pick at least one thing you coach.";
+      if (gymCode && !gymFound) return gymError ?? (gymCode.length === 6 ? "Checking the gym code…" : "A gym code is six digits. Clear it if you coach independently.");
+      return null;
+    }
     if (role === "CLIENT") {
       if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
       if (!coach) return codeError ?? "Checking your coach's code…";
@@ -194,7 +239,7 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
 
   const next = () => {
     setError(null);
-    const e = step === 1 ? step1Error() : step === 2 ? (role ? null : "Choose how you'll use CoachFlow.") : step3Error();
+    const e = step === 1 ? (role ? null : "Choose how you'll use CoachFlow.") : step === 2 ? step1Error() : step3Error();
     if (e) return setError(e);
     setStep((s) => s + 1);
   };
@@ -224,6 +269,8 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
         tagline: tagline.trim(),
         gyms,
         coachCode: cleanCoachCode(code) ?? "",
+        gymName: role === "GYM" ? gymName.trim() : undefined,
+        gymCode: role === "COACH" ? gymCode : undefined,
         medicalNotes: medical.trim(),
         focuses,
         weeklyTarget: weekly,
@@ -286,9 +333,19 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
               ))}
             </div>
 
-            {step === 1 && (
+            {step === 2 && (
               <div className="space-y-4">
-                <h2 className="text-lg font-bold">Your details</h2>
+                <div>
+                  <h2 className="text-lg font-bold">Your details</h2>
+                  {role && (
+                    <p className="text-xs text-muted">
+                      Signing up as {CARDS.find((c) => c.role === role)?.title}.{" "}
+                      <button type="button" className="font-semibold text-accent hover:underline" onClick={() => { setError(null); setStep(1); }}>
+                        Change
+                      </button>
+                    </p>
+                  )}
+                </div>
                 <Field label="Full name">
                   <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" maxLength={100} />
                 </Field>
@@ -333,31 +390,57 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
               </div>
             )}
 
-            {step === 2 && (
-              <div className="space-y-3">
-                <h2 className="text-lg font-bold">How will you use CoachFlow?</h2>
-                {ROLES.map((r) => (
-                  <button
-                    key={r.role}
-                    type="button"
-                    aria-pressed={role === r.role}
-                    onClick={() => { setRole(r.role); setNiches([]); setGoal(""); setLevel(""); }}
-                    className={cn("flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition-colors", role === r.role ? "border-accent bg-accent/10" : "border-line bg-field hover:border-accent/40")}
-                  >
-                    <span className={cn("mt-0.5 shrink-0", role === r.role ? "text-accent" : "text-muted")}>{r.icon}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">{r.title}</span>
-                      <span className="block text-xs text-muted">{r.text}</span>
-                    </span>
-                    {role === r.role && <Check size={18} className="mt-0.5 shrink-0 text-accent" />}
-                  </button>
-                ))}
+            {step === 1 && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-bold">I am a…</h2>
+                <div className="grid grid-cols-2 gap-3" role="group" aria-label="How will you use CoachFlow?">
+                  {CARDS.map((c) => {
+                    const on = role === c.role;
+                    return (
+                      <button
+                        key={c.role}
+                        type="button"
+                        disabled={c.soon}
+                        aria-pressed={on}
+                        onClick={() => {
+                          if (c.soon) return;
+                          setRole(c.role);
+                          setNiches([]);
+                          setGoal("");
+                          setLevel("");
+                          setError(null);
+                          setStep(2);
+                        }}
+                        className={cn(
+                          "relative flex min-h-44 flex-col items-start justify-between rounded-2xl border p-4 text-left transition-colors",
+                          c.soon ? "cursor-not-allowed border-line bg-field opacity-60" : on ? "border-accent bg-accent/10" : "border-line bg-field hover:border-accent/50",
+                        )}
+                      >
+                        <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", on ? "bg-accent text-on-accent" : "bg-surface text-accent")}>{c.icon}</span>
+                        <span>
+                          <span className="block text-lg font-bold leading-tight">{c.title}</span>
+                          <span className="block min-h-8 text-xs text-muted">{c.text}</span>
+                          {c.soon ? <span className="mt-1 inline-block h-5 rounded-full border border-line bg-surface px-2 text-[10px] font-bold uppercase leading-[18px] tracking-wide text-muted">Coming soon</span> : <span className="mt-1 block h-5" aria-hidden />}
+                        </span>
+                        {on && <Check size={18} className="absolute right-3 top-3 text-accent" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {step === 3 && role === "COACH" && (
+            {step === 3 && (role === "COACH" || role === "GYM") && (
               <div className="space-y-4">
-                <h2 className="text-lg font-bold">About your coaching</h2>
+                <h2 className="text-lg font-bold">{role === "GYM" ? "About your gym" : "About your coaching"}</h2>
+                {role === "GYM" && (
+                  <>
+                    <Field label="Gym or academy name">
+                      <Input value={gymName} onChange={(e) => setGymName(e.target.value)} maxLength={80} placeholder="e.g. Iron Academy" />
+                    </Field>
+                    <p className="-mt-2 text-xs text-muted">You will also coach, with your own clients and schedule. After sign-up you get a gym code to share, and can invite coaches, set roles and see the whole gym&apos;s schedule.</p>
+                  </>
+                )}
                 <div>
                   <div className="mb-2 text-sm font-semibold">What do you coach? <span className="font-normal text-muted">(first is your main one)</span></div>
                   <Chips options={sportOptions} value={niches} onToggle={(k) => toggle(setNiches, k)} />
@@ -375,6 +458,19 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
                   <Input className="mt-2" value={gymText} onChange={(e) => setGymText(e.target.value)} maxLength={200} placeholder="Other places, separated by commas" />
                   <p className="mt-1 text-xs text-muted">You can pick exact branches on the map in Settings later.</p>
                 </div>
+                {role === "COACH" && (
+                  <div>
+                    <Field label="Gym or academy code (optional)" hint={gymError ? undefined : "Working with a gym or coaching academy? Enter its 6-digit code. Leave it blank if you are an independent freelance coach."} error={gymError}>
+                      <Input value={gymCode} onChange={(e) => onGymCode(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={6} placeholder="6 digits" className="font-mono tracking-widest" />
+                    </Field>
+                    {gymFound && (
+                      <p className="mt-2 text-sm font-semibold text-success">
+                        ✓ Linked to {gymFound}
+                        <span className="mt-0.5 block text-xs font-normal text-muted">The gym will see your schedule and completed hours, and approves you once you confirm your email. Your clients and their data stay yours.</span>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -458,7 +554,7 @@ export function SignupWizard({ initialRole = null }: { initialRole?: SignupRole 
                 </Button>
               )}
               <div className="flex-1" />
-              {step < 3 ? (
+              {step === 1 ? null : step < 3 ? (
                 <Button onClick={next}>
                   Continue <ArrowRight size={16} />
                 </Button>

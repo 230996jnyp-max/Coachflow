@@ -1,16 +1,17 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { CalendarPlus, ChevronRight, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
+import { CalendarPlus, ChevronRight, FileUp, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/TrainerBookModal";
 import { AddClientModal, CredentialsModal, type Credentials } from "@/components/clients/ClientForms";
+import { ImportClientsModal } from "@/components/clients/ImportClientsModal";
 import { NudgeModal } from "@/components/clients/NudgeModal";
 import { lastSeen, PctBar, PctPill, ReasonBadges, useStatuses } from "@/components/clients/status";
 import { CoachCodeCard, LinkRequests, useLinkRequestCount } from "@/components/coachlink/CoachLink";
-import { Avatar, Badge, Button, Card, EmptyState, Input, PageHeader, Segmented } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Input, PageHeader, PersonAvatar, Segmented } from "@/components/ui";
 import { GROUP_LABEL, inGroup, type AttentionGroup } from "@/lib/attention";
 import { clientThread, requestThread } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
@@ -51,6 +52,7 @@ export default function ClientsPage() {
   const [group, setGroup] = useState<AttentionGroup>(initialGroup);
   const [view, setView] = useState<View>(initialView);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [nudging, setNudging] = useState(false);
   const [book, setBook] = useState<TrainerBookInit | null>(null);
   const [creds, setCreds] = useState<Credentials | null>(null);
@@ -106,7 +108,10 @@ export default function ClientsPage() {
             <Button variant="secondary" onClick={() => setNudging(true)} disabled={active.length === 0}>
               <Send size={16} /> Nudge clients
             </Button>
-            <Button onClick={() => setAdding(true)}>
+            <Button variant="secondary" data-tour="clients-import" onClick={() => setImporting(true)}>
+              <FileUp size={16} /> Import clients
+            </Button>
+            <Button data-tour="clients-add" onClick={() => setAdding(true)}>
               <UserPlus size={16} /> Add client
             </Button>
           </>
@@ -199,7 +204,7 @@ export default function ClientsPage() {
                 <Card key={user.id} className={cn("flex h-full flex-col gap-3 p-4 transition-colors hover:border-accent/50", s?.attention && "border-pr/40")}>
                   <Link href={`/clients/${user.id}`} className="flex flex-col gap-3" aria-label={`Open ${user.name}`}>
                     <div className="flex items-center gap-3">
-                      <Avatar name={user.name} size={46} />
+                      <PersonAvatar user={user} size={46} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-bold">{user.name}</div>
                         <div className="truncate text-xs text-muted">@{user.username}</div>
@@ -279,7 +284,7 @@ export default function ClientsPage() {
                       <tr key={user.id} className={cn("border-b border-line/60 last:border-0 hover:bg-field/50", s?.attention && "bg-pr/5")}>
                         <td className="px-4 py-3">
                           <Link href={`/clients/${user.id}`} className="flex items-center gap-3" aria-label={`Open ${user.name}`}>
-                            <Avatar name={user.name} size={36} />
+                            <PersonAvatar user={user} size={36} />
                             <span className="min-w-0">
                               <span className="block truncate font-semibold">{user.name}</span>
                               <span className="block truncate text-xs text-muted">{profile.archived ? "Archived" : profile.goal}</span>
@@ -324,6 +329,7 @@ export default function ClientsPage() {
         }}
       />
       <CredentialsModal creds={creds} onClose={() => setCreds(null)} />
+      <ImportClientsModal open={importing} onClose={() => setImporting(false)} />
       <TrainerBookModal init={book} onClose={() => setBook(null)} />
       <NudgeModal open={nudging} onClose={() => setNudging(false)} />
     </div>

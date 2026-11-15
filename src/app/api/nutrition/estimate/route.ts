@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { MEALS } from "@/lib/nutrition";
 import { aiConfigured } from "@/lib/server/ai";
+import { logAiUsage } from "@/lib/server/aiLog";
 import { refundAiQuota, takeAiQuota } from "@/lib/server/aiQuota";
 import { requireUser } from "@/lib/server/auth";
 import { requireAdult } from "@/lib/server/minors";
@@ -30,6 +31,7 @@ export const POST = route(async (req) => {
   const meal = MEALS.find((m) => m.id === body.meal)?.label;
   const settings = await getSettings(me.id);
   await takeAiQuota(me.id, "nutrition", DAILY_ESTIMATES, "food estimates");
+  await logAiUsage({ userId: me.id, feature: "other" });
   try {
     const est = await aiEstimateFood({ text, image, meal, diets: settings.diets, allergies: settings.allergies });
     return NextResponse.json(est);
