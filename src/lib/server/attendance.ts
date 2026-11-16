@@ -1,5 +1,6 @@
 import "server-only";
 import { and, eq, inArray, ne } from "drizzle-orm";
+import { lowCreditAfter } from "./creditAlerts";
 import { attendanceFor, attKey, setMark, type Mark, type Pool, type SessionKind } from "./credits";
 import { db } from "./db";
 import { badRequest, forbidden, notFound } from "./http";
@@ -124,6 +125,7 @@ export async function applyAttendance(me: UserRow, input: { kind: SessionKind; i
     if (!p) throw badRequest("That person isn't part of this session.");
     if (m.mark !== "PRESENT" && m.mark !== "NO_SHOW" && m.mark !== "CLEAR") throw badRequest("Choose Present or No-Show.");
     const res = await setMark({ kind: p.kind, sessionId: p.sessionId, coachId: ctx.coachId, clientId: p.clientId, pool: p.pool, mark: m.mark, deduct: m.mark === "NO_SHOW" && m.deduct === true, sessionType: ctx.sessionType, label: ctx.label, legacy: p.legacy });
+    await lowCreditAfter(p.clientId, ctx.coachId, p.pool, (res.charged ? 1 : 0) - (res.prevCharged ? 1 : 0));
     if (res.mark === "NO_SHOW" && (res.prevMark !== "NO_SHOW" || res.charged !== res.prevCharged)) told.push({ clientId: p.clientId, deduct: res.charged });
   }
 
@@ -159,6 +161,27 @@ export async function applyBookingStatus(me: UserRow, bookingId: string, next: "
     else if (!existing) list.push({ clientId: p.clientId, mark: "PRESENT" });
   }
   await applyAttendance(me, { kind: "BOOKING", id: bookingId, marks: list, finalize: true });
+}
+
+/**
+ * A client cancelled inside the notice window and the coach charges for that: one session credit is used. It is recorded as a charged
+ * no-show (so it shows in the credit log and attendance and can be undone), labelled "Late cancellation".
+ */
+export async function chargeLateCancel(row: BookingRow): Promise<void> {
+  const group = await sharedGroupFor(row.id);
+  const when = await whenText(row.coachId, row.startAt);
+  const pool: Pool = group ? "GROUP" : "SESSION";
+  const res = await setMark({ kind: "BOOKING", sessionId: row.id, coachId: row.coachId, clientId: row.clientId, pool, mark: "NO_SHOW", deduct: true, sessionType: group ? "Group Class" : "1-on-1 PT", label: `Late cancellation · ${when}` });
+  await lowCreditAfter(row.clientId, row.coachId, pool, (res.charged ? 1 : 0) - (res.prevCharged ? 1 : 0));
+}
+
+/** The coach forgives a late cancellation: the credit goes back and the mark is removed. Does nothing when nothing was charged. */
+export async function waiveLateCancel(row: BookingRow): Promise<boolean> {
+  const rec = (await attendanceFor("BOOKING", [row.id])).get(attKey("BOOKING", row.id, row.clientId));
+  if (!rec || !rec.charged) return false;
+  const when = await whenText(row.coachId, row.startAt);
+  await setMark({ kind: "BOOKING", sessionId: row.id, coachId: row.coachId, clientId: row.clientId, pool: rec.pool as Pool, mark: "CLEAR", sessionType: rec.pool === "GROUP" ? "Group Class" : "1-on-1 PT", label: `Late cancellation waived · ${when}` });
+  return true;
 }
 
 /** A booking is being cancelled: a credit already taken for it (marked Present early) is returned. */

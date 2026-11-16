@@ -4,7 +4,7 @@ import { toUser } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { decryptJson } from "@/lib/server/crypto";
 import { db } from "@/lib/server/db";
-import { applyBookingStatus, applyAttendance, clearBookingMark } from "@/lib/server/attendance";
+import { applyBookingStatus, applyAttendance, chargeLateCancel, clearBookingMark, waiveLateCancel } from "@/lib/server/attendance";
 import { notify, onBookingCancelled, onBookingMoved, whenText } from "@/lib/server/groups";
 import { badRequest, conflict, forbidden, notFound, readJson, route, str } from "@/lib/server/http";
 import { focusAllowed } from "@/lib/sports";
@@ -21,6 +21,7 @@ const STAFF_STATUSES: BookingStatus[] = ["CONFIRMED", "COMPLETED", "NO_SHOW", "D
 /**
  * PATCH { action } on one booking.
  *  cancel       client (within the notice window) or the coach
+ *  waive        coach: forgive a late cancellation (the session credit goes back)
  *  status       coach: CONFIRMED | COMPLETED | NO_SHOW | DECLINED | CANCELLED — completing/no-show deducts a credit, undoing restores it
  *  edit         coach or client: { start?, gymId?, customGym?, place?, focus?, notes?, waiveTravel? } - anything left out stays as it is.
  *               A client may change the comments and focus any time before the session; the date, time or place only inside the
@@ -41,12 +42,20 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
 
   if (body.action === "cancel") {
     if (status !== "PENDING" && status !== "CONFIRMED") throw badRequest("This session can no longer be cancelled.");
-    if (isClient && row.startAt.getTime() - rules.noticeHours * 3600000 < Date.now()) {
+    const late = isClient && row.startAt.getTime() - rules.noticeHours * 3600000 < Date.now();
+    if (late && !rules.lateCancelCharge) {
       throw forbidden(`Sessions can only be cancelled ${rules.noticeHours}h or more before they start — message your coach.`);
     }
+    // Inside the window the coach charges for: a confirmed session uses its credit (a request the coach hadn't accepted yet does not).
+    const charge = late && rules.lateCancelCharge && status === "CONFIRMED";
     const [u] = await d.update(bookings).set({ status: "CANCELLED", rev: row.rev + 1 }).where(eq(bookings.id, id)).returning();
-    await clearBookingMark(row);
+    if (charge) await chargeLateCancel(row);
+    else await clearBookingMark(row);
     await onBookingCancelled(id, row.clientId);
+    if (charge) {
+      const when = await whenText(row.coachId, row.startAt);
+      await notify([row.coachId], "late_cancel", { title: "Late cancellation", body: `${toUser(me).name} cancelled the session on ${when}, inside your ${rules.noticeHours}-hour window. One session credit was used; you can waive it from the session.`, link: "/schedule" }, { email: false });
+    }
     return NextResponse.json({ booking: toBooking(u) });
   }
 
@@ -128,12 +137,23 @@ export const PATCH = route<{ params: Promise<{ id: string }> }>(async (req, ctx)
 
   if (isClient) throw forbidden();
 
+  if (body.action === "waive") {
+    if (status !== "CANCELLED") throw badRequest("Only a cancelled session can have its late cancellation waived.");
+    const waived = await waiveLateCancel(row);
+    if (!waived) throw badRequest("No credit was taken for this cancellation.");
+    const [u] = await d.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+    await notify([row.clientId], "late_cancel", { title: "Your credit was returned", body: "Your coach waived the late cancellation, so your session credit is back.", link: "/book" }, { email: false });
+    return NextResponse.json({ booking: toBooking(u) });
+  }
+
   if (body.action === "status") {
     const next = body.status as BookingStatus;
     if (!STAFF_STATUSES.includes(next)) throw badRequest("Unknown status.");
     if (next === "COMPLETED" || next === "NO_SHOW") await applyBookingStatus(me, id, next);
     else if (next === "CONFIRMED" && (status === "COMPLETED" || status === "NO_SHOW")) await applyAttendance(me, { kind: "BOOKING", id, reopen: true });
     else {
+      // Bringing a late-cancelled session back gives the client their credit back too.
+      if (next === "CONFIRMED" && status === "CANCELLED") await waiveLateCancel(row);
       if (next === "CANCELLED" || next === "DECLINED") await clearBookingMark(row);
       await d.update(bookings).set({ status: next, rev: next === "CANCELLED" || next === "DECLINED" ? row.rev + 1 : row.rev }).where(and(eq(bookings.id, id), eq(bookings.coachId, me.id)));
       // A session opened to partners: a cancellation passes it on to the first partner.

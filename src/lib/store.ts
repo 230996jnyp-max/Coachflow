@@ -1386,6 +1386,7 @@ export function deletePhoto(id: string) {
 interface RulesData {
   sessionMinutes: number;
   noticeHours: number;
+  lateCancelCharge?: boolean;
   autoConfirm: boolean;
   allowCustomGym: boolean;
   utcOffsetMin?: number;
@@ -1406,12 +1407,12 @@ interface ScheduleData {
 
 /** The parts of the local database that come from the schedule endpoint. */
 function scheduleSlice(db: DB, data: ScheduleData): Pick<DB, "gyms" | "slots" | "bookings" | "settings"> {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
+  const { sessionMinutes, noticeHours, lateCancelCharge = false, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
   return {
     gyms: data.gyms,
     slots: data.slots,
     bookings: data.bookings,
-    settings: { ...db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
+    settings: { ...db.settings, sessionMinutes, noticeHours, lateCancelCharge, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
   };
 }
 
@@ -1523,6 +1524,15 @@ export async function cancelBookingAs(id: string, role: Role): Promise<string | 
   if (!r.ok || !r.data) return r.error ?? "Could not cancel the session.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "CANCEL", role === "CLIENT" ? "TRAINER" : "CLIENT");
+  return null;
+}
+
+/** The coach forgives a late cancellation: the client's session credit goes back. */
+export async function waiveLateCancel(id: string): Promise<string | null> {
+  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "waive" } });
+  if (!r.ok || !r.data) return r.error ?? "Could not waive it.";
+  replaceBooking(r.data.booking);
+  void refreshAccounts();
   return null;
 }
 
@@ -1833,7 +1843,7 @@ export async function fetchCreditLog(clientId?: string): Promise<{ stats: Attend
 
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "lateCancelCharge", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
 function pushRules() {
@@ -1843,6 +1853,7 @@ function pushRules() {
     body: {
       sessionMinutes: s.sessionMinutes,
       noticeHours: s.noticeHours,
+      lateCancelCharge: s.lateCancelCharge === true,
       autoConfirm: s.autoConfirm,
       allowCustomGym: s.allowCustomGym,
       travelEnabled: s.travelEnabled,

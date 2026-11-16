@@ -77,7 +77,7 @@ export function PaymentsSection() {
         <SectionTitle>Card and PayNow through Stripe</SectionTitle>
         <Card className="space-y-3 p-5">
           {!state.serverReady ? (
-            <p className="text-sm text-muted">Card payments are not switched on for this server yet. Ask the platform owner. You can still use PayNow directly and record cash below.</p>
+            <p className="text-sm text-muted">Card payments through Stripe are coming soon. For now your clients can pay you by PayNow directly (no fees), and you can record cash or a bank transfer below.</p>
           ) : state.stripeReady ? (
             <>
               <div className="flex flex-wrap items-center gap-2">

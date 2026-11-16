@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   brandName: "CoachFlow",
   sessionMinutes: 60,
   noticeHours: 12,
+  lateCancelCharge: false,
   autoConfirm: true,
   allowCustomGym: true,
   travelEnabled: true,

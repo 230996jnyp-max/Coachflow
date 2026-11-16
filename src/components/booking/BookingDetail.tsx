@@ -8,7 +8,7 @@ import { LocationPill, MiniMap } from "@/components/LocationPill";
 import { directionsUrl, isHomeLocation } from "@/lib/gyms";
 import { useViewer } from "@/lib/hooks";
 import { canCancel } from "@/lib/scheduling";
-import { cancelBookingAs, setBookingStatus, shareSession, unshareSession, useNow } from "@/lib/store";
+import { cancelBookingAs, setBookingStatus, waiveLateCancel, shareSession, unshareSession, useNow } from "@/lib/store";
 import Link from "next/link";
 import { RollCallPanel } from "@/components/attendance/Attendance";
 import { FloorLink } from "@/components/floor/FloorBanner";
@@ -32,6 +32,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const [groupSize, setGroupSize] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmLate, setConfirmLate] = useState(false);
 
   if (!b) return null;
   const shared = db.groups.find((g) => g.kind === "SHARED" && g.status === "OPEN" && (g.bookingId === b.id || (!isTrainer && g.mine?.role === "OWNER" && g.start === b.start)));
@@ -40,6 +41,8 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
   const home = isHomeLocation(b);
   const cancelErr = canCancel(b, now, db.settings, isTrainer ? "TRAINER" : "CLIENT");
   const active = b.status === "PENDING" || b.status === "CONFIRMED";
+  // Inside the coach's notice window a client may still cancel when the coach charges for it: the session credit is used.
+  const lateCharge = !isTrainer && active && db.settings.lateCancelCharge === true && parseISO(b.start).getTime() - db.settings.noticeHours * 3600000 < now.getTime();
   const charged = b.status === "COMPLETED" || b.status === "NO_SHOW";
   // Once the session is marked present, the workout done that day can be shared as a recap.
   const dayWorkout = b.status === "COMPLETED" ? db.workouts.find((w) => w.clientId === b.clientId && w.status === "DONE" && isSameDay(parseISO(w.startedAt), parseISO(b.start))) : undefined;
@@ -162,9 +165,28 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
 
         {isTrainer && (b.status === "CONFIRMED" || charged) && <RollCallPanel target={{ kind: "BOOKING", id: b.id }} />}
 
+        {isTrainer && b.status === "CANCELLED" && b.attendance?.deduct && (
+          <div className="space-y-2 rounded-xl border border-line bg-field p-3 text-sm">
+            <div>{`${client?.name ?? "The client"} cancelled inside your ${db.settings.noticeHours}-hour window, so 1 session credit was used.`}</div>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const err = await waiveLateCancel(b.id);
+                setBusy(false);
+                if (err) setError(err);
+              }}
+            >
+              Waive it (give the credit back)
+            </Button>
+          </div>
+        )}
+
         {!isTrainer && b.attendance && (
           <div className="rounded-xl border border-line bg-field p-3 text-sm">
-            {b.attendance.mark === "PRESENT" ? "You were marked present — 1 credit used." : b.attendance.deduct ? "You were marked as a no-show — 1 credit was deducted." : "You were marked as a no-show — your credit was returned."}
+            {b.status === "CANCELLED" && b.attendance.deduct ? "You cancelled inside the notice window, so 1 session credit was used." : b.attendance.mark === "PRESENT" ? "You were marked present — 1 credit used." : b.attendance.deduct ? "You were marked as a no-show — 1 credit was deducted." : "You were marked as a no-show — your credit was returned."}
           </div>
         )}
 
@@ -183,11 +205,21 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
         {active && (
           <>
             {cancelErr && !isTrainer && <Notice tone="warn">{cancelErr}</Notice>}
+            {lateCharge && (
+              <Notice tone="warn">
+                {`This is inside your coach's ${db.settings.noticeHours}-hour cancellation window. If you cancel now, 1 session credit is used.`}
+              </Notice>
+            )}
             <Button
               variant="danger"
               className="w-full"
               disabled={!!cancelErr || busy}
               onClick={async () => {
+                // A late cancellation costs a credit, so it takes a second tap to be sure.
+                if (lateCharge && !confirmLate) {
+                  setConfirmLate(true);
+                  return;
+                }
                 setBusy(true);
                 const err = await cancelBookingAs(b.id, isTrainer ? "TRAINER" : "CLIENT");
                 setBusy(false);
@@ -195,7 +227,7 @@ function Detail({ bookingId, onClose }: { bookingId: string; onClose: () => void
                 else onClose();
               }}
             >
-              Cancel session
+              {lateCharge ? (confirmLate ? "Yes, cancel and use 1 credit" : "Cancel session") : "Cancel session"}
             </Button>
           </>
         )}

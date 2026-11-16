@@ -23,6 +23,8 @@ export interface ProfileJson {
   startDate: string;
   /** Group-class credits (older profiles do not have the field yet: read it with `?? 0`). */
   groupClassCredits?: number;
+  /** The last day the package can be used (yyyy-MM-dd), set by the coach. Clients and coach are told a week before and the day before. */
+  packageExpires?: string;
   /** Home address for sessions at the client's home (a picked place, or typed text). */
   homePlace?: PlaceInfo;
   homeText?: string;
@@ -129,6 +131,7 @@ export function toProfile(row: UserRow): ClientProfile {
     startDate: p.startDate,
     coachId: row.coachId ?? "",
     groupClassCredits: p.groupClassCredits ?? 0,
+    ...(p.packageExpires ? { packageExpires: p.packageExpires } : {}),
     ...(p.homePlace ? { homePlace: p.homePlace } : {}),
     ...(p.homeText ? { homeText: p.homeText } : {}),
     ...(p.focuses?.length ? { focuses: p.focuses } : {}),

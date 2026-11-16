@@ -16,6 +16,9 @@ export const CATEGORY_LABEL: Record<NoteCategory, string> = {
 
 const BY_KIND: Record<string, NoteCategory> = {
   booking_changed: "booking",
+  late_cancel: "booking",
+  credits_low: "booking",
+  package_expiring: "booking",
   no_show: "booking",
   session_transferred: "booking",
   join_request: "booking",

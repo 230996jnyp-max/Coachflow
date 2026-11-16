@@ -462,6 +462,8 @@ export const coachSettings = pgTable("coach_settings", {
   coachId: text("coach_id").primaryKey(),
   sessionMinutes: integer("session_minutes").notNull().default(60),
   noticeHours: integer("notice_hours").notNull().default(12),
+  /** A client may cancel inside the notice window, and the session credit is used (otherwise they are blocked and told to message the coach). */
+  lateCancelCharge: boolean("late_cancel_charge").notNull().default(false),
   autoConfirm: boolean("auto_confirm").notNull().default(true),
   allowCustomGym: boolean("allow_custom_gym").notNull().default(true),
   utcOffsetMin: integer("utc_offset_min").notNull().default(480),
@@ -1183,6 +1185,7 @@ export const DDL = [
     coach_id text PRIMARY KEY,
     session_minutes integer NOT NULL DEFAULT 60,
     notice_hours integer NOT NULL DEFAULT 12,
+    late_cancel_charge boolean NOT NULL DEFAULT false,
     auto_confirm boolean NOT NULL DEFAULT true,
     allow_custom_gym boolean NOT NULL DEFAULT true,
     utc_offset_min integer NOT NULL DEFAULT 480
@@ -1227,6 +1230,7 @@ export const DDL = [
     token_enc text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS late_cancel_charge boolean NOT NULL DEFAULT false`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS templates_seeded boolean NOT NULL DEFAULT false`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_enabled boolean NOT NULL DEFAULT true`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_default_min integer NOT NULL DEFAULT 30`,

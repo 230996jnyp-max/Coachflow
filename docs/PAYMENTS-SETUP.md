@@ -4,7 +4,7 @@ Clients pay their coach for packages inside CoachFlow. The money goes **straight
 account (Stripe Connect, Standard accounts, "direct charges") or by PayNow / cash that the coach confirms. CoachFlow charges **0%**
 (the Stripe "application fee" is never set), and never holds the money.
 
-This branch is `feature/payments`. It is not part of a Sunday release until you decide to merge it.
+PayNow and cash payments work for every coach straight away. **Card payments through Stripe stay switched off until you set `CONNECT_ENABLED=1`** (step 4 below), because they need Connect enabled on your Stripe account first. Until then a coach sees "Card payments are coming soon" and can still use PayNow and cash.
 
 ## What you need once (as the platform owner)
 
@@ -21,6 +21,7 @@ This branch is `feature/payments`. It is not part of a Sunday release until you 
    - Turn on **Listen to events on Connected accounts** (a "Connect" webhook; this is what makes it different from the subscription webhook).
    - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `charge.refunded`, `account.updated`.
    - Copy its signing secret into `STRIPE_CONNECT_WEBHOOK_SECRET`.
+4. **Switch cards on.** Once Connect is enabled and the webhook is added, set `CONNECT_ENABLED=1` in Vercel (Production) and redeploy. Coaches then get the "Connect your Stripe account" button.
 
 ## What each coach does
 

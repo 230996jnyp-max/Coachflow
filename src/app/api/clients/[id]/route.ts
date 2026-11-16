@@ -55,6 +55,12 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
   if ("groupClassCredits" in body) p.groupClassCredits = int(body.groupClassCredits, "Group class credits", 0, 1000);
   if ("packageSize" in body) p.packageSize = int(body.packageSize, "Package size", 0, 1000);
   if (body.setPackageToBalance === true) p.packageSize = p.credits;
+  if ("packageExpires" in body) {
+    const v = typeof body.packageExpires === "string" ? body.packageExpires.trim() : "";
+    if (!v) delete p.packageExpires;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))) p.packageExpires = v;
+    else throw badRequest("Choose a valid date for when the package ends.");
+  }
   if ("homeAddress" in body) applyHomeAddress(p, body.homeAddress);
   if ("focuses" in body) {
     // The coach assigns what this client trains: built-in disciplines or sports the coach added. Empty = everything.

@@ -1,6 +1,6 @@
 "use client";
 
-import { format, formatDistanceToNowStrict, parseISO, startOfMonth, subDays } from "date-fns";
+import { differenceInCalendarDays, format, formatDistanceToNowStrict, parseISO, startOfMonth, subDays } from "date-fns";
 import { Activity, HeartPulse, Mail, MessageCircle, MessagesSquare, Phone, Ruler, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -8,20 +8,41 @@ import { useMemo } from "react";
 import { GoalCard } from "@/components/goal/GoalCard";
 import { badgeStatuses } from "@/lib/badges";
 import { Sparkline } from "@/components/progress/Sparkline";
-import { Badge, Button, Card, Notice, SectionTitle, Stat } from "@/components/ui";
+import { Badge, Button, Card, Input, Notice, SectionTitle, Stat } from "@/components/ui";
 import { FeelingBadge } from "@/components/workout/FeelingCard";
 import { clientThread, requestThread } from "@/lib/chat";
 import { buildFeed } from "@/lib/clientFeed";
 import { useViewer } from "@/lib/hooks";
 import { reservedCount } from "@/lib/scheduling";
 import { doneWorkouts, formatSet, PR_LABELS, weekStreak, workoutVolume } from "@/lib/stats";
-import { useNow } from "@/lib/store";
+import { updateClient, useNow } from "@/lib/store";
 import { cn, fmtLength, fmtVolume, fmtWeight, round } from "@/lib/utils";
 import { CoachNotes } from "./CoachNotes";
 import { FeedIcon } from "./FeedIcon";
 import { PctBar, PctPill, ReasonBadges, useStatuses } from "./status";
 
 type JumpTab = "workouts" | "progress" | "plan";
+
+/** When the client's package ends. Set a date and the client and coach are told a week before and the day before, while sessions remain. */
+function PackageEnds({ clientId, expires, credits, now }: { clientId: string; expires?: string; credits: number; now: Date }) {
+  const left = expires ? differenceInCalendarDays(parseISO(expires), now) : null;
+  const text =
+    left === null ? "No end date set. Add one and you and your client are reminded before the sessions run out of time." : left < 0 ? `Ended ${-left} day${left === -1 ? "" : "s"} ago${credits > 0 ? `, with ${credits} credit${credits === 1 ? "" : "s"} unused` : ""}.` : left === 0 ? "Ends today." : `${left} day${left === 1 ? "" : "s"} left (${format(parseISO(expires!), "d MMM yyyy")}).`;
+  return (
+    <Card className={cn("flex flex-wrap items-center gap-3 p-3", left !== null && left <= 7 && credits > 0 && "border-pr/40")}>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold">Package valid until</div>
+        <div className="text-xs text-muted">{text}</div>
+      </div>
+      <Input type="date" aria-label="Package valid until" className="w-44" value={expires ?? ""} onChange={(e) => void updateClient(clientId, { profile: { packageExpires: e.target.value } })} />
+      {expires && (
+        <Button size="sm" variant="ghost" onClick={() => void updateClient(clientId, { profile: { packageExpires: "" } })}>
+          Clear
+        </Button>
+      )}
+    </Card>
+  );
+}
 
 /**
  * A coach's view of one client at a glance: training score against the weekly target, the last workout, this month's highlights,
@@ -158,6 +179,8 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
             <Stat label="Records" value={monthPbs} tone="pr" sub="PBs this month" />
             <Stat label="Week streak" value={`${weekStreak(workouts, now)} 🔥`} sub={last ? `Last: ${format(parseISO(last.startedAt), "d MMM")}` : "No workouts yet"} />
           </div>
+
+          <PackageEnds clientId={clientId} expires={profile.packageExpires} credits={profile.credits + profile.groupClassCredits} now={now} />
 
           <Card className="space-y-3 p-4">
             <div className="flex items-center justify-between gap-2">

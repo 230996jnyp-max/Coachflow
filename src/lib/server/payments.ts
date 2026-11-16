@@ -25,7 +25,12 @@ const LINK_DAYS = 14;
 
 /* ---------------- Stripe ---------------- */
 let client: Stripe | null = null;
-export const paymentsReady = (): boolean => !!process.env.STRIPE_SECRET_KEY;
+/**
+ * Card payments through a coach's own Stripe account need Stripe Connect switched on for the CoachFlow account. Until the owner has
+ * done that and set CONNECT_ENABLED=1, coaches are only offered PayNow and cash (which need no Stripe at all). Local test mode with
+ * the stand-in Stripe (PAYMENTS_FAKE_STRIPE) is always on.
+ */
+export const paymentsReady = (): boolean => !!process.env.STRIPE_SECRET_KEY && (process.env.CONNECT_ENABLED === "1" || (!!process.env.PAYMENTS_FAKE_STRIPE && isLocalTestMode()));
 export function stripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new HttpError(503, "Card payments aren't set up on this server yet.");

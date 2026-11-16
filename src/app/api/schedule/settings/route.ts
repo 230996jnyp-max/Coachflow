@@ -17,6 +17,7 @@ export const PUT = route(async (req) => {
   const next = {
     sessionMinutes: "sessionMinutes" in body ? int(body.sessionMinutes, "Session length", 15, 240) : cur.sessionMinutes,
     noticeHours: "noticeHours" in body ? int(body.noticeHours, "Notice hours", 0, 336) : cur.noticeHours,
+    lateCancelCharge: typeof body.lateCancelCharge === "boolean" ? body.lateCancelCharge : cur.lateCancelCharge,
     autoConfirm: typeof body.autoConfirm === "boolean" ? body.autoConfirm : cur.autoConfirm,
     allowCustomGym: typeof body.allowCustomGym === "boolean" ? body.allowCustomGym : cur.allowCustomGym,
     utcOffsetMin: "utcOffsetMin" in body ? int(body.utcOffsetMin, "UTC offset", -720, 840) : (cur.utcOffsetMin ?? DEFAULT_RULES.utcOffsetMin),
