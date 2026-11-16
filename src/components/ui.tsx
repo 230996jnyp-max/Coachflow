@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { mediaUrl } from "@/lib/prefs";
 import type { User } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
@@ -182,21 +182,21 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
 }
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  const id = useId();
+  // The whole row is ONE button: a button nested inside a label gets its click twice in some browsers (it switched and switched
+  // straight back), so the switch itself only worked when you tapped beside it. One element means one click, anywhere on the row.
   return (
-    <label htmlFor={id} className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex min-h-12 w-full cursor-pointer touch-manipulation items-center justify-between gap-3 rounded-lg py-1 text-left [-webkit-tap-highlight-color:transparent] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
       <span className="text-sm">{label}</span>
-      <button
-        id={id}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={cn("relative h-7 w-12 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-line")}
-      >
+      <span aria-hidden className={cn("relative h-7 w-12 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-line")}>
         <span className={cn("absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all", checked ? "left-[22px]" : "left-0.5")} />
-      </button>
-    </label>
+      </span>
+    </button>
   );
 }
 

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { IDLE_MS, isIdleStale, markActive, readLastActive, setIdleNotice } from "@/lib/idle";
+import { idleLimitMs, isIdleStale, markActive, readLastActive, setIdleNotice } from "@/lib/idle";
 import { api, logout, useStore } from "@/lib/store";
 
 const WRITE_EVERY_MS = 15_000;
@@ -10,7 +10,7 @@ const PING_EVERY_MS = 2 * 60_000;
 const CHECK_EVERY_MS = 30_000;
 const EVENTS = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"] as const;
 
-/** Signs every account out after 4 hours without real activity. Mounted once, and only does anything while signed in. */
+/** Signs every account out after 4 hours without real activity (30 days if they chose to stay signed in). Mounted once, and only does anything while signed in. */
 export function IdleGuard() {
   const { sessionUserId } = useStore();
   const pathname = usePathname();
@@ -45,7 +45,7 @@ export function IdleGuard() {
 
     const check = () => {
       const last = readLastActive();
-      if (last !== null && Date.now() - last > IDLE_MS) void signOut();
+      if (last !== null && Date.now() - last > idleLimitMs()) void signOut();
     };
 
     // Re-opening the app after a long absence signs out straight away; otherwise the clock starts now.

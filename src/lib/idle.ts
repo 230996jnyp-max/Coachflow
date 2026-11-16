@@ -5,9 +5,12 @@
  */
 
 export const IDLE_MS = 4 * 60 * 60 * 1000;
+/** Signed in with "Stay signed in on this device": the same rule, but 30 days (the server uses the same limit for that session). */
+export const REMEMBER_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
 export const IDLE_NOTICE = "Signed out after 4 hours of inactivity for your security. Please re-enter your password.";
 
 const ACTIVE_KEY = "coachflow-last-active";
+const REMEMBER_KEY = "coachflow-stay-signed-in";
 const NOTICE_KEY = "coachflow-idle-notice";
 const USER_KEY = "coachflow-last-username";
 
@@ -40,10 +43,19 @@ export function readLastActive(): number | null {
 export const markActive = (now = Date.now()) => set(ACTIVE_KEY, String(now));
 export const clearActive = () => del(ACTIVE_KEY);
 
-/** True when the device last saw activity more than 4 hours ago. */
+/** Whether this device was signed in with "Stay signed in on this device". Cleared when signing out. */
+export const isRemembered = (): boolean => get(REMEMBER_KEY) === "1";
+export function setRemembered(on: boolean) {
+  if (on) set(REMEMBER_KEY, "1");
+  else del(REMEMBER_KEY);
+}
+/** How long this device may sit unused before it signs out: 4 hours, or 30 days when the person chose to stay signed in. */
+export const idleLimitMs = (): number => (isRemembered() ? REMEMBER_IDLE_MS : IDLE_MS);
+
+/** True when the device last saw activity longer ago than its limit. */
 export function isIdleStale(now = Date.now()): boolean {
   const last = readLastActive();
-  return last !== null && now - last > IDLE_MS;
+  return last !== null && now - last > idleLimitMs();
 }
 
 export const setIdleNotice = () => set(NOTICE_KEY, "1");

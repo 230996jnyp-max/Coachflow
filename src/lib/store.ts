@@ -10,7 +10,7 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
-import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice } from "./idle";
+import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice, setRemembered } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
 import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
@@ -763,9 +763,10 @@ export async function login(username: string, password: string): Promise<string 
 }
 
 /** Like login(), and also says why it failed when the server gave a reason (e.g. "unverified": the email hasn't been confirmed yet). */
-export async function loginResult(username: string, password: string): Promise<{ error: string | null; code?: string }> {
-  const r = await api("/api/auth/login", { body: { username, password } });
+export async function loginResult(username: string, password: string, stayHere = false): Promise<{ error: string | null; code?: string }> {
+  const r = await api("/api/auth/login", { body: { username, password, remember: stayHere } });
   if (!r.ok) return { error: r.error ?? "Login failed.", code: r.code };
+  setRemembered(stayHere); // "Stay signed in on this device": this browser keeps the session for 30 days instead of 4 hours idle
   markActive(); // tells establishSession that this device is signed in, so it can load everything at once
   const ok = await establishSession();
   // Only the username is remembered on this device, never the password. A coach with no niche saved yet is asked for one by the
@@ -784,6 +785,7 @@ export async function logout() {
   await writeOutbox(); // anything still unsent waits on this device for the next sign-in
   outboxFrozen = true;
   clearActive();
+  setRemembered(false);
   workoutQ.clear();
   templateQ.clear();
   exerciseQ.clear();

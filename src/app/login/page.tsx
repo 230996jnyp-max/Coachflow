@@ -18,6 +18,8 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
+  // "Stay signed in on this device": off unless ticked, because the default is to sign out after 4 hours of no activity.
+  const [stay, setStay] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Set when this form signed the person in: the card fades out as the next screen fades in, instead of flashing a loader.
@@ -62,7 +64,7 @@ export default function LoginPage() {
   const attempt = async (u: string, p: string) => {
     setBusy(true);
     setSubmitted(true);
-    const r = await loginResult(u, p);
+    const r = await loginResult(u, p, stay);
     if (r.error) {
       setBusy(false);
       setSubmitted(false);
@@ -139,6 +141,13 @@ export default function LoginPage() {
                 </button>
               </div>
             </Field>
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg py-1">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-accent" checked={stay} onChange={(e) => setStay(e.target.checked)} />
+              <span className="text-sm">
+                <span className="font-semibold">Stay signed in on this device</span>
+                <span className="block text-xs text-muted">Only on your own phone or computer. You stay signed in for 30 days; otherwise you are signed out after 4 hours of no activity.</span>
+              </span>
+            </label>
             {error && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
             {unverified && (
               <Button type="button" variant="secondary" className="w-full" onClick={resend} disabled={resent}>
