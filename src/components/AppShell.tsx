@@ -8,6 +8,7 @@ import { useBilling, useBillingLoader } from "@/lib/billingState";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   Apple,
+  BarChart3,
   Building2,
   CalendarDays,
   ChevronsLeft,
@@ -55,6 +56,7 @@ const TRAINER_NAV: NavItem[] = [
   { href: "/schedule", label: "Schedule", icon: <CalendarDays size={22} />, mobile: true },
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
   { href: "/messages", label: "Messages", icon: <MessageCircle size={22} />, mobile: true },
+  { href: "/business", label: "Business", icon: <BarChart3 size={22} /> },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Settings", icon: <Settings size={22} /> },
 ];
@@ -70,7 +72,7 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/settings", label: "Profile", icon: <UserRound size={22} /> },
 ];
 
-const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
+const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor", "/business"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
 const GYM_NAV: NavItem = { href: "/gym-admin", label: "Gym", icon: <Building2 size={22} /> };

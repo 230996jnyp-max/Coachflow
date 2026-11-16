@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
-import { notifyByEmail, storeMessages, type EmailMeta } from "@/lib/server/chatSend";
+import { notifyByEmail, pushNewMessage, storeMessages, type EmailMeta } from "@/lib/server/chatSend";
 import { db } from "@/lib/server/db";
 import { readJson, route, str } from "@/lib/server/http";
 import { users } from "@/lib/server/schema";
@@ -26,5 +26,6 @@ export const POST = route(async (req) => {
     me,
     true,
   );
+  for (const c of coaches) pushNewMessage(me, [c.id], `o:${c.id}`, true);
   return NextResponse.json({ sent: coaches.length, messages: stored });
 });

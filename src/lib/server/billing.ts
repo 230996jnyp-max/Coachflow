@@ -2,7 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { addDays, effectiveStatus, isBlockedStatus, lookupKey, sgd, tierFor, TRIAL_DAYS, trialDaysLeft, type BillingInfo, type BillingStatus } from "@/lib/billing";
-import { db } from "./db";
+import { db, isLocalTestMode } from "./db";
 import { badRequest, HttpError } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
 import { coachBilling, users, type CoachBillingRow, type UserRow } from "./schema";
@@ -23,7 +23,15 @@ export const stripeReady = (): boolean => !!process.env.STRIPE_SECRET_KEY;
 let client: Stripe | null = null;
 export function stripe(): Stripe {
   if (!process.env.STRIPE_SECRET_KEY) throw new HttpError(503, "Billing isn't set up yet. Please try again later.");
-  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY));
+  if (!client) {
+    // Local testing only: talk to a stand-in Stripe (host:port) instead of the real one.
+    const fake = process.env.PAYMENTS_FAKE_STRIPE;
+    if (fake && isLocalTestMode()) {
+      const [host, port] = fake.split(":");
+      client = new Stripe(process.env.STRIPE_SECRET_KEY, { host, port: Number(port), protocol: "http" });
+    } else client = new Stripe(process.env.STRIPE_SECRET_KEY);
+  }
+  return client;
 }
 /** Tests only: swap in a stand-in for Stripe. */
 export function setStripeForTests(c: unknown) {
@@ -321,6 +329,11 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
         })
         .where(eq(coachBilling.coachId, coachId));
       forget(coachId);
+      // Stripe says "active" once the first real payment went through: the coach who invited this one earns their free month.
+      if (sub.status === "active") {
+        const { onCoachPaid } = await import("./referrals");
+        await onCoachPaid(coachId);
+      }
       return true;
     }
     case "customer.subscription.deleted": {

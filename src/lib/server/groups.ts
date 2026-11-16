@@ -12,6 +12,7 @@ import { badRequest, conflict, forbidden, notFound } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
 import { attendance, bookings, groupMembers, groupRequests, groupSessions, notifications, templates, users, workouts, type AttendanceRow, type GroupMemberRow, type GroupRequestRow, type GroupRow, type UserRow } from "./schema";
 import { attendanceFor, attendanceInfo, attKey, logCredit, setMark } from "./credits";
+import { sendPush } from "./push";
 import { rulesFor, toBooking } from "./schedule";
 import { customExercisesFor, insertWorkoutIfAbsent, parseTemplateExercise, recentDoneWorkouts } from "./training";
 
@@ -99,6 +100,8 @@ export async function notify(userIds: string[], kind: string, n: NoteBody, opts:
   try {
     const d = await db();
     const rows = await usersByIds(ids);
+    // The same notice also goes to their phone (not waited for, and silent inside their quiet hours).
+    void sendPush(rows.map((r) => r.id), { title: n.title, body: n.body, url: n.link, tag: kind });
     for (const u of rows) {
       const id = newId("n");
       await d.insert(notifications).values({ id, userId: u.id, kind, bodyEnc: encryptJson(n, aadN(id)) });

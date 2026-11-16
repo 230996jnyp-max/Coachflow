@@ -30,6 +30,8 @@ export const users = pgTable(
     theme: text("theme"),
     /** A coach's 6-digit code, shared so clients can find them at sign-up (null for everyone else). Unique. */
     coachCode: text("coach_code"),
+    /** A coach's own referral code (CF + 6 characters), made the first time it is needed. */
+    referralCode: text("referral_code"),
     /** False only for someone who signed themselves up and hasn't opened the link in their verification email yet. */
     emailVerified: boolean("email_verified").notNull().default(true),
     /** End of the 30-day free trial of a self sign-up (coach or personal). Null = no trial (coach-made clients, older accounts). */
@@ -547,6 +549,29 @@ export const coachBilling = pgTable("coach_billing", {
 });
 export type CoachBillingRow = typeof coachBilling.$inferSelect;
 
+/**
+ * Coach referrals: one row per coach who signed up with someone's referral code. `status` goes SIGNED_UP, then PAID (the new coach became a
+ * paying subscriber), then REWARDED (the inviter got their free month) or CAPPED (they had already earned the maximum).
+ */
+export const referrals = pgTable(
+  "referrals",
+  {
+    id: text("id").primaryKey(),
+    referrerId: text("referrer_id").notNull(),
+    refereeId: text("referee_id").notNull(),
+    code: text("code").notNull(),
+    status: text("status").notNull().default("SIGNED_UP"),
+    /** TRIAL_EXTENSION | STRIPE_CREDIT | EXEMPT, once rewarded. */
+    rewardKind: text("reward_kind"),
+    rewardNote: text("reward_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    rewardedAt: timestamp("rewarded_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("referrals_referee_idx").on(t.refereeId), index("referrals_referrer_idx").on(t.referrerId)],
+);
+export type ReferralRow = typeof referrals.$inferSelect;
+
 /** How many AI calls a person made today, by kind (limits protect the shared free AI quota). */
 export const aiUsage = pgTable(
   "ai_usage",
@@ -808,6 +833,26 @@ export const notifications = pgTable(
 );
 
 /**
+ * Phone and browser push subscriptions (Web Push): one row per device a person turned "Phone notifications" on for. The endpoint and keys
+ * are only ever read by the server to deliver a notification; nothing here is sent back to a browser.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("push_subs_endpoint_idx").on(t.endpoint), index("push_subs_user_idx").on(t.userId)],
+);
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+
+/**
  * One row per person per session once the coach has marked them Present or No-Show. `charged` says whether a credit is
  * currently taken for it, so changing a mark later only ever moves the balance by the difference (never double counts).
  */
@@ -966,6 +1011,8 @@ export const DDL = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme text`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS coach_code text`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_coach_code_idx ON users (coach_code) WHERE coach_code IS NOT NULL`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code text`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_idx ON users (referral_code) WHERE referral_code IS NOT NULL`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz`,
   `CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email))`,
@@ -1305,6 +1352,20 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS coach_billing_customer ON coach_billing (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS referrals (
+    id text PRIMARY KEY,
+    referrer_id text NOT NULL,
+    referee_id text NOT NULL,
+    code text NOT NULL,
+    status text NOT NULL DEFAULT 'SIGNED_UP',
+    reward_kind text,
+    reward_note text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    paid_at timestamptz,
+    rewarded_at timestamptz
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS referrals_referee_idx ON referrals (referee_id)`,
+  `CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)`,
   `CREATE TABLE IF NOT EXISTS ai_usage (
     user_id text NOT NULL,
     day text NOT NULL,
@@ -1410,6 +1471,18 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    endpoint text NOT NULL,
+    p256dh text NOT NULL,
+    auth text NOT NULL,
+    user_agent text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_sent_at timestamptz
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS push_subs_endpoint_idx ON push_subscriptions (endpoint)`,
+  `CREATE INDEX IF NOT EXISTS push_subs_user_idx ON push_subscriptions (user_id)`,
   `CREATE TABLE IF NOT EXISTS attendance (
     id text PRIMARY KEY,
     kind text NOT NULL,

@@ -10,6 +10,7 @@ import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
+import { forgetPushOnSignOut, relinkPush } from "./pushClient";
 import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice, setRemembered } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
 import type { TravelNeighbor } from "./travel";
@@ -540,6 +541,7 @@ async function establishSession(): Promise<boolean> {
     return false;
   }
   const me = r.data.user;
+  void relinkPush(me.id); // phone notifications stay on after an inactivity sign-out
   const trainingReq = early?.training ?? api<TrainingData>("/api/training?recent=1");
   const scheduleReq = early?.schedule ?? api<ScheduleData>("/api/schedule");
   const groupsReq = early?.groups ?? api<GroupsData>("/api/groups");
@@ -776,7 +778,9 @@ export async function loginResult(username: string, password: string, stayHere =
   return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
 
-export async function logout() {
+/** Signs out. `idle` = the inactivity timeout (phone notifications stay on); a sign-out on purpose also stops them on this device. */
+export async function logout(opts: { idle?: boolean } = {}) {
+  const leaving = state.sessionUserId;
   if (persistTimer) clearTimeout(persistTimer);
   // Make sure nothing typed in the last moment is lost before the session ends.
   await Promise.all([exerciseQ.flush(), templateQ.flush(), metricQ.flush(), photoQ.flush()]);
@@ -797,6 +801,7 @@ export async function logout() {
   bodyQueueing = false;
   bodySafe = false;
   bodySince = undefined;
+  if (leaving && !opts.idle) await forgetPushOnSignOut(leaving);
   await api("/api/auth/logout", { method: "POST", body: {} });
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
 }

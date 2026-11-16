@@ -7,6 +7,8 @@ import type { ClientGoal } from "@/lib/types";
 import { openStaffProfile, sealProfile, usernameTaken, parseUsername, openProfile, type ProfileJson, type StaffProfileJson } from "./accounts";
 import { issueToken, consumeToken } from "./authTokens";
 import { coachByCode, ensureCoachCode } from "./coachCode";
+import { cleanReferralCode, REFERRAL_BONUS_DAYS } from "@/lib/referral";
+import { recordReferral, referrerByCode } from "./referrals";
 import { requestCoach } from "./coachLinks";
 import { hashPassword } from "./auth";
 import { createGym, deleteGymEverything, joinWithCode, lookupGym } from "./gymOrg";
@@ -15,7 +17,7 @@ import { db, isLocalTestMode } from "./db";
 import { badRequest, checkPassword, conflict, email as parseEmail, HttpError, int, isUniqueViolation, str } from "./http";
 import { escapeHtml, layout, sendMail, type MailResult } from "./mail";
 import { hit } from "./rateLimit";
-import { authTokens, coachSettings, gymOrgs, gyms, users, type UserRow } from "./schema";
+import { authTokens, coachSettings, gymOrgs, gyms, referrals, users, type UserRow } from "./schema";
 
 /*
  * Self sign-up. Anyone can make a Coach, Client or Personal account from /signup. The account exists straight away but can't sign in
@@ -62,6 +64,8 @@ export interface SignupInput {
   /** GYM sign-ups: the name of the gym or academy they run. COACH sign-ups: an optional gym code to join. */
   gymName: string;
   gymCode: string;
+  /** COACH and GYM sign-ups: the referral code of the coach who invited them (CF + 6 characters), if any. */
+  referralCode: string;
   medicalNotes: string;
   focuses: string[];
   weeklyTarget: number;
@@ -107,6 +111,7 @@ export function parseSignup(body: Record<string, unknown>, now: Date = new Date(
     coachCode: "",
     gymName: "",
     gymCode: "",
+    referralCode: "",
     medicalNotes: "",
     focuses: [],
     weeklyTarget: 3,
@@ -121,6 +126,11 @@ export function parseSignup(body: Record<string, unknown>, now: Date = new Date(
       const gc = cleanGymCode(body.gymCode);
       if (!gc) throw badRequest("A gym code is six digits.");
       base.gymCode = gc;
+    }
+    if (typeof body.referralCode === "string" && body.referralCode.trim()) {
+      const rc = cleanReferralCode(body.referralCode);
+      if (!rc) throw badRequest("That referral code doesn't look right. It starts with CF and has 6 more letters or numbers.");
+      base.referralCode = rc;
     }
     base.experienceYears = int(body.experienceYears ?? 0, "Years of experience", 0, 60);
     base.tagline = str(body.tagline, "Tagline", { optional: true, max: 140 });
@@ -247,6 +257,10 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
     if (!coach) throw new HttpError(404, "We couldn't find a coach with that code. Check it with your coach.");
   }
 
+  // A coach invited by another coach: check the code now, so a typo is caught before an account is made. They start with a longer trial.
+  const referrer = input.referralCode ? await referrerByCode(input.referralCode) : null;
+  if (input.referralCode && !referrer) throw new HttpError(404, "We couldn't find that referral code. Check it with the coach who invited you, or leave it blank.");
+
   const d = await db();
   const id = `u_${randomUUID()}`;
   const consent = { at: new Date().toISOString(), ...(input.guardian ? { guardian: true } : {}) };
@@ -294,7 +308,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
         unit: input.unit,
         mustChangePassword: false,
         emailVerified: false,
-        trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
+        trialEndsAt: new Date(Date.now() + (TRIAL_DAYS + (referrer ? REFERRAL_BONUS_DAYS : 0)) * 86_400_000),
       })
       .returning();
   } catch (e) {
@@ -304,6 +318,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
 
   const undo = async () => {
     await d.delete(authTokens).where(eq(authTokens.userId, id));
+    await d.delete(referrals).where(eq(referrals.refereeId, id));
     const owned = await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, id));
     for (const g of owned) await deleteGymEverything(g.id);
     await d.delete(gyms).where(eq(gyms.coachId, id));
@@ -322,6 +337,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
       await undo();
       throw new HttpError(502, `We couldn't send the confirmation email${mail.error ? ` (${mail.error})` : ""}. Check the address and try again.`);
     }
+    if (referrer) await recordReferral(id, referrer, input.referralCode);
   } catch (e) {
     if (!(e instanceof HttpError)) await undo().catch(() => undefined);
     throw e;

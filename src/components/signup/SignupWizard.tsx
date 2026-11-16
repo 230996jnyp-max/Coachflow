@@ -8,6 +8,7 @@ import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Button, Card, Field, Input, Notice, Segmented, Select, Textarea } from "@/components/ui";
 import { CATALOG } from "@/lib/gyms";
 import { cleanGymCode } from "@/lib/gymPerms";
+import { cleanReferralCode } from "@/lib/referral";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, coachTitle, LEVELS, PERSONAL_GOALS, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import { CORE_SPORTS, sportLabel } from "@/lib/sports";
 import { api } from "@/lib/store";
@@ -60,7 +61,7 @@ const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
-export function SignupWizard({ initialRole = null, initialGymCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string }) {
+export function SignupWizard({ initialRole = null, initialGymCode = "", initialRef = "" }: { initialRole?: SignupRole | null; initialGymCode?: string; initialRef?: string }) {
   // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
   const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
@@ -96,6 +97,10 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
   const [gymName, setGymName] = useState("");
   // A gym code from an invitation link (?gym=123456), or typed here. Looked up as soon as it is complete.
   const [gymCode, setGymCode] = useState(cleanGymCode(initialGymCode) ?? "");
+  // A referral code from an invitation link (?ref=CF7K4Q9P), or typed here. Looked up as soon as it is complete.
+  const [refCode, setRefCode] = useState(cleanReferralCode(initialRef) ?? "");
+  const [refFound, setRefFound] = useState<string | null>(null);
+  const [refError, setRefError] = useState<string | null>(null);
   const [gymFound, setGymFound] = useState<string | null>(null);
   const [gymError, setGymError] = useState<string | null>(null);
   const [gymChoice, setGymChoice] = useState<string[]>([]);
@@ -138,6 +143,21 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
       alive = false;
     };
     // Only for the code present when the form opens; typing a code is handled by onCode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A referral code that came in with the address is checked straight away, so step 3 already names who invited them.
+  useEffect(() => {
+    if (!refCode) return;
+    let alive = true;
+    void api<{ name: string }>("/api/signup/referral", { body: { code: refCode } }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.data) setRefFound(r.data.name);
+      else setRefError(r.error ?? "We couldn't find that referral code.");
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -201,6 +221,20 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     return null;
   };
 
+  const onRefCode = (v: string) => {
+    const typed = v.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12);
+    setRefCode(typed);
+    setRefFound(null);
+    setRefError(null);
+    const clean = cleanReferralCode(typed);
+    if (clean) {
+      void api<{ name: string }>("/api/signup/referral", { body: { code: clean } }).then((r) => {
+        if (r.ok && r.data) setRefFound(r.data.name);
+        else setRefError(r.error ?? "We couldn't find that referral code.");
+      });
+    }
+  };
+
   const onGymCode = (v: string) => {
     const digits = v.replace(/\D/g, "").slice(0, 6);
     setGymCode(digits);
@@ -215,12 +249,14 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
   };
 
   const step3Error = (): string | null => {
+    const refProblem = (role === "GYM" || role === "COACH") && refCode ? (refFound ? null : refError ?? (cleanReferralCode(refCode) ? "Checking the referral code…" : "A referral code starts with CF and has 6 more letters or numbers. Clear it if nobody invited you.")) : null;
     if (role === "GYM") {
       if (gymName.trim().length < 2) return "Enter the name of your gym or academy.";
-      return niches.length === 0 ? "Pick at least one thing you coach." : null;
+      return niches.length === 0 ? "Pick at least one thing you coach." : refProblem;
     }
     if (role === "COACH") {
       if (niches.length === 0) return "Pick at least one thing you coach.";
+      if (refProblem) return refProblem;
       if (gymCode && !gymFound) return gymError ?? (gymCode.length === 6 ? "Checking the gym code…" : "A gym code is six digits. Clear it if you coach independently.");
       return null;
     }
@@ -271,6 +307,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
         coachCode: cleanCoachCode(code) ?? "",
         gymName: role === "GYM" ? gymName.trim() : undefined,
         gymCode: role === "COACH" ? gymCode : undefined,
+        referralCode: (role === "COACH" || role === "GYM") && refCode ? (cleanReferralCode(refCode) ?? "") : undefined,
         medicalNotes: medical.trim(),
         focuses,
         weeklyTarget: weekly,
@@ -458,6 +495,19 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
                   <Input className="mt-2" value={gymText} onChange={(e) => setGymText(e.target.value)} maxLength={200} placeholder="Other places, separated by commas" />
                   <p className="mt-1 text-xs text-muted">You can pick exact branches on the map in Settings later.</p>
                 </div>
+                {(role === "COACH" || role === "GYM") && (
+                  <div>
+                    <Field label="Referral code (optional)" hint={refError ? undefined : "Invited by another coach? Enter their code (it looks like CF-7K4Q9P) and you both get something: you start with an extra 30 days free."} error={refError}>
+                      <Input value={refCode} onChange={(e) => onRefCode(e.target.value)} autoComplete="off" autoCapitalize="characters" maxLength={12} placeholder="CF-XXXXXX" className="font-mono tracking-widest" />
+                    </Field>
+                    {refFound && (
+                      <p className="mt-2 text-sm font-semibold text-success">
+                        ✓ Invited by {refFound}
+                        <span className="mt-0.5 block text-xs font-normal text-muted">Your free trial starts at 60 days instead of 30.</span>
+                      </p>
+                    )}
+                  </div>
+                )}
                 {role === "COACH" && (
                   <div>
                     <Field label="Gym or academy code (optional)" hint={gymError ? undefined : "Working with a gym or coaching academy? Enter its 6-digit code. Leave it blank if you are an independent freelance coach."} error={gymError}>

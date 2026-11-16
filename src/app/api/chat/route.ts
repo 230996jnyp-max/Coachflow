@@ -2,7 +2,7 @@ import { and, desc, gt, inArray, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { allowedThreads, hydrate, otherParty } from "@/lib/server/chat";
-import { notifyByEmail, storeMessages } from "@/lib/server/chatSend";
+import { notifyByEmail, pushNewMessage, storeMessages } from "@/lib/server/chatSend";
 import { db } from "@/lib/server/db";
 import { forbidden, readJson, route, str, tooMany } from "@/lib/server/http";
 import { smtpConfigured } from "@/lib/server/mail";
@@ -54,5 +54,6 @@ export const POST = route(async (req) => {
   const origin = process.env.APP_URL || new URL(req.url).origin;
   const email = body.notifyEmail === false ? ({ status: "off" } as const) : await notifyByEmail({ from: me, to: other, text, origin });
   const [message] = await storeMessages([{ thread, text, email }], me);
+  pushNewMessage(me, [other.id], thread);
   return NextResponse.json({ message, smtp: smtpConfigured() });
 });

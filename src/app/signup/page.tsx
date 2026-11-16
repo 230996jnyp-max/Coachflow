@@ -17,8 +17,9 @@ function Inner() {
   const router = useRouter();
   const params = useSearchParams();
   const gymCode = params.get("gym") ?? "";
+  const refCode = params.get("ref") ?? "";
   // An invitation link (?role=coach&gym=123456) opens the coach sign-up with the gym code already in.
-  const role = roleFrom(params.get("role")) ?? (gymCode ? "COACH" : null);
+  const role = roleFrom(params.get("role")) ?? (gymCode || refCode ? "COACH" : null);
 
   // Someone who is already signed in has no need for this page.
   useEffect(() => {
@@ -26,7 +27,7 @@ function Inner() {
   }, [ready, user, isTrainer, router]);
 
   if (!ready || user) return <Splash />;
-  return <SignupWizard initialRole={role} initialGymCode={gymCode} />;
+  return <SignupWizard initialRole={role} initialGymCode={gymCode} initialRef={refCode} />;
 }
 
 /** Public: make a Coach, Client or Personal account. */

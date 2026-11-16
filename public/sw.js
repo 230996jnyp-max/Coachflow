@@ -65,6 +65,28 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+// A push from the server (bookings, messages, reminders). Skipped while CoachFlow is open and in front: the app already shows it.
+self.addEventListener("push", (event) => {
+  let d = {};
+  try {
+    d = event.data ? event.data.json() : {};
+  } catch {
+    d = { title: "CoachFlow", body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      if (list.some((c) => c.visibilityState === "visible" && c.focused)) return undefined;
+      return self.registration.showNotification(d.title || "CoachFlow", {
+        body: d.body || "",
+        icon: "/pwa-icon/192",
+        badge: "/pwa-icon/192",
+        tag: d.tag || undefined,
+        data: { url: d.url || "/" },
+      });
+    }),
+  );
+});
+
 // Focus (or open) the app when a notification is tapped.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();

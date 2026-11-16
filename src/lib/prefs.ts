@@ -147,6 +147,17 @@ export function inQuietHours(q: Prefs["quiet"], now: Date): boolean {
   return from < to ? cur >= from && cur < to : cur >= from || cur < to;
 }
 
+/** Same, for a server that has no "local" clock: the time of day in the given time zone (Singapore unless APP_TZ says otherwise). */
+export function inQuietHoursIn(q: Prefs["quiet"], now: Date, tz = "Asia/Singapore"): boolean {
+  if (!q) return false;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const from = minutes(q.from), to = minutes(q.to), cur = h * 60 + m;
+  if (from === to) return false;
+  return from < to ? cur >= from && cur < to : cur >= from || cur < to;
+}
+
 /** Sort `items` by the saved order (unknown ones last, in their original order) and drop the hidden ones. */
 export function arrange<T extends { id: string }>(items: T[], setting: { hidden: string[]; order: string[] } | undefined): T[] {
   if (!setting) return items;

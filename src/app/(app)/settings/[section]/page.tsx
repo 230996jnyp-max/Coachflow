@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 import { PaymentsSection } from "@/components/payments/CoachPayments";
+import { ReferralsSection } from "@/components/settings/Referrals";
 import { categoriesFor } from "@/components/settings/categories";
 import { AppearanceSection, CoachingSection, HelpSection, MyCoachSection, NotificationsSection, ProfileSection } from "@/components/settings/Sections";
 import { useViewer } from "@/lib/hooks";
@@ -22,7 +23,7 @@ export default function SettingsSectionPage({ params }: { params: Promise<{ sect
   }, [user, cat, section, router]);
 
   if (!user) return null;
-  if (!["profile", "notifications", "appearance", "coaching", "payments", "my-coach", "administration", "help"].includes(section)) notFound();
+  if (!["profile", "notifications", "appearance", "coaching", "payments", "referrals", "my-coach", "administration", "help"].includes(section)) notFound();
   if (!cat) return null;
 
   return (
@@ -39,6 +40,7 @@ export default function SettingsSectionPage({ params }: { params: Promise<{ sect
       {section === "appearance" && <AppearanceSection />}
       {section === "coaching" && <CoachingSection />}
       {section === "payments" && <PaymentsSection />}
+      {section === "referrals" && <ReferralsSection />}
       {section === "my-coach" && <MyCoachSection />}
       {section === "help" && <HelpSection />}
     </div>

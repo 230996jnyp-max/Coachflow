@@ -11,6 +11,7 @@ import { HomeAddressField } from "@/components/HomeAddressField";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
 import { NumberInput } from "@/components/NumberInput";
+import { PhoneNotifications } from "./PhoneNotifications";
 import { SpecialtiesCard } from "@/components/sports/Focus";
 import { ThemePicker } from "@/components/ThemeSwitcher";
 import { UsernameField } from "@/components/UsernameField";
@@ -134,6 +135,8 @@ export function NotificationsSection() {
           )}
         </div>
       </Block>
+
+      <PhoneNotifications />
 
       <Block title="Quiet hours" hint="No pop-ups or sounds between these times. Messages still arrive and show as unread.">
         <Toggle checked={!!quiet} onChange={(on) => savePrefs({ quiet: on ? { from: "22:00", to: "07:00" } : null })} label="Keep quiet at night" />
