@@ -13,6 +13,9 @@ const COOKIE = "cf_session";
 const MAX_AGE = 7 * 24 * 60 * 60;
 /** A session with no real user activity for this long is dead, even if the cookie is still valid. */
 export const IDLE_SECONDS = 4 * 60 * 60;
+/** "Stay signed in on this device" (the person ticked it at login): the session and its inactivity limit are both 30 days. */
+const REMEMBER_MAX_AGE = 30 * 24 * 60 * 60;
+export const REMEMBER_IDLE_SECONDS = REMEMBER_MAX_AGE;
 
 export type DbRole = "OWNER" | "COACH" | "CLIENT";
 export const isStaff = (u: Pick<UserRow, "role">) => u.role === "OWNER" || u.role === "COACH";
@@ -54,21 +57,39 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 /** An older bcrypt hash that should be replaced with an Argon2id one after a successful sign-in. */
 export const needsRehash = async (hash: string): Promise<boolean> => !hash.startsWith("$argon2") && (await argon()) !== null;
 
-/** Issues the httpOnly session cookie. `tokenVersion` lets us revoke every session (password change, deactivation). */
-export async function createSession(user: UserRow) {
+/** Whether the current session cookie was issued with "stay signed in" (`rm`). Used to keep that choice when the session is renewed. */
+async function sessionIsRemembered(): Promise<boolean> {
+  const token = (await cookies()).get(COOKIE)?.value;
+  if (!token) return false;
+  try {
+    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+    return payload.rm === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Issues the httpOnly session cookie. `tokenVersion` lets us revoke every session (password change, deactivation).
+ * `remember` (set only by signing in with "Stay signed in on this device") makes it a 30-day session; when left out, a renewal keeps
+ * whatever the current session was.
+ */
+export async function createSession(user: UserRow, opts?: { remember?: boolean }) {
+  const remember = opts?.remember ?? (await sessionIsRemembered());
+  const maxAge = remember ? REMEMBER_MAX_AGE : MAX_AGE;
   // `la` = last activity. Background polling never refreshes it; only the explicit activity ping and logging in do.
-  const jwt = await new SignJWT({ tv: user.tokenVersion, la: Math.floor(Date.now() / 1000) })
+  const jwt = await new SignJWT({ tv: user.tokenVersion, la: Math.floor(Date.now() / 1000), ...(remember ? { rm: 1 } : {}) })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt()
-    .setExpirationTime(`${MAX_AGE}s`)
+    .setExpirationTime(`${maxAge}s`)
     .sign(secret());
   (await cookies()).set(COOKIE, jwt, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: MAX_AGE,
+    maxAge,
   });
 }
 
@@ -88,7 +109,7 @@ export async function currentUser(): Promise<UserRow | null> {
     if (!row || !row.active || row.tokenVersion !== payload.tv) return null;
     // Sessions issued before inactivity tracking have no `la`; their issue time stands in for it.
     const lastActive = typeof payload.la === "number" ? payload.la : (payload.iat ?? 0);
-    if (Date.now() / 1000 - lastActive > IDLE_SECONDS) return null;
+    if (Date.now() / 1000 - lastActive > (payload.rm === 1 ? REMEMBER_IDLE_SECONDS : IDLE_SECONDS)) return null;
     return row;
   } catch {
     return null;

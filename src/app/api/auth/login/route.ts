@@ -58,6 +58,7 @@ export const POST = route(async (req) => {
 
   const upgrade = (await needsRehash(user.passwordHash)) ? { passwordHash: await hashPassword(password) } : {};
   await d.update(users).set({ failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), ...upgrade }).where(eq(users.id, user.id));
-  await createSession(user);
+  // Only an explicit "Stay signed in on this device" makes a longer session; every other sign-in is the normal 4-hour-idle one.
+  await createSession(user, { remember: body.remember === true });
   return NextResponse.json({ ok: true });
 });
