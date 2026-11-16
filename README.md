@@ -377,3 +377,15 @@ Setup steps and where to find each key: `docs/STRIPE-SETUP.md`. Run `npm run str
 - **Tier changes** happen when a client is added, archived, restored or deleted, and again when Stripe sends the upcoming-invoice notice. The new price applies from the next renewal only (`proration_behavior: none`); the coach is told with a toast.
 - **Paywall:** `BILLING_ENFORCED=1` turns it on (off by default). A coach without a trial or subscription, and that coach's clients, see a "Subscription Required" / "Coaching is paused" screen and the API answers 402; nothing is ever deleted. Past-due payments keep access and show a recovery banner.
 - **Routes:** `POST /api/stripe/checkout`, `POST /api/stripe/portal`, `POST /api/stripe/webhook` (signature checked), `GET /api/billing`, `GET /api/cron/billing`, `GET /api/admin/billing`, `POST /api/admin/billing/[coachId]`. Code: `src/lib/billing.ts` (pure), `src/lib/server/billing.ts`.
+
+## Payments between a coach and their clients
+
+Clients pay their coach for packages inside the app, and **CoachFlow takes 0%**: the money goes straight to the coach, never through us. Setup and the exact flow are in `docs/PAYMENTS-SETUP.md`.
+
+- **Stripe Connect, Standard accounts, direct charges.** A coach connects their own Stripe account (Settings, Payments). Checkout is made on *their* account with no application fee; Stripe bills its own fee to the coach (Singapore cards about 3.4% + S$0.50, PayNow about 1.3%). Refunds, disputes and payouts stay in the coach's Stripe dashboard. Code: `src/lib/server/payments.ts`, routes `/api/payments/*`, `/api/pay/[token]`, and the Connect webhook `/api/stripe/connect-webhook` (signature checked; credits only from a verified event whose order, amount, currency and Stripe account all match; one-time via a guarded status change and `payment_events`).
+- **PayNow directly and cash (no fees at all).** The coach adds a PayNow number; the payer sees the number, the amount and a reference (`CF-XXXXXX`), sends it from their bank app and taps "I have sent it"; the coach confirms receipt and the credits are added. The coach can also record cash or a bank transfer.
+- **Packages** (name, sessions, optional group class credits, price, up to S$5,000) are copied onto each payment, so changing a package never changes what was sold. A package is switched off, not erased.
+- **Pay links** (`/pay/<code>`) need no account, so a parent or guardian can pay; under-18 clients can't buy for themselves. Links last 14 days.
+- **Records:** a payments list with totals, a CSV, receipts (Stripe's), an estimate of Stripe's fee per card payment, and refunds that take back only the credits the client has left. A refund made in the Stripe dashboard is picked up too.
+- **Tables:** `payment_settings`, `payment_packages`, `payment_orders`, `payment_events`. Nothing here is visible to a gym.
+- **Tests:** `PAYMENTS_FAKE_STRIPE` (local test mode only) points the server at a stand-in Stripe, so the whole flow is tested with no network and no real money.

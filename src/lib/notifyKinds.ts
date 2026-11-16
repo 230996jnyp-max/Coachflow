@@ -45,6 +45,8 @@ const BY_KIND: Record<string, NoteCategory> = {
   coach_accepted: "clients",
   coach_declined: "clients",
   intake_request: "clients",
+  payment_received: "clients",
+  payment_claimed: "clients",
   intake_submitted: "clients",
   intake_reviewed: "clients",
   intake_ack: "clients",
