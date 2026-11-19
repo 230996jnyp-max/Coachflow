@@ -49,7 +49,7 @@ interface OwnerData {
   signups30: { coaches: number; solo: number; clients: number };
   activeThisWeek: { coaches: number; solo: number; clients: number };
   gyms: { total: number; active: number };
-  referrals: { invited: number; subscribed: number; rewarded: number };
+  referrals: { invited: number; subscribed: number; rewarded: number; friends: { clients: number; solo: number } };
   verifiedPct: number | null;
 }
 
@@ -349,6 +349,9 @@ function OwnerView() {
           </div>
           <div>
             Coach referrals: <b>{data.referrals.invited}</b> invited, <b>{data.referrals.subscribed}</b> subscribed, <b>{data.referrals.rewarded}</b> free months given
+          </div>
+          <div>
+            Friend invitations: <b>{data.referrals.friends.clients}</b> to a coach (by clients), <b>{data.referrals.friends.solo}</b> by solo users
           </div>
         </Card>
       </div>

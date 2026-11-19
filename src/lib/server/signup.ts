@@ -7,8 +7,8 @@ import type { ClientGoal } from "@/lib/types";
 import { openStaffProfile, sealProfile, usernameTaken, parseUsername, openProfile, type ProfileJson, type StaffProfileJson } from "./accounts";
 import { issueToken, consumeToken } from "./authTokens";
 import { coachByCode, ensureCoachCode } from "./coachCode";
-import { cleanReferralCode, REFERRAL_BONUS_DAYS } from "@/lib/referral";
-import { recordReferral, referrerByCode } from "./referrals";
+import { cleanReferralCode, kindForSignupRole, mismatchMessage, REFERRAL_BONUS_DAYS } from "@/lib/referral";
+import { coachOfClient, onFriendConfirmed, recordReferral, referralKindOf, referrerByCode } from "./referrals";
 import { requestCoach } from "./coachLinks";
 import { hashPassword } from "./auth";
 import { createGym, deleteGymEverything, joinWithCode, lookupGym } from "./gymOrg";
@@ -64,7 +64,7 @@ export interface SignupInput {
   /** GYM sign-ups: the name of the gym or academy they run. COACH sign-ups: an optional gym code to join. */
   gymName: string;
   gymCode: string;
-  /** COACH and GYM sign-ups: the referral code of the coach who invited them (CF + 6 characters), if any. */
+  /** The referral code of whoever invited them (CF + 6 characters), if any. Its kind has to match the sign-up: coach, client or solo. */
   referralCode: string;
   medicalNotes: string;
   focuses: string[];
@@ -118,6 +118,12 @@ export function parseSignup(body: Record<string, unknown>, now: Date = new Date(
     weightKg: 0,
   };
 
+  if (typeof body.referralCode === "string" && body.referralCode.trim()) {
+    const rc = cleanReferralCode(body.referralCode);
+    if (!rc) throw badRequest("That referral code doesn't look right. It starts with CF and has 6 more letters or numbers.");
+    base.referralCode = rc;
+  }
+
   if (role === "COACH" || role === "GYM") {
     base.niches = presetNiches(body.niches, 6);
     if (base.niches.length === 0) throw badRequest("Pick at least one thing you coach.");
@@ -127,19 +133,15 @@ export function parseSignup(body: Record<string, unknown>, now: Date = new Date(
       if (!gc) throw badRequest("A gym code is six digits.");
       base.gymCode = gc;
     }
-    if (typeof body.referralCode === "string" && body.referralCode.trim()) {
-      const rc = cleanReferralCode(body.referralCode);
-      if (!rc) throw badRequest("That referral code doesn't look right. It starts with CF and has 6 more letters or numbers.");
-      base.referralCode = rc;
-    }
     base.experienceYears = int(body.experienceYears ?? 0, "Years of experience", 0, 60);
     base.tagline = str(body.tagline, "Tagline", { optional: true, max: 140 });
     const places = Array.isArray(body.gyms) ? body.gyms : [];
     base.gyms = places.filter((g): g is string => typeof g === "string").map((g) => g.trim().slice(0, 120)).filter(Boolean).slice(0, 5);
   } else if (role === "CLIENT") {
     const code = cleanCoachCode(body.coachCode);
-    if (!code) throw badRequest("Enter your coach's 6-digit code.");
-    base.coachCode = code;
+    // A friend who comes through a client's invitation joins that client's coach, so they need no code of their own.
+    if (!code && !base.referralCode) throw badRequest("Enter your coach's 6-digit code.");
+    base.coachCode = code ?? "";
     if (!(CLIENT_GOALS as readonly string[]).includes(String(body.goal))) throw badRequest("Pick your main goal.");
     base.goal = String(body.goal);
     if (!(LEVELS as readonly string[]).includes(String(body.level))) throw badRequest("Pick your experience level.");
@@ -251,15 +253,24 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
   if (await usernameTaken(input.username, "")) throw conflict("That username is taken. Try another.");
   if (await emailInUse(input.email)) throw conflict("That email already has an account. Sign in, or use \"Forgot password\".");
 
+  // An invitation code: check it now, so a typo is caught before an account is made. It has to be the right kind for this sign-up.
+  const referrer = input.referralCode ? await referrerByCode(input.referralCode) : null;
+  if (input.referralCode && !referrer) throw new HttpError(404, "We couldn't find that referral code. Check it with the person who invited you, or leave it blank.");
+  const refKind = referrer ? referralKindOf(referrer) : null;
+  if (refKind && refKind !== kindForSignupRole(input.role)) throw badRequest(mismatchMessage(refKind, input.role));
+
   let coach: UserRow | null = null;
   if (input.role === "CLIENT") {
-    coach = await coachByCode(input.coachCode);
-    if (!coach) throw new HttpError(404, "We couldn't find a coach with that code. Check it with your coach.");
+    if (refKind === "CLIENT" && referrer) {
+      // A friend of a client joins that client's coach.
+      coach = await coachOfClient(referrer);
+      if (!coach) throw new HttpError(404, "Your friend's coach isn't taking new clients right now. Ask your coach for their 6-digit code instead.");
+    } else {
+      if (!input.coachCode) throw badRequest("Enter your coach's 6-digit code.");
+      coach = await coachByCode(input.coachCode);
+      if (!coach) throw new HttpError(404, "We couldn't find a coach with that code. Check it with your coach.");
+    }
   }
-
-  // A coach invited by another coach: check the code now, so a typo is caught before an account is made. They start with a longer trial.
-  const referrer = input.referralCode ? await referrerByCode(input.referralCode) : null;
-  if (input.referralCode && !referrer) throw new HttpError(404, "We couldn't find that referral code. Check it with the coach who invited you, or leave it blank.");
 
   const d = await db();
   const id = `u_${randomUUID()}`;
@@ -308,7 +319,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
         unit: input.unit,
         mustChangePassword: false,
         emailVerified: false,
-        trialEndsAt: new Date(Date.now() + (TRIAL_DAYS + (referrer ? REFERRAL_BONUS_DAYS : 0)) * 86_400_000),
+        trialEndsAt: new Date(Date.now() + (TRIAL_DAYS + (refKind === "COACH" || refKind === "SOLO" ? REFERRAL_BONUS_DAYS : 0)) * 86_400_000),
       })
       .returning();
   } catch (e) {
@@ -337,7 +348,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
       await undo();
       throw new HttpError(502, `We couldn't send the confirmation email${mail.error ? ` (${mail.error})` : ""}. Check the address and try again.`);
     }
-    if (referrer) await recordReferral(id, referrer, input.referralCode);
+    if (referrer && refKind) await recordReferral(id, referrer, input.referralCode, refKind);
   } catch (e) {
     if (!(e instanceof HttpError)) await undo().catch(() => undefined);
     throw e;
@@ -352,6 +363,7 @@ export async function confirmEmail(rawToken: string): Promise<{ role: SignupRole
   const d = await db();
   const [row] = await d.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, userId)).returning();
   if (!row) throw badRequest("This link isn't valid any more.");
+  await onFriendConfirmed(row.id); // someone training alone invited them: the inviter earns their bonus now
   let joinedCoach = false;
   if (row.role === "CLIENT") {
     try {

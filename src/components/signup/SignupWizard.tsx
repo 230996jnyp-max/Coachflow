@@ -100,6 +100,9 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
   // A referral code from an invitation link (?ref=CF7K4Q9P), or typed here. Looked up as soon as it is complete.
   const [refCode, setRefCode] = useState(cleanReferralCode(initialRef) ?? "");
   const [refFound, setRefFound] = useState<string | null>(null);
+  // What kind of code it is (a coach's, a client's or a solo user's) and, for a client's, the coach the friend will join.
+  const [refKind, setRefKind] = useState<"COACH" | "CLIENT" | "SOLO" | null>(null);
+  const [refCoach, setRefCoach] = useState<string | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
   const [gymFound, setGymFound] = useState<string | null>(null);
   const [gymError, setGymError] = useState<string | null>(null);
@@ -150,10 +153,13 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
   useEffect(() => {
     if (!refCode) return;
     let alive = true;
-    void api<{ name: string }>("/api/signup/referral", { body: { code: refCode } }).then((r) => {
+    void api<{ name: string; kind: "COACH" | "CLIENT" | "SOLO"; coachName?: string }>("/api/signup/referral", { body: { code: refCode } }).then((r) => {
       if (!alive) return;
-      if (r.ok && r.data) setRefFound(r.data.name);
-      else setRefError(r.error ?? "We couldn't find that referral code.");
+      if (r.ok && r.data) {
+        setRefFound(r.data.name);
+        setRefKind(r.data.kind);
+        setRefCoach(r.data.coachName ?? null);
+      } else setRefError(r.error ?? "We couldn't find that referral code.");
     });
     return () => {
       alive = false;
@@ -225,12 +231,17 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     const typed = v.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12);
     setRefCode(typed);
     setRefFound(null);
+    setRefKind(null);
+    setRefCoach(null);
     setRefError(null);
     const clean = cleanReferralCode(typed);
     if (clean) {
-      void api<{ name: string }>("/api/signup/referral", { body: { code: clean } }).then((r) => {
-        if (r.ok && r.data) setRefFound(r.data.name);
-        else setRefError(r.error ?? "We couldn't find that referral code.");
+      void api<{ name: string; kind: "COACH" | "CLIENT" | "SOLO"; coachName?: string }>("/api/signup/referral", { body: { code: clean } }).then((r) => {
+        if (r.ok && r.data) {
+          setRefFound(r.data.name);
+          setRefKind(r.data.kind);
+          setRefCoach(r.data.coachName ?? null);
+        } else setRefError(r.error ?? "We couldn't find that referral code.");
       });
     }
   };
@@ -248,8 +259,39 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     }
   };
 
+  // A friend invited by a client joins that client's coach, so no coach code is needed.
+  const viaClient = role === "CLIENT" && !!refFound && refKind === "CLIENT" && !!refCoach;
+
+  /** The optional invitation-code box, worded for the kind of sign-up. */
+  const referralField = () => {
+    const hint = role === "CLIENT" ? "Invited by a friend who trains with the same coach? Enter their code and you won't need your coach's code." : role === "PERSONAL" ? "Invited by a friend who trains on their own? Enter their code and you both get something: you start with an extra 30 days free." : "Invited by another coach? Enter their code (it looks like CF-7K4Q9P) and you both get something: you start with an extra 30 days free.";
+    return (
+      <div>
+        <Field label="Referral code (optional)" hint={refError ? undefined : hint} error={refError}>
+          <Input value={refCode} onChange={(e) => onRefCode(e.target.value)} autoComplete="off" autoCapitalize="characters" maxLength={12} placeholder="CF-XXXXXX" className="font-mono tracking-widest" />
+        </Field>
+        {refFound && (
+          <p className="mt-2 text-sm font-semibold text-success">
+            ✓ Invited by {refFound}
+            <span className="mt-0.5 block text-xs font-normal text-muted">
+              {role === "CLIENT" ? (viaClient ? `You'll ask ${coachTitle(refCoach ?? "")} to take you on, the same coach as ${refFound}. They have to accept you.` : "") : `Your free trial starts at ${TRIAL_DAYS + 30} days instead of ${TRIAL_DAYS}.`}
+            </span>
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const step3Error = (): string | null => {
-    const refProblem = (role === "GYM" || role === "COACH") && refCode ? (refFound ? null : refError ?? (cleanReferralCode(refCode) ? "Checking the referral code…" : "A referral code starts with CF and has 6 more letters or numbers. Clear it if nobody invited you.")) : null;
+    // A code has to be the right kind for this sign-up: coaches' codes for coaches, clients' codes to join a coach, solo codes for solo accounts.
+    const wantKind = role === "CLIENT" ? "CLIENT" : role === "PERSONAL" ? "SOLO" : "COACH";
+    const refProblem = refCode
+      ? refFound
+        ? refKind && refKind !== wantKind
+          ? wantKind === "CLIENT" ? "That code is for something else. To join a coach, use their 6-digit code, or a link from one of their clients." : wantKind === "SOLO" ? "That code is for something else. Use a link from someone who trains on their own, or clear it." : "That code is from a client or solo user, so it can't be used to sign up as a coach. Clear it, or use a coach's code."
+          : null
+        : refError ?? (cleanReferralCode(refCode) ? "Checking the referral code…" : "A referral code starts with CF and has 6 more letters or numbers. Clear it if nobody invited you.")
+      : null;
     if (role === "GYM") {
       if (gymName.trim().length < 2) return "Enter the name of your gym or academy.";
       return niches.length === 0 ? "Pick at least one thing you coach." : refProblem;
@@ -261,8 +303,11 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
       return null;
     }
     if (role === "CLIENT") {
-      if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
-      if (!coach) return codeError ?? "Checking your coach's code…";
+      if (refProblem) return refProblem;
+      if (!viaClient) {
+        if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
+        if (!coach) return codeError ?? "Checking your coach's code…";
+      }
       if (!goal) return "Pick your main goal.";
       if (!level) return "Pick your experience level.";
       return null;
@@ -270,7 +315,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     if (niches.length === 0) return "Pick at least one thing you train.";
     if (!level) return "Pick your experience level.";
     if (!goal) return "Pick your main goal.";
-    return null;
+    return refProblem;
   };
 
   const next = () => {
@@ -307,7 +352,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
         coachCode: cleanCoachCode(code) ?? "",
         gymName: role === "GYM" ? gymName.trim() : undefined,
         gymCode: role === "COACH" ? gymCode : undefined,
-        referralCode: (role === "COACH" || role === "GYM") && refCode ? (cleanReferralCode(refCode) ?? "") : undefined,
+        referralCode: refCode ? (cleanReferralCode(refCode) ?? "") : undefined,
         medicalNotes: medical.trim(),
         focuses,
         weeklyTarget: weekly,
@@ -495,19 +540,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
                   <Input className="mt-2" value={gymText} onChange={(e) => setGymText(e.target.value)} maxLength={200} placeholder="Other places, separated by commas" />
                   <p className="mt-1 text-xs text-muted">You can pick exact branches on the map in Settings later.</p>
                 </div>
-                {(role === "COACH" || role === "GYM") && (
-                  <div>
-                    <Field label="Referral code (optional)" hint={refError ? undefined : "Invited by another coach? Enter their code (it looks like CF-7K4Q9P) and you both get something: you start with an extra 30 days free."} error={refError}>
-                      <Input value={refCode} onChange={(e) => onRefCode(e.target.value)} autoComplete="off" autoCapitalize="characters" maxLength={12} placeholder="CF-XXXXXX" className="font-mono tracking-widest" />
-                    </Field>
-                    {refFound && (
-                      <p className="mt-2 text-sm font-semibold text-success">
-                        ✓ Invited by {refFound}
-                        <span className="mt-0.5 block text-xs font-normal text-muted">Your free trial starts at 60 days instead of 30.</span>
-                      </p>
-                    )}
-                  </div>
-                )}
+                {referralField()}
                 {role === "COACH" && (
                   <div>
                     <Field label="Gym or academy code (optional)" hint={gymError ? undefined : "Working with a gym or coaching academy? Enter its 6-digit code. Leave it blank if you are an independent freelance coach."} error={gymError}>
@@ -527,16 +560,19 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
             {step === 3 && role === "CLIENT" && (
               <div className="space-y-4">
                 <h2 className="text-lg font-bold">Connect with your coach</h2>
+                {referralField()}
+                {!viaClient && (
                 <Field label="Your coach's 6-digit code" hint="Ask your coach for it. It's on their dashboard.">
                   <Input value={code} onChange={(e) => onCode(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={7} placeholder="123456" className="text-center text-lg tracking-[0.3em]" />
                 </Field>
-                {coach && (
+                )}
+                {!viaClient && coach && (
                   <Notice tone="success">
                     ✓ Matched with {coachTitle(coach.name)}
                     {coach.tagline ? ` · ${coach.tagline}` : ""}
                   </Notice>
                 )}
-                {codeError && <Notice tone="error">{codeError}</Notice>}
+                {!viaClient && codeError && <Notice tone="error">{codeError}</Notice>}
                 <Field label="Main goal">
                   <Select value={goal} onChange={(e) => setGoal(e.target.value)}>
                     <option value="">Choose…</option>
@@ -583,6 +619,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
                   </Field>
                 </div>
                 <p className="text-xs text-muted">Heights in {lengthUnit(unit)} and body measurements can be added later in Progress.</p>
+                {referralField()}
               </div>
             )}
 

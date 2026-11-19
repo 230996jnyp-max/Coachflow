@@ -291,7 +291,7 @@ export interface OwnerBusiness {
   signups30: { coaches: number; solo: number; clients: number };
   activeThisWeek: { coaches: number; solo: number; clients: number };
   gyms: { total: number; active: number };
-  referrals: { invited: number; subscribed: number; rewarded: number };
+  referrals: { invited: number; subscribed: number; rewarded: number; friends: { clients: number; solo: number } };
   verifiedPct: number | null;
 }
 

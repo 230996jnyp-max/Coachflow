@@ -50,6 +50,7 @@ const BY_KIND: Record<string, NoteCategory> = {
   intake_request: "clients",
   payment_received: "clients",
   referral_reward: "other",
+  referral_joined: "other",
   payment_claimed: "clients",
   intake_submitted: "clients",
   intake_reviewed: "clients",

@@ -6,6 +6,7 @@ import { openProfile } from "./accounts";
 import { db } from "./db";
 import { conflict, forbidden, notFound } from "./http";
 import { notify } from "./groups";
+import { onClientAccepted } from "./referrals";
 import { coachLinks, users, type UserRow } from "./schema";
 
 /*
@@ -121,4 +122,5 @@ export async function decide(coach: UserRow, linkId: string, accept: boolean): P
     .set({ status: "CANCELLED", decidedAt: new Date() })
     .where(and(eq(coachLinks.clientId, done.clientId), eq(coachLinks.status, "PENDING")));
   await notify([done.clientId], "coach_accepted", { title: "You're in!", body: `${coachName} accepted you. You can now book sessions and chat with your coach.`, link: "/home" });
+  await onClientAccepted(done.clientId, coach); // a friend of one of this coach's clients: the client earns what the coach has set
 }

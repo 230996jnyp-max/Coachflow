@@ -466,6 +466,8 @@ export const coachSettings = pgTable("coach_settings", {
   noticeHours: integer("notice_hours").notNull().default(12),
   /** A client may cancel inside the notice window, and the session credit is used (otherwise they are blocked and told to message the coach). */
   lateCancelCharge: boolean("late_cancel_charge").notNull().default(false),
+  /** Session credits a client earns when a friend they invited joins this coach (0 = referral rewards are off). */
+  referralRewardCredits: integer("referral_reward_credits").notNull().default(0),
   autoConfirm: boolean("auto_confirm").notNull().default(true),
   allowCustomGym: boolean("allow_custom_gym").notNull().default(true),
   utcOffsetMin: integer("utc_offset_min").notNull().default(480),
@@ -560,6 +562,8 @@ export const referrals = pgTable(
     referrerId: text("referrer_id").notNull(),
     refereeId: text("referee_id").notNull(),
     code: text("code").notNull(),
+    /** COACH (a coach invited a coach), CLIENT (a client invited a friend to their coach) or SOLO (someone training alone invited a friend). */
+    kind: text("kind").notNull().default("COACH"),
     status: text("status").notNull().default("SIGNED_UP"),
     /** TRIAL_EXTENSION | STRIPE_CREDIT | EXEMPT, once rewarded. */
     rewardKind: text("reward_kind"),
@@ -1278,6 +1282,7 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS late_cancel_charge boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS referral_reward_credits integer NOT NULL DEFAULT 0`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS templates_seeded boolean NOT NULL DEFAULT false`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_enabled boolean NOT NULL DEFAULT true`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_default_min integer NOT NULL DEFAULT 30`,
@@ -1357,6 +1362,7 @@ export const DDL = [
     referrer_id text NOT NULL,
     referee_id text NOT NULL,
     code text NOT NULL,
+    kind text NOT NULL DEFAULT 'COACH',
     status text NOT NULL DEFAULT 'SIGNED_UP',
     reward_kind text,
     reward_note text,
@@ -1366,6 +1372,7 @@ export const DDL = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS referrals_referee_idx ON referrals (referee_id)`,
   `CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)`,
+  `ALTER TABLE referrals ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'COACH'`,
   `CREATE TABLE IF NOT EXISTS ai_usage (
     user_id text NOT NULL,
     day text NOT NULL,
