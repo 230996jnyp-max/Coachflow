@@ -3,9 +3,12 @@
 import { AlertTriangle, BarChart3, Gift } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ExportBar, MyPerformance, OccupancyPanel, PerformanceTable } from "@/components/business/Analytics";
 import { Bars, Delta, money, StackedBars } from "@/components/business/Charts";
 import { Card, EmptyState, Notice, PageHeader, SectionTitle, Segmented, Stat } from "@/components/ui";
-import { hourLabel, monthShort, pctChange, peakIndex, WEEKDAYS } from "@/lib/business";
+import { format } from "date-fns";
+import { hourLabel, monthShort, pctChange, peakIndex, WEEKDAYS, type CoachPerf, type OccupancySummary } from "@/lib/business";
+import type { ReportInput } from "@/lib/businessPdf";
 import { useViewer } from "@/lib/hooks";
 
 type View = "coach" | "gym" | "owner";
@@ -29,6 +32,8 @@ interface CoachData {
   byHour: number[];
   topPackages: { name: string; sold: number; cents: number }[];
   attendance: { present: number; noShow: number; ratePct: number | null };
+  performance: CoachPerf;
+  occupancy: OccupancySummary | null;
 }
 interface GymData {
   gymName: string;
@@ -40,6 +45,8 @@ interface GymData {
   classFill: { classes: number; capacity: number; filled: number; pct: number | null };
   activeCoaches: number;
   waiting: number;
+  occupancy: OccupancySummary;
+  performance: CoachPerf[] | null;
 }
 interface OwnerData {
   coaches: { total: number; paying: number; trialing: number; exempt: number; trialEnded: number };
@@ -52,6 +59,21 @@ interface OwnerData {
   referrals: { invited: number; subscribed: number; rewarded: number; friends: { clients: number; solo: number } };
   verifiedPct: number | null;
 }
+
+/** Makes the PDF report and saves it (the PDF library is only loaded when this is used). */
+async function saveReport(input: ReportInput): Promise<void> {
+  const { buildReportPdf, reportFileName } = await import("@/lib/businessPdf");
+  const blob = await buildReportPdf(input);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = reportFileName(input, new Date().toISOString().slice(0, 10));
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const periodText = () => `Last 30 days to ${format(new Date(), "d MMM yyyy")}`;
 
 function useData<T>(view: View | null): { data: T | null; error: string | null } {
   const [state, setState] = useState<{ view: View | null; data: T | null; error: string | null }>({ view: null, data: null, error: null });
@@ -103,6 +125,7 @@ function BusyTimes({ byWeekday, byHour, note }: { byWeekday: number[]; byHour: n
 
 /* ---------------- A coach's own business ---------------- */
 function CoachView() {
+  const { user } = useViewer();
   const { data, error } = useData<CoachData>("coach");
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!data) return <p className="text-sm text-muted">Loading…</p>;
@@ -226,6 +249,42 @@ function CoachView() {
         <SectionTitle>Busy times</SectionTitle>
         <BusyTimes byWeekday={data.byWeekday} byHour={data.byHour} note="Book some sessions and your busiest times show here." />
       </section>
+
+      <section className="space-y-3">
+        <SectionTitle>Your performance</SectionTitle>
+        <MyPerformance p={data.performance} />
+      </section>
+
+      {data.occupancy && (
+        <section className="space-y-3">
+          <SectionTitle>Your classes</SectionTitle>
+          <OccupancyPanel occ={data.occupancy} />
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <SectionTitle>Download</SectionTitle>
+        <ExportBar
+          view="coach"
+          performance
+          onReport={() =>
+            saveReport({
+              kind: "coach",
+              who: user?.name ?? "Coach",
+              period: periodText(),
+              kpis: [
+                ["Sessions, 30 days", String(data.performance.sessions30)],
+                ["Active clients", String(data.performance.clients)],
+                ["Attendance", data.performance.attendancePct === null ? "-" : `${data.performance.attendancePct}%`],
+                ["Clients kept, 3 months", data.performance.retention.m3.pct === null ? "-" : `${data.performance.retention.m3.pct}%`],
+                ["Class fill, 90 days", data.occupancy?.totals.fillPct == null ? "-" : `${data.occupancy.totals.fillPct}%`],
+              ],
+              performance: [data.performance],
+              occupancy: data.occupancy,
+            })
+          }
+        />
+      </section>
     </div>
   );
 }
@@ -252,6 +311,28 @@ function GymView() {
         <Stat label="Class fill" value={data.classFill.pct === null ? "—" : `${data.classFill.pct}%`} tone="success" sub={data.classFill.classes ? `${data.classFill.filled} of ${data.classFill.capacity} places, ${data.classFill.classes} classes` : "No classes in 30 days"} />
       </div>
 
+      <ExportBar
+        view="gym"
+        performance={!!data.performance}
+        onReport={() =>
+          saveReport({
+            kind: "gym",
+            who: data.gymName,
+            period: periodText(),
+            kpis: [
+              ["Active coaches", String(data.activeCoaches)],
+              ["Sessions, 30 days", String(done30)],
+              ["Hours worked", String(hours30)],
+              ["Classes, 30 days", String(classes30)],
+              ["Class fill, 90 days", data.occupancy.totals.fillPct === null ? "-" : `${data.occupancy.totals.fillPct}%`],
+              ["Class no-shows", data.occupancy.totals.noShowPct === null ? "-" : `${data.occupancy.totals.noShowPct}%`],
+            ],
+            performance: data.performance,
+            occupancy: data.occupancy,
+          })
+        }
+      />
+
       <section className="space-y-3">
         <SectionTitle>Sessions delivered</SectionTitle>
         <Card className="p-5">
@@ -260,7 +341,10 @@ function GymView() {
       </section>
 
       <section className="space-y-3">
-        <SectionTitle>Coaches, last 30 days</SectionTitle>
+        <SectionTitle>{data.performance ? "Coach performance" : "Coaches, last 30 days"}</SectionTitle>
+        {data.performance ? (
+          <PerformanceTable rows={data.performance} />
+        ) : (
         <Card className="overflow-x-auto p-0">
           <table className="w-full min-w-[520px] text-left text-sm">
             <thead className="border-b border-line text-xs text-muted">
@@ -287,6 +371,12 @@ function GymView() {
             </tbody>
           </table>
         </Card>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <SectionTitle>Class occupancy</SectionTitle>
+        <OccupancyPanel occ={data.occupancy} />
       </section>
 
       <section className="space-y-3">

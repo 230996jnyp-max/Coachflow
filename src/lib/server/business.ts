@@ -1,14 +1,15 @@
 import "server-only";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
-import { AT_RISK_DAYS, daysSince, histogram, isAtRisk, lastMonths, onMonths, pct } from "@/lib/business";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { AT_RISK_DAYS, daysSince, histogram, isAtRisk, lastMonths, localParts, onMonths, pct, retention, summariseClasses, type ClassEventRow, type ClassRow, type CoachPerf, type OccupancySummary } from "@/lib/business";
 import { todayIn } from "@/lib/packageExpiry";
 import { openProfile } from "./accounts";
 import { billingOverview } from "./billing";
 import { db } from "./db";
 import { forbidden } from "./http";
+import { openGroup } from "./groups";
 import { membershipOf } from "./gymOrg";
 import { referralTotals } from "./referrals";
-import { attendance, bookings, coachBilling, gymMembers, gymOrgs, groupMembers, groupSessions, paymentOrders, users, type UserRow } from "./schema";
+import { attendance, bookings, classEvents, coachBilling, gymMembers, gymOrgs, groupMembers, groupSessions, paymentOrders, users, workouts, type UserRow } from "./schema";
 
 /*
  * The business dashboards. Three views, each reading only what that person may already see:
@@ -23,6 +24,139 @@ const MONTH = (col: unknown) => sql<string>`to_char(${col} at time zone 'Asia/Si
 const DOW = (col: unknown) => sql<number>`extract(dow from ${col} at time zone 'Asia/Singapore')::int`;
 const HOUR = (col: unknown) => sql<number>`extract(hour from ${col} at time zone 'Asia/Singapore')::int`;
 const tzToday = (now: Date) => todayIn(process.env.APP_TZ || undefined, now);
+
+/* ---------------- Class occupancy and coach performance (shared by the coach, gym and export views) ---------------- */
+type ClassRowWithCoach = ClassRow & { coachId: string };
+
+/** Every class these coaches held in the last 200 days (plus the waitlist and cancellation events of the last 90). Counts only. */
+async function loadClassData(ids: string[], now: Date): Promise<{ rows: ClassRowWithCoach[]; events: ClassEventRow[] }> {
+  if (!ids.length) return { rows: [], events: [] };
+  const d = await db();
+  const since = new Date(now.getTime() - 200 * 86_400_000);
+  const day90 = new Date(now.getTime() - 90 * 86_400_000);
+  const where = and(inArray(groupSessions.coachId, ids), eq(groupSessions.kind, "CLASS"), inArray(groupSessions.status, ["COMPLETED", "OPEN"]), gte(groupSessions.startAt, since), lte(groupSessions.startAt, now));
+  const [groups, counts, events] = await Promise.all([
+    d.select().from(groupSessions).where(where),
+    d
+      .select({
+        groupId: groupMembers.groupId,
+        booked: sql<number>`count(*) filter (where ${groupMembers.status} in ('CONFIRMED','ATTENDED','ABSENT'))::int`,
+        attended: sql<number>`count(*) filter (where ${groupMembers.status} = 'ATTENDED')::int`,
+        absent: sql<number>`count(*) filter (where ${groupMembers.status} = 'ABSENT')::int`,
+      })
+      .from(groupMembers)
+      .innerJoin(groupSessions, eq(groupMembers.groupId, groupSessions.id))
+      .where(where)
+      .groupBy(groupMembers.groupId),
+    d.select({ groupId: classEvents.groupId, kind: classEvents.kind }).from(classEvents).where(and(inArray(classEvents.coachId, ids), gte(classEvents.createdAt, day90))),
+  ]);
+  const by = new Map(counts.map((c) => [c.groupId, c]));
+  const tz = process.env.APP_TZ || undefined;
+  const rows = groups.map((g) => {
+    const c = by.get(g.id);
+    const p = localParts(g.startAt, tz);
+    return { id: g.id, coachId: g.coachId, title: openGroup(g).title, weekday: p.weekday, hour: p.hour, month: p.month, t: g.startAt.getTime(), capacity: g.capacity, booked: c?.booked ?? 0, attended: c?.attended ?? 0, absent: c?.absent ?? 0 };
+  });
+  return { rows, events: events as ClassEventRow[] };
+}
+
+export interface ClassData {
+  rows: ClassRowWithCoach[];
+  events: ClassEventRow[];
+}
+export const classDataFor = loadClassData;
+
+/** Occupancy for these coaches' classes (the gym's, or one coach's own). */
+export function occupancyOf(data: ClassData, now: Date): OccupancySummary {
+  return summariseClasses(data.rows, data.events, lastMonths(6, tzToday(now)), now.getTime());
+}
+
+/** One row of numbers per coach. A gym passes all its active coaches; a coach passes only themselves. */
+export async function coachPerformance(ids: string[], data: ClassData, now: Date): Promise<CoachPerf[]> {
+  if (!ids.length) return [];
+  const d = await db();
+  const t = now.getTime();
+  const day = (n: number) => new Date(t - n * 86_400_000);
+  const iso = (n: number) => day(n).toISOString();
+
+  const [people, clientRows, bk, att] = await Promise.all([
+    d.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids)),
+    d.select({ id: users.id, coachId: users.coachId, active: users.active, createdAt: users.createdAt }).from(users).where(and(eq(users.role, "CLIENT"), inArray(users.coachId, ids))),
+    d
+      .select({
+        coachId: bookings.coachId,
+        done30: sql<number>`count(*) filter (where ${bookings.status} = 'COMPLETED' and ${bookings.startAt} >= ${iso(30)}::timestamptz)::int`,
+        donePrev: sql<number>`count(*) filter (where ${bookings.status} = 'COMPLETED' and ${bookings.startAt} >= ${iso(60)}::timestamptz and ${bookings.startAt} < ${iso(30)}::timestamptz)::int`,
+        seconds30: sql<number>`coalesce(sum(extract(epoch from (${bookings.endAt} - ${bookings.startAt}))) filter (where ${bookings.status} = 'COMPLETED' and ${bookings.startAt} >= ${iso(30)}::timestamptz),0)::float`,
+        done90: sql<number>`count(*) filter (where ${bookings.status} = 'COMPLETED')::int`,
+        noShow90: sql<number>`count(*) filter (where ${bookings.status} = 'NO_SHOW')::int`,
+        cancelled90: sql<number>`count(*) filter (where ${bookings.status} = 'CANCELLED')::int`,
+      })
+      .from(bookings)
+      .where(and(inArray(bookings.coachId, ids), gte(bookings.startAt, day(90)), lte(bookings.startAt, now)))
+      .groupBy(bookings.coachId),
+    d
+      .select({ coachId: attendance.coachId, mark: attendance.mark, n: sql<number>`count(*)::int` })
+      .from(attendance)
+      .where(and(inArray(attendance.coachId, ids), gte(attendance.markedAt, day(90))))
+      .groupBy(attendance.coachId, attendance.mark),
+  ]);
+
+  const clientIds = clientRows.map((c) => c.id);
+  const activeIds = clientRows.filter((c) => c.active).map((c) => c.id);
+  const [lastB, lastA, wk] = clientIds.length
+    ? await Promise.all([
+        d.select({ clientId: bookings.clientId, last: sql<Date>`max(${bookings.startAt})`.mapWith(bookings.startAt) }).from(bookings).where(and(inArray(bookings.clientId, clientIds), eq(bookings.status, "COMPLETED"), lte(bookings.startAt, now))).groupBy(bookings.clientId),
+        d.select({ clientId: attendance.clientId, last: sql<Date>`max(${attendance.markedAt})`.mapWith(attendance.markedAt) }).from(attendance).where(and(inArray(attendance.clientId, clientIds), eq(attendance.mark, "PRESENT"))).groupBy(attendance.clientId),
+        activeIds.length
+          ? d
+              .select({ clientId: workouts.clientId, n28: sql<number>`count(*)::int`, n14: sql<number>`count(*) filter (where ${workouts.startedAt} >= ${iso(14)}::timestamptz)::int` })
+              .from(workouts)
+              .where(and(inArray(workouts.clientId, activeIds), eq(workouts.status, "DONE"), gte(workouts.startedAt, day(28))))
+              .groupBy(workouts.clientId)
+          : Promise.resolve([]),
+      ])
+    : [[], [], []];
+
+  const lastOf = new Map<string, number>();
+  for (const r of [...lastB, ...lastA]) if (r.last) lastOf.set(r.clientId, Math.max(lastOf.get(r.clientId) ?? 0, r.last.getTime()));
+  const wkOf = new Map(wk.map((w) => [w.clientId, w]));
+  const nameOf = new Map(people.map((p) => [p.id, p.name ?? "Coach"]));
+
+  return ids.map((id) => {
+    const mine = clientRows.filter((c) => c.coachId === id);
+    const active = mine.filter((c) => c.active);
+    const ret = mine.map((c) => ({ since: c.createdAt.getTime(), active: c.active, last: lastOf.get(c.id) ?? null }));
+    const b = bk.find((x) => x.coachId === id);
+    const present = att.find((a) => a.coachId === id && a.mark === "PRESENT")?.n ?? 0;
+    const noShow = att.find((a) => a.coachId === id && a.mark === "NO_SHOW")?.n ?? 0;
+    const classes = data.rows.filter((r) => r.coachId === id && r.t >= t - 30 * 86_400_000);
+    const workoutsAll = active.reduce((s, c) => s + (wkOf.get(c.id)?.n28 ?? 0), 0);
+    const engaged = active.filter((c) => (wkOf.get(c.id)?.n14 ?? 0) > 0).length;
+    const booked = (b?.done90 ?? 0) + (b?.noShow90 ?? 0) + (b?.cancelled90 ?? 0);
+    return {
+      id,
+      name: nameOf.get(id) ?? "Coach",
+      clients: active.length,
+      sessions30: b?.done30 ?? 0,
+      sessionsPrev30: b?.donePrev ?? 0,
+      hours30: Math.round(((b?.seconds30 ?? 0) / 3600) * 10) / 10,
+      classes30: classes.length,
+      classFillPct: pct(
+        classes.reduce((s, r) => s + r.booked, 0),
+        classes.reduce((s, r) => s + r.capacity, 0),
+      ),
+      classAttendees30: classes.reduce((s, r) => s + r.attended, 0),
+      attendancePct: pct(present, present + noShow),
+      noShows90: b?.noShow90 ?? 0,
+      cancelPct: pct(b?.cancelled90 ?? 0, booked),
+      cancels90: b?.cancelled90 ?? 0,
+      retention: { m1: retention(ret, t, 1), m3: retention(ret, t, 3), m6: retention(ret, t, 6) },
+      workoutsPerClientWeek: active.length ? Math.round((workoutsAll / active.length / 4) * 10) / 10 : null,
+      engagedPct: pct(engaged, active.length),
+    };
+  });
+}
 
 /* ---------------- A coach ---------------- */
 export interface CoachBusiness {
@@ -44,10 +178,14 @@ export interface CoachBusiness {
   byHour: number[];
   topPackages: { name: string; sold: number; cents: number }[];
   attendance: { present: number; noShow: number; ratePct: number | null };
+  /** Their own performance numbers, and the occupancy of their own classes (null when they hold none). */
+  performance: CoachPerf;
+  occupancy: OccupancySummary | null;
 }
 
 export async function coachBusiness(me: UserRow, now = new Date()): Promise<CoachBusiness> {
   const d = await db();
+  const classData = await loadClassData([me.id], now);
   const today = tzToday(now);
   const months = lastMonths(6, today);
   const since = new Date(now.getTime() - 200 * 86_400_000);
@@ -172,6 +310,8 @@ export async function coachBusiness(me: UserRow, now = new Date()): Promise<Coac
     byHour: histogram(24, byHour),
     topPackages: pkgs,
     attendance: { present, noShow, ratePct: pct(present, present + noShow) },
+    performance: (await coachPerformance([me.id], classData, now))[0],
+    occupancy: classData.rows.length || classData.events.length ? occupancyOf(classData, now) : null,
   };
 }
 
@@ -189,6 +329,9 @@ export interface GymBusiness {
   classFill: { classes: number; capacity: number; filled: number; pct: number | null };
   activeCoaches: number;
   waiting: number;
+  /** Class occupancy for the whole gym, and each coach's performance (null unless the viewer may see hours and payroll). */
+  occupancy: OccupancySummary;
+  performance: CoachPerf[] | null;
 }
 
 export async function gymBusiness(me: UserRow, now = new Date()): Promise<GymBusiness> {
@@ -213,8 +356,13 @@ export async function gymBusiness(me: UserRow, now = new Date()): Promise<GymBus
     classFill: { classes: 0, capacity: 0, filled: 0, pct: null },
     activeCoaches: 0,
     waiting,
+    occupancy: summariseClasses([], [], months, now.getTime()),
+    performance: null,
   };
   if (!activeIds.length) return empty;
+  // Occupancy follows the schedule permission; coach performance is as sensitive as hours and payroll, so it follows that one.
+  const classData = await loadClassData(activeIds, now);
+  const perf = m.perms.includes("hours.view") ? await coachPerformance(activeIds, classData, now) : null;
 
   const [monthly, perCoach, perClass, byDow, byHour, fill, people] = await Promise.all([
     d
@@ -279,6 +427,8 @@ export async function gymBusiness(me: UserRow, now = new Date()): Promise<GymBus
     byHour: histogram(24, byHour),
     classFill: { classes: f.classes, capacity: f.capacity, filled: f.filled, pct: pct(f.filled, f.capacity) },
     activeCoaches: activeIds.length,
+    occupancy: occupancyOf(classData, now),
+    performance: perf ? perf.sort((a, b) => b.sessions30 + b.classes30 - (a.sessions30 + a.classes30)) : null,
   };
 }
 

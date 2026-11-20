@@ -837,6 +837,25 @@ export const notifications = pgTable(
 );
 
 /**
+ * Class events, for the occupancy analytics: someone joined the waitlist of a full class, or a client left a class they had a place in.
+ * Only counts are kept (no client is recorded), because the history is otherwise lost: waitlists are cleared when a class finishes.
+ * kind: WAITLIST | CANCEL | LATE_CANCEL (left inside the coach's notice window).
+ */
+export const classEvents = pgTable(
+  "class_events",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    kind: text("kind").notNull(),
+    /** How long before the class started it happened (negative once it had started). */
+    minutesBefore: integer("minutes_before").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("class_events_coach_idx").on(t.coachId, t.createdAt), index("class_events_group_idx").on(t.groupId)],
+);
+
+/**
  * Phone and browser push subscriptions (Web Push): one row per device a person turned "Phone notifications" on for. The endpoint and keys
  * are only ever read by the server to deliver a notification; nothing here is sent back to a browser.
  */
@@ -1490,6 +1509,16 @@ export const DDL = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS push_subs_endpoint_idx ON push_subscriptions (endpoint)`,
   `CREATE INDEX IF NOT EXISTS push_subs_user_idx ON push_subscriptions (user_id)`,
+  `CREATE TABLE IF NOT EXISTS class_events (
+    id text PRIMARY KEY,
+    group_id text NOT NULL,
+    coach_id text NOT NULL,
+    kind text NOT NULL,
+    minutes_before integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS class_events_coach_idx ON class_events (coach_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS class_events_group_idx ON class_events (group_id)`,
   `CREATE TABLE IF NOT EXISTS attendance (
     id text PRIMARY KEY,
     kind text NOT NULL,
