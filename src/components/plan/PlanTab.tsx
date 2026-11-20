@@ -10,6 +10,8 @@ import { useViewer } from "@/lib/hooks";
 import { assignWorkout, copyAssignment, moveAssignment, removeAssignment, setAssignmentDone, setAssignmentNote, useNow } from "@/lib/store";
 import type { Assignment } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ClientPrograms } from "@/components/programs/ClientPrograms";
+import { ProgramSuggestions } from "@/components/programs/ProgramSuggestions";
 import { ExerciseRows, PhonePreview } from "./PhonePreview";
 
 const STATE_STYLE: Record<AssignState, string> = {
@@ -47,6 +49,8 @@ export function PlanTab({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-4" data-tour="plan-tab">
+      <ClientPrograms clientId={clientId} />
+      <ProgramSuggestions clientId={clientId} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="secondary" onClick={() => setStart((s) => addDays(s, -7))} aria-label="Previous week">

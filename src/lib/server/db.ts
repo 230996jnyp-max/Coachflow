@@ -3,8 +3,12 @@ import { createHash } from "node:crypto";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { DDL } from "./schema";
+import { DDL as MAIN_DDL } from "./schema";
+import { FLOW_DDL } from "./schemaFlow";
 import * as schema from "./schema";
+
+/** The main tables, then the programs and Autopilot tables (schemaFlow.ts). */
+const DDL = [...MAIN_DDL, ...FLOW_DDL];
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 

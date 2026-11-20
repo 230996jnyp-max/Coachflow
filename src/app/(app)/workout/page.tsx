@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { Avatar, Field, PageHeader, Select } from "@/components/ui";
+import { Avatar, Button, Field, PageHeader, Select } from "@/components/ui";
 import { AssignedWorkouts } from "@/components/plan/AssignedWorkouts";
 import { WorkoutHub } from "@/components/workout/WorkoutHub";
 import { useViewer } from "@/lib/hooks";
@@ -30,7 +31,15 @@ export default function WorkoutPage() {
 
   return (
     <div>
-      <PageHeader title="Workout" subtitle="Log workouts on behalf of any client" />
+      <PageHeader
+        title="Workout"
+        subtitle="Log workouts on behalf of any client"
+        actions={
+          <Link href="/programs">
+            <Button variant="secondary">Programs</Button>
+          </Link>
+        }
+      />
       {active.length === 0 ? (
         <p className="text-sm text-muted">Add a client first to log workouts.</p>
       ) : (

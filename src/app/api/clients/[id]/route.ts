@@ -15,6 +15,7 @@ import { purgeClientTraining } from "@/lib/server/training";
 import { purgeClientTalk } from "@/lib/server/workoutTalk";
 import { purgeClientBody } from "@/lib/server/bodyData";
 import { purgeClientAssignments } from "@/lib/server/assignments";
+import { purgeClientPrograms } from "@/lib/server/programs";
 import { purgeClientAssessments } from "@/lib/server/assessments";
 import { purgeClientIntake } from "@/lib/server/intake";
 import type { ClientGoal } from "@/lib/types";
@@ -111,6 +112,7 @@ export const DELETE = route<Ctx>(async (req, ctx) => {
   await purgeClientTalk(id);
   await purgeClientBody(id);
   await purgeClientAssignments(id);
+  await purgeClientPrograms(id);
   await purgeClientNutrition(id);
   await purgeClientIntake(id);
   await purgeClientAssessments(id);

@@ -583,6 +583,8 @@ export interface Assignment {
   exercises: TemplateExercise[];
   /** The coach ticked it off by hand (for example it was done on the gym floor, which is logged separately). */
   doneManually?: boolean;
+  /** Set when it came from a program: which one, and which week and day of it. */
+  program?: { enrolmentId: string; programId: string; name: string; week: number; day: number };
   createdAt: string;
 }
 
