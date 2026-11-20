@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChevronRight, HelpCircle, Handshake, LogOut, Palette, ShieldCheck, UserRound, Dumbbell } from "lucide-react";
+import { Bell, ChevronRight, HelpCircle, Handshake, LogOut, Palette, ShieldCheck, Sparkles, UserRound, Dumbbell } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -16,6 +16,7 @@ const ICONS: Record<string, ReactNode> = {
   notifications: <Bell size={20} />,
   appearance: <Palette size={20} />,
   coaching: <Dumbbell size={20} />,
+  "ai-review": <Sparkles size={20} />,
   "my-coach": <Handshake size={20} />,
   administration: <ShieldCheck size={20} />,
   help: <HelpCircle size={20} />,

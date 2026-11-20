@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Settings,
   ShieldCheck,
+  Sparkles,
   Timer,
   UserRound,
   Users,
@@ -71,6 +72,8 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Profile", icon: <UserRound size={22} /> },
 ];
+/** Only for someone training on their own (no coach): the AI trainer. */
+const AI_TRAINER_NAV: NavItem = { href: "/ai-trainer", label: "AI trainer", icon: <Sparkles size={22} />, mobile: true };
 
 const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor", "/business"];
 const OWNER_ONLY = ["/admin"];
@@ -105,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
       (pathname.startsWith("/gym-admin") && !hasPortalAccess(user.gym)) ||
       (isPersonal && ["/book", "/messages", "/classes", "/intake", "/pay"].some((p) => pathname.startsWith(p))) ||
+      ((!isPersonal || isMinor) && pathname.startsWith("/ai-trainer")) ||
       (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
@@ -144,7 +148,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isTrainer && (nicheStep || (db.settings.specialties ?? []).length === 0) && !user.mustChangePassword) return <NicheStep />;
 
   // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
-  const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  const baseClientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  // The AI trainer sits after Workout for someone on their own (not for under-18s: no AI features for them).
+  const clientNav = isPersonal && !isMinor ? [...baseClientNav.slice(0, 2), AI_TRAINER_NAV, ...baseClientNav.slice(2)] : baseClientNav;
   // A coach whose gym role opens the gym portal gets a Gym entry (on phones it is in the profile menu).
   const withGym = hasPortalAccess(user.gym) ? [...TRAINER_NAV.slice(0, 4), GYM_NAV, ...TRAINER_NAV.slice(4)] : TRAINER_NAV;
   const nav = isTrainer ? (user.isOwner ? [...withGym.slice(0, withGym.length - 2), ADMIN_NAV, ...withGym.slice(withGym.length - 2)] : withGym) : clientNav;

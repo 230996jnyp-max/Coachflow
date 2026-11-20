@@ -333,6 +333,13 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
       if (sub.status === "active") {
         const { onCoachPaid } = await import("./referrals");
         await onCoachPaid(coachId);
+        // A discount earned from the monthly AI review before they subscribed goes onto their account now.
+        try {
+          const { applyPendingReviewCredits } = await import("./aiReview");
+          await applyPendingReviewCredits(coachId);
+        } catch (e) {
+          console.error("pending review credit", e instanceof Error ? e.message : e);
+        }
       }
       return true;
     }

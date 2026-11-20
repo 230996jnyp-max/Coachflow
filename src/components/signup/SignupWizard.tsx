@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowRight, Building2, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NumberInput } from "@/components/NumberInput";
 import { ThemeMenu } from "@/components/ThemeSwitcher";
@@ -11,9 +12,10 @@ import { cleanGymCode } from "@/lib/gymPerms";
 import { cleanReferralCode } from "@/lib/referral";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, coachTitle, LEVELS, PERSONAL_GOALS, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import { CORE_SPORTS, sportLabel } from "@/lib/sports";
-import { api } from "@/lib/store";
+import { adoptSession, api } from "@/lib/store";
 import { cn, lengthUnit, toKg, weightUnit } from "@/lib/utils";
 import { Captcha } from "./Captcha";
+import { providerLabel, SocialButtons, socialMessage } from "./SocialButtons";
 
 const BLURB: Record<string, string> = {
   "Strength & Gym": "Hypertrophy and general fitness",
@@ -130,7 +132,12 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
   const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ email: string; role: SignupRole } | null>(null);
+  // `wait` is a secret only this browser holds: it lets this screen move on by itself once the email is confirmed (on any device).
+  const [done, setDone] = useState<{ email: string; role: SignupRole; wait?: string } | null>(null);
+  const router = useRouter();
+  // Came back from Google, Facebook or Microsoft with no account yet: their name and email are filled in and the password is skipped.
+  const [social, setSocial] = useState<{ provider: string; email: string; trusted: boolean } | null>(null);
+  const [socialNote, setSocialNote] = useState<ReturnType<typeof socialMessage>>(null);
   const [resent, setResent] = useState(false);
 
   // A code that came from the welcome page is checked straight away, so step 3 already names the coach.
@@ -187,6 +194,60 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     window.scrollTo({ top: 0 });
   }, [step, done]);
 
+  // Once the emailed link has been opened (here or on a phone), this page is signed in and goes straight into the app.
+  const waitSecret = done?.wait;
+  useEffect(() => {
+    if (!waitSecret) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const r = await api<{ status: string; role?: string }>("/api/auth/signup-status", { body: { wait: waitSecret } });
+      if (!live) return;
+      if (r.ok && r.data?.status === "ok") {
+        if (await adoptSession()) router.replace(r.data.role === "COACH" ? "/trainer" : "/home");
+        return;
+      }
+      // Still waiting: ask again shortly. Anything else (expired, an error): stop; the resend button and the sign-in link are still here.
+      if (r.ok && r.data?.status === "waiting") timer = setTimeout(poll, 4000);
+    };
+    timer = setTimeout(poll, 3000);
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [waitSecret, router]);
+
+  // Back from a provider: pick up who they are (keeping anything already typed), or say why it did not finish.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const code = q.get("social");
+    if (!code) return;
+    let live = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!live) return;
+      if (code !== "1") {
+        setSocialNote(socialMessage(code, q.get("provider")));
+        return;
+      }
+      const r = await api<{ pending: { provider: string; email: string; name: string; trusted: boolean; username: string } | null }>("/api/auth/social/pending");
+      if (!live) return;
+      const p = r.ok ? r.data?.pending : null;
+      if (!p) {
+        setSocialNote(socialMessage("error", null));
+        return;
+      }
+      setSocial({ provider: p.provider, email: p.email, trusted: p.trusted });
+      setFullName((v) => v || p.name);
+      setEmail(p.email);
+      setUsername((v) => v || p.username);
+      setSocialNote(q.get("from") === "login" ? { tone: "info", text: `You don't have a CoachFlow account yet. Let's finish setting you up with ${providerLabel(p.provider)}.` } : null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
   const age = dob ? checkAge(dob) : null;
   const toggle = (set: React.Dispatch<React.SetStateAction<string[]>>, k: string, max = 6) => set((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : cur.length >= max ? cur : [...cur, k]));
 
@@ -217,8 +278,8 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     if (taken.username) return "That username is taken. Try another.";
     if (!EMAIL_RE.test(email.trim())) return "Enter a valid email address.";
     if (taken.email) return "That email can't be used (it already has an account, or it's a temporary mailbox).";
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return "Password: at least 8 characters with a letter and a number.";
-    if (password !== confirm) return "The two passwords don't match.";
+    if (!social && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return "Password: at least 8 characters with a letter and a number.";
+    if (!social && password !== confirm) return "The two passwords don't match.";
     if (phone.replace(/\D/g, "").length < 6) return "Enter your phone / WhatsApp number.";
     if (!dob) return "Enter your date of birth.";
     if (age && !age.ok) return age.error;
@@ -331,13 +392,14 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     setBusy(true);
     setError(null);
     const gyms = [...gymChoice, ...gymText.split(",").map((g) => g.trim()).filter(Boolean)];
-    const r = await api("/api/signup", {
+    const r = await api<{ wait?: string; signedIn?: boolean }>("/api/signup", {
       body: {
         role,
         fullName: fullName.trim(),
         username: username.trim().toLowerCase(),
         email: email.trim().toLowerCase(),
-        password,
+        password: social ? "" : password,
+        social: social ? true : undefined,
         phone: phone.trim(),
         dob,
         unit,
@@ -363,7 +425,13 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
     });
     setBusy(false);
     if (!r.ok) return setError(r.error ?? "Something went wrong. Please try again.");
-    setDone({ email: email.trim().toLowerCase(), role });
+    // Google already confirmed the address: the account is ready and this device is signed in, so go straight in.
+    if (r.data?.signedIn) {
+      await adoptSession();
+      router.replace(role === "COACH" || role === "GYM" ? "/trainer" : "/home");
+      return;
+    }
+    setDone({ email: email.trim().toLowerCase(), role, wait: r.data?.wait });
   };
 
   const resend = async () => {
@@ -394,7 +462,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
             <Mail size={44} className="mx-auto rounded-full bg-accent/15 p-2.5 text-accent" />
             <h2 className="text-lg font-bold">Check your email</h2>
             <p className="text-sm text-muted">
-              We sent a confirmation link to <strong className="text-ink">{done.email}</strong>. Open it to start your {TRIAL_DAYS}-day free trial, then sign in.
+              We sent a confirmation link to <strong className="text-ink">{done.email}</strong>. Open it to start your {TRIAL_DAYS}-day free trial. You&apos;ll be taken straight into the app, with no second sign-in.
             </p>
             {done.role === "CLIENT" && <p className="text-sm text-muted">Once you confirm, your coach gets your request. You can start logging workouts straight away while you wait for them to accept.</p>}
             <p className="text-xs text-muted">The link works for 48 hours. Check your spam folder if you can&apos;t see it.</p>
@@ -409,6 +477,21 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
           </Card>
         ) : (
           <Card className="p-5">
+            {socialNote && (
+              <div className="mb-4">
+                <Notice tone={socialNote.tone}>
+                  {socialNote.text}
+                  {socialNote.signIn && (
+                    <>
+                      {" "}
+                      <Link href="/login" className="font-semibold underline">
+                        Log in
+                      </Link>
+                    </>
+                  )}
+                </Notice>
+              </div>
+            )}
             <div className="mb-4 flex gap-1.5" aria-hidden="true">
               {[1, 2, 3].map((n) => (
                 <div key={n} className={cn("h-1.5 flex-1 rounded-full", n <= step ? "bg-accent" : "bg-line")} />
@@ -435,8 +518,10 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
                   <Input value={username} onChange={(e) => { setUsername(e.target.value); setTaken((t) => ({ ...t, username: undefined })); }} onBlur={() => void checkAvail("username")} autoCapitalize="none" autoCorrect="off" autoComplete="username" maxLength={32} />
                 </Field>
                 <Field label="Email address" error={taken.email ? "This email can't be used. It may already have an account." : null}>
-                  <Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setTaken((t) => ({ ...t, email: undefined })); }} onBlur={() => void checkAvail("email")} autoCapitalize="none" autoComplete="email" maxLength={200} />
+                  <Input type="email" value={email} readOnly={!!social} onChange={(e) => { setEmail(e.target.value); setTaken((t) => ({ ...t, email: undefined })); }} onBlur={() => !social && void checkAvail("email")} autoCapitalize="none" autoComplete="email" maxLength={200} />
                 </Field>
+                {!social && (
+                  <>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Password">
                     <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" maxLength={128} />
@@ -446,6 +531,9 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
                   </Field>
                 </div>
                 <p className="-mt-2 text-xs text-muted">At least 8 characters, with a letter and a number.</p>
+                  </>
+                )}
+                {social && <p className="text-xs text-muted">No password needed: you&apos;ll sign in with {providerLabel(social.provider)}. You can set one later with &ldquo;Forgot your password?&rdquo;.</p>}
                 <Field label="Phone / WhatsApp number">
                   <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" inputMode="tel" maxLength={30} />
                 </Field>
@@ -474,6 +562,12 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
 
             {step === 1 && (
               <div className="space-y-4">
+                {!social && <SocialButtons mode="signup" divider="after" />}
+                {social && (
+                  <Notice tone="success">
+                    Signed in with {providerLabel(social.provider)} as {social.email}. Choose how you&apos;ll use CoachFlow, then answer a few questions. No password needed.
+                  </Notice>
+                )}
                 <h2 className="text-lg font-bold">I am a…</h2>
                 <div className="grid grid-cols-2 gap-3" role="group" aria-label="How will you use CoachFlow?">
                   {CARDS.map((c) => {

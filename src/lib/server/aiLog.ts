@@ -5,7 +5,7 @@ import { db } from "./db";
 import { aiUsageLog, gymMembers, users } from "./schema";
 
 /** The four AI features the owner tracks, plus everything else (food estimates, explanations ...). */
-export const AI_FEATURES = ["workout_import", "niche_search", "custom_tracking", "progression", "client_details_import", "assessment_summary", "other"] as const;
+export const AI_FEATURES = ["workout_import", "niche_search", "custom_tracking", "progression", "client_details_import", "assessment_summary", "ai_trainer", "other"] as const;
 export type AiFeature = (typeof AI_FEATURES)[number];
 
 export const AI_FEATURE_LABEL: Record<AiFeature, string> = {
@@ -15,6 +15,7 @@ export const AI_FEATURE_LABEL: Record<AiFeature, string> = {
   progression: "AI auto-progression and deload suggestions",
   client_details_import: "AI client-details import",
   assessment_summary: "AI assessment summary",
+  ai_trainer: "AI trainer plans",
   other: "Other AI",
 };
 

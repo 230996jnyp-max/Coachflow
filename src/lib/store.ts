@@ -778,6 +778,14 @@ export async function loginResult(username: string, password: string, stayHere =
   return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
 
+/** The server has just started a session for this browser (the emailed link, a finished sign-up, Google). Loads everything; true when it worked. */
+export async function adoptSession(): Promise<boolean> {
+  markActive(); // tells establishSession that this device is signed in, so it can load everything at once
+  const ok = await establishSession();
+  if (!ok) clearActive();
+  return ok;
+}
+
 /** Signs out. `idle` = the inactivity timeout (phone notifications stay on); a sign-out on purpose also stops them on this device. */
 export async function logout(opts: { idle?: boolean } = {}) {
   const leaving = state.sessionUserId;

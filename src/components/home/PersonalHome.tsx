@@ -1,7 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { ChevronRight, Dumbbell, Play, Target, Trophy } from "lucide-react";
+import { ChevronRight, Dumbbell, Play, Sparkles, Target, Trophy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
@@ -69,6 +69,21 @@ export function PersonalHome() {
           </div>
         </Card>
       </section>
+
+      {!user.isMinor && (
+        <Link href="/ai-trainer" className="block">
+          <Card className="flex items-center gap-3 p-4 hover:border-accent/50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-field text-accent">
+              <Sparkles size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold">Your AI trainer</div>
+              <div className="text-xs text-muted">A workout plan for each week, made for your goal and health.</div>
+            </div>
+            <ChevronRight size={18} className="text-muted" />
+          </Card>
+        </Link>
+      )}
 
       <GoalCard clientId={user.id} editable canSetTarget />
 

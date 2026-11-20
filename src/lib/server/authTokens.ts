@@ -4,8 +4,9 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { authTokens } from "./schema";
 
-export type TokenKind = "verify" | "reset";
-const TTL_MS: Record<TokenKind, number> = { verify: 48 * 3_600_000, reset: 60 * 60_000 };
+/** "signup_wait": held only by the browser that signed up, so its waiting page can move on by itself once the email is confirmed. */
+export type TokenKind = "verify" | "reset" | "signup_wait";
+const TTL_MS: Record<TokenKind, number> = { verify: 48 * 3_600_000, reset: 60 * 60_000, signup_wait: 48 * 3_600_000 };
 
 const hashOf = (raw: string) => createHash("sha256").update(raw).digest("hex");
 

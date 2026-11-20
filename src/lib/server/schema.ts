@@ -38,7 +38,7 @@ export const users = pgTable(
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     /** Personal look and feel as JSON (accent, background, text size, bio ...). See lib/prefs.ts. Nothing sensitive. */
     prefs: text("prefs"),
-    /** When they last signed in (shown to the owner on the Sign-ups tab). */
+    /** When they last signed in (shown to the owner on the Users tab). */
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     /** Set when the owner disables the account: it can't sign in, and the data is kept. */
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
@@ -1008,6 +1008,106 @@ export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
 export type BookingRow = typeof bookings.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
 
+/*
+ * The AI trainer (for people training on their own) and the coaches' monthly review that teaches it.
+ *  - ai_trainer_profiles / ai_trainer_plans: a person's health answers, goals and weekly plans. Everything about the person is encrypted.
+ *  - ai_reviews: a coach's monthly review of made-up profiles (nothing about a real person). status SUBMITTED (waiting for the owner, flagged),
+ *    APPROVED or REJECTED. Approved reviews create ai_rules, which every plan is checked against.
+ *  - ai_review_credits: the 10% discount earned by an approved review: APPLIED once it is on their Stripe account, PENDING until they subscribe.
+ */
+export const aiTrainerProfiles = pgTable("ai_trainer_profiles", {
+  userId: text("user_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiTrainerPlans = pgTable(
+  "ai_trainer_plans",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    weekStart: text("week_start").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_trainer_plans_user_idx").on(t.userId, t.weekStart)],
+);
+
+export const aiReviews = pgTable(
+  "ai_reviews",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    /** yyyy-MM, Singapore time. One review per coach per month. */
+    month: text("month").notNull(),
+    status: text("status").notNull().default("STARTED"),
+    flagged: boolean("flagged").notNull().default(false),
+    /** JSON array of why the owner is asked to look. */
+    flags: text("flags").notNull().default("[]"),
+    seconds: integer("seconds").notNull().default(0),
+    /** JSON array of the coach's answers (made-up profiles only). */
+    answers: text("answers").notNull().default("[]"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    decisionNote: text("decision_note").notNull().default(""),
+    /** What happened with the discount: STRIPE_CREDIT, PENDING, EXEMPT, NONE. */
+    discountKind: text("discount_kind"),
+    discountNote: text("discount_note").notNull().default(""),
+  },
+  (t) => [uniqueIndex("ai_reviews_coach_month_idx").on(t.coachId, t.month)],
+);
+
+export const aiRules = pgTable(
+  "ai_rules",
+  {
+    id: text("id").primaryKey(),
+    reviewId: text("review_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    /** JSON arrays. */
+    tags: text("tags").notNull(),
+    exerciseIds: text("exercise_ids").notNull(),
+    text: text("text").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_rules_active_idx").on(t.active, t.createdAt)],
+);
+
+export const aiReviewCredits = pgTable(
+  "ai_review_credits",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    reviewId: text("review_id").notNull(),
+    cents: integer("cents").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    note: text("note").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+  },
+  (t) => [index("ai_review_credits_coach_idx").on(t.coachId, t.status)],
+);
+/**
+ * "Continue with Google / Facebook / Microsoft": which provider account belongs to which CoachFlow account. Only the provider's own id for the
+ * person and the email it gave are kept (never a token or a password).
+ */
+export const oauthIdentities = pgTable(
+  "oauth_identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.subject] }), index("oauth_identities_user_idx").on(t.userId)],
+);
+export type AiReviewRow = typeof aiReviews.$inferSelect;
+export type AiRuleRow = typeof aiRules.$inferSelect;
+
 /** Idempotent DDL applied once per server instance (see db.ts). Mirrors the tables above. */
 export const DDL = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -1649,4 +1749,67 @@ export const DDL = [
   )`,
   `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS original_coach_id text`,
   `ALTER TABLE group_sessions ADD COLUMN IF NOT EXISTS original_coach_id text`,
+  `CREATE TABLE IF NOT EXISTS ai_trainer_profiles (
+    user_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS ai_trainer_plans (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    week_start text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_trainer_plans_user_idx ON ai_trainer_plans (user_id, week_start)`,
+  `CREATE TABLE IF NOT EXISTS ai_reviews (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    month text NOT NULL,
+    status text NOT NULL DEFAULT 'STARTED',
+    flagged boolean NOT NULL DEFAULT false,
+    flags text NOT NULL DEFAULT '[]',
+    seconds integer NOT NULL DEFAULT 0,
+    answers text NOT NULL DEFAULT '[]',
+    started_at timestamptz NOT NULL DEFAULT now(),
+    submitted_at timestamptz,
+    decided_at timestamptz,
+    decided_by text,
+    decision_note text NOT NULL DEFAULT '',
+    discount_kind text,
+    discount_note text NOT NULL DEFAULT ''
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ai_reviews_coach_month_idx ON ai_reviews (coach_id, month)`,
+  `CREATE TABLE IF NOT EXISTS ai_rules (
+    id text PRIMARY KEY,
+    review_id text NOT NULL,
+    coach_id text NOT NULL,
+    tags text NOT NULL,
+    exercise_ids text NOT NULL,
+    text text NOT NULL DEFAULT '',
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_rules_active_idx ON ai_rules (active, created_at)`,
+  `CREATE TABLE IF NOT EXISTS ai_review_credits (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    review_id text NOT NULL,
+    cents integer NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    note text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    applied_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_review_credits_coach_idx ON ai_review_credits (coach_id, status)`,
+  `CREATE TABLE IF NOT EXISTS oauth_identities (
+    provider text NOT NULL,
+    subject text NOT NULL,
+    user_id text NOT NULL,
+    email text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider, subject)
+  )`,
+  `CREATE INDEX IF NOT EXISTS oauth_identities_user_idx ON oauth_identities (user_id)`,
 ];

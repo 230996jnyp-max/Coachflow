@@ -16,6 +16,8 @@ import { adminActions, aiUsageLog, gymMembers, gymOrgs, users, type UserRow } fr
 export interface GymOverviewRow {
   id: string;
   name: string;
+  /** The coach account that runs the gym. */
+  adminId: string;
   adminName: string;
   adminEmail: string;
   code: string;
@@ -49,6 +51,7 @@ export async function listGyms(): Promise<GymOverviewRow[]> {
     return {
       id: g.id,
       name: g.name,
+      adminId: g.ownerId,
       adminName: o ? (o.name ?? o.username) : "—",
       adminEmail: o?.email ?? "",
       code: g.code,

@@ -2,16 +2,18 @@
 
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AuthShell } from "@/components/signup/AuthShell";
-import { api } from "@/lib/store";
+import { adoptSession, api } from "@/lib/store";
 
-type State = { kind: "working" } | { kind: "ok"; joinedCoach: boolean } | { kind: "bad"; message: string };
+type State = { kind: "working" } | { kind: "ok"; joinedCoach: boolean; signedIn: boolean } | { kind: "bad"; message: string };
 
 /** Public: the link in the confirmation email lands here. */
 export default function VerifyPage() {
   const [state, setState] = useState<State>({ kind: "working" });
   const started = useRef(false);
+  const router = useRouter();
 
   useEffect(() => {
     // A link can only be used once, so the check must run exactly once even when the page is mounted twice (dev mode).
@@ -22,10 +24,15 @@ export default function VerifyPage() {
       Promise.resolve().then(() => setState({ kind: "bad", message: "This link isn't valid. Open the link from your email." }));
       return;
     }
-    void api<{ joinedCoach: boolean }>("/api/auth/verify", { body: { token } }).then((r) =>
-      setState(r.ok ? { kind: "ok", joinedCoach: !!r.data?.joinedCoach } : { kind: "bad", message: r.error ?? "This link isn't valid." }),
-    );
-  }, []);
+    void (async () => {
+      const r = await api<{ joinedCoach: boolean; signedIn: boolean; role: string }>("/api/auth/verify", { body: { token } });
+      if (!r.ok) return setState({ kind: "bad", message: r.error ?? "This link isn't valid." });
+      // The link signs this device in, so there is no second sign-in: load the account and go straight into the app.
+      const signedIn = !!r.data?.signedIn && (await adoptSession());
+      setState({ kind: "ok", joinedCoach: !!r.data?.joinedCoach, signedIn });
+      if (signedIn) setTimeout(() => router.replace(r.data?.role === "COACH" ? "/trainer" : "/home"), 1400);
+    })();
+  }, [router]);
 
   return (
     <AuthShell title="Confirming your email">
@@ -40,10 +47,16 @@ export default function VerifyPage() {
           <>
             <CheckCircle2 size={44} className="mx-auto rounded-full bg-success/15 p-2.5 text-success" />
             <h2 className="text-lg font-bold">Email confirmed</h2>
-            <p className="text-sm text-muted">Your 30-day free trial has started. Sign in to get going.{state.joinedCoach ? " Your coach has been sent your request." : ""}</p>
-            <Link href="/login" className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent hover:brightness-110">
-              Sign in
-            </Link>
+            <p className="text-sm text-muted">Your 30-day free trial has started.{state.joinedCoach ? " Your coach has been sent your request." : ""}</p>
+            {state.signedIn ? (
+              <p className="flex items-center justify-center gap-2 text-sm font-semibold text-accent">
+                <Loader2 size={16} className="animate-spin" /> Taking you in…
+              </p>
+            ) : (
+              <Link href="/login" className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent hover:brightness-110">
+                Sign in to get going
+              </Link>
+            )}
           </>
         )}
         {state.kind === "bad" && (

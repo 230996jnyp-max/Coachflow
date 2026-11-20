@@ -4,6 +4,7 @@ import { Bell, Compass, KeyRound, LifeBuoy, Mail, MapPin, Moon, Pencil, Plus, Tr
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
+import { ConnectedSignIn } from "./ConnectedSignIn";
 import { GymAffiliation } from "@/components/gym/GymAffiliation";
 import { HaveACoachCard } from "@/components/coachlink/CoachLink";
 import { FormPreviewModal, FormsPreviewRows } from "@/components/intake/FormsPreview";
@@ -71,6 +72,7 @@ export function ProfileSection() {
             <KeyRound size={16} /> Change password
           </Button>
         </Link>
+        <ConnectedSignIn />
       </Block>
       {!isTrainer && !isPersonal && (
         <Block title="Home address">

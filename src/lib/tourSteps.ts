@@ -8,7 +8,7 @@ import type { GymPerm } from "./gymPerms";
  *   clients  coaches:  adding and importing clients, the "Before we meet" forms, assessments, and making the app yours
  *   forms    clients:  their forms, and making the app yours
  *   gym      anyone with gym access: the gym portal, shown by the permissions they have. Starts the first time they open the Gym page
- *   admin    the platform owner: Coaches, Sign-ups, Gyms and AI usage. Starts the first time they open Admin
+ *   admin    the platform owner: Users (coaches, gyms, solo users, clients) and AI usage. Starts the first time they open Admin
  */
 
 export type TourId = "basics" | "clients" | "forms" | "gym" | "admin";
@@ -227,9 +227,7 @@ const GYM_STEPS: TourStep[] = [
 /* ---------------- Platform owner ---------------- */
 const admin = (tab: string, title: string, text: string): TourStep => ({ route: "/admin", targets: [`admin-tab-${tab}`], click: true, title, text });
 const ADMIN_STEPS: TourStep[] = [
-  admin("coaches", "Coaches", "Add coaches, reset passwords, deactivate and announce to everyone. Only counts are shown for clients: client details stay private to each coach."),
-  admin("signups", "Who signed up", "New accounts per day, who is verified and who is not, and every account with filters. Open one to resend the email, disable or delete it."),
-  admin("gyms", "Gyms", "Every gym with its code, coach count and AI use. Switch one off or on, or delete it. The gym's admin is emailed."),
+  admin("users", "Users", "Everyone in one list: coaches (open one to see their clients underneath), gyms, solo users and clients. Filter by type, search, add a user, and open anyone to reset a password, disable or delete. Only contact details are shown, never training data."),
   admin("ai", "AI usage", "How much AI is used today, this week and this month, by gym, by coach and by feature, so you can see what it costs before it surprises you."),
 ];
 
@@ -242,7 +240,7 @@ export function sectionsFor(who: TourWho): TourSection[] {
       { id: "clients", label: "Clients, forms and assessments", blurb: "Add and import clients, preview the forms, assessments, and making CoachFlow yours", steps: COACH_CLIENTS, whatsNew: true },
     ];
     if (who.gymPerms && who.gymPerms.length) out.push({ id: "gym", label: "Gym portal", blurb: "Your gym's schedule, hours, team, roles and settings", steps: GYM_STEPS, autoOnVisit: "/gym-admin" });
-    if (who.isOwner) out.push({ id: "admin", label: "Admin", blurb: "Coaches, sign-ups, gyms and AI usage", steps: ADMIN_STEPS, autoOnVisit: "/admin" });
+    if (who.isOwner) out.push({ id: "admin", label: "Admin", blurb: "Users, gyms and AI usage", steps: ADMIN_STEPS, autoOnVisit: "/admin" });
     return out;
   }
   if (who.isPersonal) return [{ id: "basics", label: "The basics", blurb: "Your home, workouts and progress", steps: PERSONAL_BASICS }];

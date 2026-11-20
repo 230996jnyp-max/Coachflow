@@ -5,11 +5,12 @@ import { CORE_SPORTS, cleanSports } from "@/lib/sports";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, isDisposableEmail, LEVELS, PERSONAL_GOALS, shortName, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import type { ClientGoal } from "@/lib/types";
 import { openStaffProfile, sealProfile, usernameTaken, parseUsername, openProfile, type ProfileJson, type StaffProfileJson } from "./accounts";
-import { issueToken, consumeToken } from "./authTokens";
+import { issueToken, consumeToken, peekToken } from "./authTokens";
 import { coachByCode, ensureCoachCode } from "./coachCode";
 import { cleanReferralCode, kindForSignupRole, mismatchMessage, REFERRAL_BONUS_DAYS } from "@/lib/referral";
 import { coachOfClient, onFriendConfirmed, recordReferral, referralKindOf, referrerByCode } from "./referrals";
 import { requestCoach } from "./coachLinks";
+import { linkIdentity, type ProviderId } from "./socialStore";
 import { hashPassword } from "./auth";
 import { createGym, deleteGymEverything, joinWithCode, lookupGym } from "./gymOrg";
 import { cleanGymCode } from "@/lib/gymPerms";
@@ -17,7 +18,7 @@ import { db, isLocalTestMode } from "./db";
 import { badRequest, checkPassword, conflict, email as parseEmail, HttpError, int, isUniqueViolation, str } from "./http";
 import { escapeHtml, layout, sendMail, type MailResult } from "./mail";
 import { hit } from "./rateLimit";
-import { authTokens, coachSettings, gymOrgs, gyms, referrals, users, type UserRow } from "./schema";
+import { authTokens, coachSettings, gymOrgs, gyms, oauthIdentities, referrals, users, type UserRow } from "./schema";
 
 /*
  * Self sign-up. Anyone can make a Coach, Client or Personal account from /signup. The account exists straight away but can't sign in
@@ -248,7 +249,14 @@ async function sendVerification(user: UserRow, to: string, name: string, origin:
 }
 
 /* ---------------- Creating the account ---------------- */
-export async function createAccount(input: SignupInput, ip: string, origin: string): Promise<{ email: string; role: SignupRole }> {
+/** Someone who signed up with Google, Facebook or Microsoft. `trusted`: the provider confirmed the address (Google), so no confirmation email is needed. */
+export interface SocialSignup {
+  provider: ProviderId;
+  subject: string;
+  trusted: boolean;
+}
+
+export async function createAccount(input: SignupInput, ip: string, origin: string, social?: SocialSignup): Promise<{ email: string; role: SignupRole; wait: string; user: UserRow; verified: boolean }> {
   await hit(`signup:${ip}`, 5, 3_600_000, "Too many sign-ups from this network. Please try again in an hour.");
   if (await usernameTaken(input.username, "")) throw conflict("That username is taken. Try another.");
   if (await emailInUse(input.email)) throw conflict("That email already has an account. Sign in, or use \"Forgot password\".");
@@ -318,7 +326,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
         coachId: null,
         unit: input.unit,
         mustChangePassword: false,
-        emailVerified: false,
+        emailVerified: !!social?.trusted,
         trialEndsAt: new Date(Date.now() + (TRIAL_DAYS + (refKind === "COACH" || refKind === "SOLO" ? REFERRAL_BONUS_DAYS : 0)) * 86_400_000),
       })
       .returning();
@@ -329,6 +337,7 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
 
   const undo = async () => {
     await d.delete(authTokens).where(eq(authTokens.userId, id));
+    await d.delete(oauthIdentities).where(eq(oauthIdentities.userId, id));
     await d.delete(referrals).where(eq(referrals.refereeId, id));
     const owned = await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, id));
     for (const g of owned) await deleteGymEverything(g.id);
@@ -343,26 +352,33 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
       await ensureCoachCode(row);
       if (input.role === "GYM") await createGym(row, input.gymName);
     }
-    const mail = await sendVerification(row, input.email, input.fullName, origin);
-    if (!delivered(mail)) {
-      await undo();
-      throw new HttpError(502, `We couldn't send the confirmation email${mail.error ? ` (${mail.error})` : ""}. Check the address and try again.`);
-    }
+    // Recorded first: an address that is confirmed straight away pays the inviter at once (see afterConfirmed).
     if (referrer && refKind) await recordReferral(id, referrer, input.referralCode, refKind);
+    if (social) await linkIdentity(social.provider, social.subject, id, input.email);
+    if (social?.trusted) {
+      // The provider already confirmed this address: nothing to email, the account is ready (the same things happen as after the emailed link).
+      await afterConfirmed(row);
+    } else {
+      const mail = await sendVerification(row, input.email, input.fullName, origin);
+      if (!delivered(mail)) {
+        await undo();
+        throw new HttpError(502, `We couldn't send the confirmation email${mail.error ? ` (${mail.error})` : ""}. Check the address and try again.`);
+      }
+    }
   } catch (e) {
     if (!(e instanceof HttpError)) await undo().catch(() => undefined);
     throw e;
   }
-  return { email: input.email, role: input.role };
+  // The signup page keeps this secret and asks about it until the email is confirmed, then it is let in without a second sign-in.
+  const verified = !!social?.trusted;
+  const wait = verified ? "" : await issueToken(id, "signup_wait");
+  return { email: input.email, role: input.role, wait, user: { ...row, emailVerified: verified || row.emailVerified }, verified };
 }
 
 /* ---------------- Confirming the email ---------------- */
-export async function confirmEmail(rawToken: string): Promise<{ role: SignupRole; joinedCoach: boolean }> {
-  const userId = await consumeToken(rawToken, "verify");
-  if (!userId) throw badRequest("This link has expired or was already used. Sign in and we'll send you a new one.");
+/** What happens once an address is known to be theirs: a friend's bonus, a coach request, a gym join. Used for the emailed link and for sign-ups whose address Google already confirmed. */
+export async function afterConfirmed(row: UserRow): Promise<{ role: SignupRole; joinedCoach: boolean }> {
   const d = await db();
-  const [row] = await d.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, userId)).returning();
-  if (!row) throw badRequest("This link isn't valid any more.");
   await onFriendConfirmed(row.id); // someone training alone invited them: the inviter earns their bonus now
   let joinedCoach = false;
   if (row.role === "CLIENT") {
@@ -396,6 +412,33 @@ export async function confirmEmail(rawToken: string): Promise<{ role: SignupRole
   }
   const personalOrClient: SignupRole = row.role === "COACH" || row.role === "OWNER" ? "COACH" : joinedCoach ? "CLIENT" : "PERSONAL";
   return { role: personalOrClient, joinedCoach };
+}
+
+/** The emailed link: marks the address confirmed and says who it was, so the caller can let them straight in. */
+export async function confirmEmail(rawToken: string): Promise<{ role: SignupRole; joinedCoach: boolean; user: UserRow }> {
+  const userId = await consumeToken(rawToken, "verify");
+  if (!userId) throw badRequest("This link has expired or was already used. Sign in and we'll send you a new one.");
+  const d = await db();
+  const [row] = await d.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, userId)).returning();
+  if (!row) throw badRequest("This link isn't valid any more.");
+  return { ...(await afterConfirmed(row)), user: row };
+}
+
+/**
+ * The signup page asks: is the email confirmed yet? Not yet: "waiting". Yes: the secret is used up and the caller starts the session.
+ * Anything else (unknown, used, expired): "expired", and the page falls back to the normal sign-in.
+ */
+export async function signupStatus(rawWait: unknown): Promise<{ status: "waiting" | "expired" } | { status: "ok"; user: UserRow; role: SignupRole }> {
+  if (typeof rawWait !== "string") return { status: "expired" };
+  const userId = await peekToken(rawWait, "signup_wait");
+  if (!userId) return { status: "expired" };
+  const d = await db();
+  const [row] = await d.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!row || !row.active) return { status: "expired" };
+  if (!row.emailVerified) return { status: "waiting" };
+  // Used up here, so the secret works once even if two tabs ask at the same moment.
+  if (!(await consumeToken(rawWait, "signup_wait"))) return { status: "expired" };
+  return { status: "ok", user: row, role: row.role === "COACH" || row.role === "OWNER" ? "COACH" : "CLIENT" };
 }
 
 async function findByIdentifier(identifier: string): Promise<UserRow | null> {
@@ -468,5 +511,5 @@ export async function finishPasswordReset(rawToken: string, password: unknown): 
     .where(and(eq(users.id, userId), eq(users.active, true)));
 }
 
-/** Sends the "confirm your email" link (used when the owner re-sends it from the Sign-ups tab). */
+/** Sends the "confirm your email" link (used when the owner re-sends it from the Users tab). */
 export const sendVerificationFor = sendVerification;
