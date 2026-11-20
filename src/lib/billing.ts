@@ -93,4 +93,22 @@ export interface BillingInfo {
   stripeReady: boolean;
   /** For a client: their coach's first name. */
   coachName?: string;
+  /** For a coach in a gym: the gym's plan (the gym pays, so the coach pays nothing). Paused when the gym's plan has ended. */
+  gymPlan?: GymPlanSummary;
+}
+
+/** A gym's plan as its owner and coaches see it. */
+export interface GymPlanSummary {
+  name: string;
+  ownerName: string;
+  isOwner: boolean;
+  status: "FREE" | "TRIALING" | "ACTIVE" | "GRACE" | "EXPIRED" | "LAPSED";
+  blocked: boolean;
+  graceDaysLeft: number | null;
+  trialDaysLeft: number | null;
+  priceCents: number;
+  needsCustomPlan: boolean;
+  coaches: number;
+  smallMax: number;
+  planRequested: boolean;
 }

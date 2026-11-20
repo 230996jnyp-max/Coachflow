@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { GymActivity } from "@/components/gym/GymActivity";
+import { GymBilling } from "@/components/gym/GymBilling";
 import { GymHours } from "@/components/gym/GymHours";
 import { GymOverview } from "@/components/gym/GymOverview";
 import { GymRoles } from "@/components/gym/GymRoles";
@@ -17,7 +18,7 @@ import { mediaUrl } from "@/lib/prefs";
 import { api } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type Tab = "overview" | "schedule" | "hours" | "team" | "roles" | "settings" | "activity";
+type Tab = "overview" | "schedule" | "hours" | "team" | "roles" | "settings" | "activity" | "billing";
 
 /** The gym portal: everything a gym owner or manager needs, shown according to the permissions of their role. */
 export default function GymAdminPage() {
@@ -70,6 +71,8 @@ export default function GymAdminPage() {
     { id: "roles", label: "Roles", show: can(g, "roles.manage") },
     { id: "settings", label: "Settings", show: can(g, "branding.manage") || can(g, "coaches.manage") },
     { id: "activity", label: "Activity", show: can(g, "activity.view") },
+    // Only the gym's owner sees or changes its billing.
+    { id: "billing", label: "Billing", show: !!g?.isOwner },
   ];
   const logo = g ? mediaUrl(g.id, "logo", g.logoV) : null;
 
@@ -115,6 +118,7 @@ export default function GymAdminPage() {
           {tab === "roles" && <GymRoles editable={can(g, "roles.manage")} />}
           {tab === "settings" && <GymSettingsPanel gym={g} settings={state.settings} onChanged={() => void load()} />}
           {tab === "activity" && <GymActivity />}
+          {tab === "billing" && g?.isOwner && <GymBilling />}
         </>
       )}
     </div>

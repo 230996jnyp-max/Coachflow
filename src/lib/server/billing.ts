@@ -132,7 +132,9 @@ export async function billingInfo(me: UserRow): Promise<BillingInfo> {
     };
   }
   if (me.role === "COACH" && (await coveredByGym(me.id))) {
-    return { ...base, role: "COACH", exempt: true, gym: true, status: "LIFETIME_FREE", blocked: false, trialDaysLeft: 0, trialEnds: null, activeClients: await activeClientCount(me.id), tierCents: 0, renewsOn: null, hasSubscription: false, cancelAtPeriodEnd: false };
+    const { gymPlanForUser } = await import("./gymPlan");
+    const plan = await gymPlanForUser(me.id);
+    return { ...base, role: "COACH", exempt: true, gym: true, ...(plan ? { gymPlan: plan } : {}), status: "LIFETIME_FREE", blocked: enforced && !!plan?.blocked, trialDaysLeft: 0, trialEnds: null, activeClients: await activeClientCount(me.id), tierCents: 0, renewsOn: null, hasSubscription: false, cancelAtPeriodEnd: false };
   }
   const row = await ensureBilling(me);
   const status = effectiveStatus(fields(row));
@@ -292,6 +294,10 @@ const asDate = (unix?: number | null): Date | null => (unix ? new Date(unix * 10
 
 /** Applies one verified Stripe event. Safe to receive more than once. Returns whether it was one we act on. */
 export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
+  // A gym's subscription (its id is in the event's metadata, or the customer is a gym's) is handled in gymPlan.ts.
+  const { handleGymEvent } = await import("./gymPlan");
+  const gymResult = await handleGymEvent(event);
+  if (gymResult !== null) return gymResult;
   const d = await db();
   switch (event.type) {
     case "checkout.session.completed": {

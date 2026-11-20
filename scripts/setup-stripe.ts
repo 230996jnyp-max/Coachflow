@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import Stripe from "stripe";
 import { CURRENCY, lookupKey, sgd, TIER_CENTS } from "../src/lib/billing";
+import { GYM_PRICE_CENTS, gymLookupKey } from "../src/lib/gymBilling";
 
 function loadEnv() {
   try {
@@ -101,6 +102,25 @@ async function main() {
       metadata: { app: "coachflow", tier_cents: String(cents) },
     });
     console.log(`✔ Created ${sgd(cents)}/mo (${price.id})`);
+  }
+
+  // ---- the gym plan: its own product and the flat monthly price (a gym with a custom price is charged through an inline price at checkout)
+  const gymLk = gymLookupKey(GYM_PRICE_CENTS);
+  const gymFound = await stripe.prices.list({ lookup_keys: [gymLk], limit: 1 });
+  if (gymFound.data[0]) {
+    const have = gymFound.data[0];
+    if (have.unit_amount !== GYM_PRICE_CENTS || have.currency !== CURRENCY) console.log(`  ! ${gymLk} exists with a different amount (${have.unit_amount} ${have.currency}). Prices can't be edited; archive it in Stripe and run this again.`);
+    else console.log(`✔ Gym plan ${sgd(GYM_PRICE_CENTS)}/mo already there (${have.id})`);
+  } else {
+    const gymBase: Stripe.ProductCreateParams = { name: "CoachFlow Gym Plan", description: "Monthly CoachFlow plan for a small gym: covers every coach in the gym.", metadata: { app: "coachflow", kind: "gym" } };
+    let gymProduct: string;
+    try {
+      gymProduct = (await stripe.products.create({ ...gymBase, tax_code: "txcd_10103001" })).id;
+    } catch {
+      gymProduct = (await stripe.products.create(gymBase)).id;
+    }
+    const gp = await stripe.prices.create({ product: gymProduct, currency: CURRENCY, unit_amount: GYM_PRICE_CENTS, recurring: { interval: "month" }, lookup_key: gymLk, tax_behavior: "exclusive", nickname: `Gym plan ${sgd(GYM_PRICE_CENTS)}/mo`, metadata: { app: "coachflow", kind: "gym" } });
+    console.log(`✔ Created gym plan ${sgd(GYM_PRICE_CENTS)}/mo (${gp.id})`);
   }
 
   // ---- customer portal

@@ -5,7 +5,7 @@ import { ChevronDown, Copy, KeyRound, MessageSquare, Power, Search, ShieldCheck,
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BillingStats, CoachBillingLine, type BillingOverview } from "@/components/admin/BillingAdmin";
 import type { CoachRow, Roster } from "@/components/admin/AddUserModal";
-import { GymActionModal, type GymAction, type GymRow } from "@/components/admin/GymsPanel";
+import { GymActionModal, GymPlanEditor, type GymAction, type GymRow } from "@/components/admin/GymsPanel";
 import { ACTION_LABEL, ActionModal, PersonActions, PersonCard, PersonDetails, WaitlistRow, type Action, type Overview, type Person } from "@/components/admin/SignupsPanel";
 import { RoleBadge } from "@/components/chat/RoleBadge";
 import { Avatar, Badge, Button, Card, Input, Notice, SectionTitle, Segmented, Stat } from "@/components/ui";
@@ -218,7 +218,7 @@ export function UsersPanel({ roster, billing, billingReload, version, meId, onCh
             />
           ))}
           {gymEntries.map(({ g, person, kids, autoOpen }) => (
-            <GymCard key={g.id} g={g} person={person} kids={kids} autoOpen={autoOpen} onAct={(action) => setGymAct({ gym: g, action })} />
+            <GymCard key={g.id} g={g} person={person} kids={kids} autoOpen={autoOpen} onAct={(action) => setGymAct({ gym: g, action })} onPlanSaved={(text) => { setFlash({ tone: "success", text }); void load(); }} />
           ))}
           {soloEntries.map((p) => (
             <PersonCard key={p.id} p={p} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} onAct={(action) => setAct({ person: p, action })} />
@@ -393,7 +393,7 @@ function CoachCard({ c, person, kids, autoOpen, me, line, onBillingChanged, onMe
   );
 }
 
-function GymCard({ g, person, kids, autoOpen, onAct }: { g: GymRow; person: Person | undefined; kids: Person[]; autoOpen: boolean; onAct: (a: GymAction) => void }) {
+function GymCard({ g, person, kids, autoOpen, onAct, onPlanSaved }: { g: GymRow; person: Person | undefined; kids: Person[]; autoOpen: boolean; onAct: (a: GymAction) => void; onPlanSaved: (text: string) => void }) {
   return (
     <Card className="p-0" data-user-kind="gym">
       <div className="space-y-3 p-4">
@@ -433,6 +433,7 @@ function GymCard({ g, person, kids, autoOpen, onAct }: { g: GymRow; person: Pers
             {g.trialEndsAt ? ` · trial ends ${format(parseISO(g.trialEndsAt), "d MMM yyyy")}` : ""}
           </div>
         </div>
+        {g.trialEndsAt || g.plan.status !== "FREE" ? <GymPlanEditor gym={g} onSaved={onPlanSaved} /> : null}
         <div className="flex flex-wrap gap-2">
           {g.status === "DISABLED" ? (
             <Button size="sm" variant="success" onClick={() => onAct("enable")}>

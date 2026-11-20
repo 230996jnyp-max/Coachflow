@@ -6,6 +6,7 @@ import { notice, tell } from "./accountAdmin";
 import { db } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./http";
 import { deleteGymEverything, setGymStatus } from "./gymOrg";
+import { planOverview } from "./gymPlan";
 import { adminActions, aiUsageLog, gymMembers, gymOrgs, users, type UserRow } from "./schema";
 
 /*
@@ -28,6 +29,8 @@ export interface GymOverviewRow {
   aiUses30d: number;
   createdAt: string;
   trialEndsAt: string | null;
+  /** The gym's subscription: its state, monthly price in cents, whether that is a custom price, and whether it asked for one. */
+  plan: { status: string; priceCents: number; custom: boolean; requested: boolean };
 }
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -45,6 +48,7 @@ export async function listGyms(): Promise<GymOverviewRow[]> {
     .from(aiUsageLog)
     .where(sql`${aiUsageLog.gymId} is not null`)
     .groupBy(aiUsageLog.gymId);
+  const plans = await planOverview(gyms.map((g) => g.id));
   return gyms.map((g) => {
     const o = ownerById.get(g.ownerId);
     const a = ai.find((x) => x.gymId === g.id);
@@ -62,6 +66,7 @@ export async function listGyms(): Promise<GymOverviewRow[]> {
       aiUses30d: num(a?.recent),
       createdAt: g.createdAt.toISOString(),
       trialEndsAt: g.trialEndsAt ? g.trialEndsAt.toISOString() : null,
+      plan: plans.get(g.id) ?? { status: "TRIALING", priceCents: 10000, custom: false, requested: false },
     };
   });
 }

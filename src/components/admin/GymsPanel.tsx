@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Field, Input, Modal, Notice, Textarea } from "@/components/ui";
+import { Badge, Button, Field, Input, Modal, Notice, Textarea } from "@/components/ui";
+import { planLabel, type GymPlanStatus } from "@/lib/gymBilling";
 import { api } from "@/lib/store";
 
 export interface GymRow {
@@ -18,6 +19,45 @@ export interface GymRow {
   aiUses30d: number;
   createdAt: string;
   trialEndsAt: string | null;
+  plan: { status: string; priceCents: number; custom: boolean; requested: boolean };
+}
+
+
+/** The gym's plan in a line, and where the platform owner sets a custom monthly price for a large gym (S$, empty = the flat price). */
+export function GymPlanEditor({ gym, onSaved }: { gym: GymRow; onSaved: (text: string) => void }) {
+  const [value, setValue] = useState(gym.plan.custom ? String(gym.plan.priceCents / 100) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await api<{ priceCents: number | null }>("/api/admin/gyms/" + gym.id + "/billing", { method: "PUT", body: { priceDollars: value.trim() === "" ? null : Number(value) } });
+    setBusy(false);
+    if (!r.ok) return setError(r.error ?? "Could not save the price.");
+    onSaved(value.trim() === "" ? gym.name + " is back on the flat price." : gym.name + " now pays S$" + value + " a month.");
+  };
+  return (
+    <div className="space-y-2 rounded-xl border border-line bg-field/40 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted">Plan</span>
+        <strong>{planLabel[gym.plan.status as GymPlanStatus] ?? gym.plan.status}</strong>
+        <span className="text-muted">
+          · S${gym.plan.priceCents / 100} a month{gym.plan.custom ? " (custom)" : ""}
+        </span>
+        {gym.plan.requested && <Badge className="border-pr/30 bg-pr/15 text-pr">Asked for a custom plan ({gym.coaches} coaches)</Badge>}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-muted">
+          Custom price (S$ a month)
+          <Input className="mt-1 w-36" type="number" min={1} max={10000} step="1" placeholder="Flat price" value={value} onChange={(e) => setValue(e.target.value)} />
+        </label>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save price"}
+        </Button>
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
+    </div>
+  );
 }
 
 export type GymAction = "disable" | "enable" | "delete";

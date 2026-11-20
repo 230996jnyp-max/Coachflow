@@ -56,11 +56,11 @@ export function GymOverview({ state, goTo }: { state: GymState; goTo: (tab: stri
           <Card className="p-4 text-sm">
             {trial.expired ? (
               <span>
-                Your free month has ended. {trial.enforced ? "The platform is paused for you and your coaches until you subscribe." : "Subscriptions are opening soon."}
+                Your free month has ended. {trial.enforced ? "The platform is paused for you and your coaches until you subscribe." : "Subscribe from the Billing tab to keep your gym running."}
               </span>
             ) : (
               <span>
-                Free trial: <strong>{trial.daysLeft} day{trial.daysLeft === 1 ? "" : "s"} left</strong>. It covers you and every coach in your gym. When it ends, the platform stops for the gym&apos;s coaches and admins until you subscribe.
+                Free trial: <strong>{trial.daysLeft} day{trial.daysLeft === 1 ? "" : "s"} left</strong>. It covers you and every coach in your gym. When it ends, the platform stops for the gym&apos;s coaches and admins until you subscribe (S$100 a month for a small gym, from the Billing tab).
               </span>
             )}
           </Card>

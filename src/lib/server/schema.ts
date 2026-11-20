@@ -837,6 +837,33 @@ export const notifications = pgTable(
 );
 
 /**
+ * A gym's subscription (the gym's free month is gym_orgs.trial_ends_at). One row per gym, made when it is first needed.
+ * status: TRIALING | ACTIVE | PAST_DUE | CANCELED, kept from Stripe. price_cents is a custom monthly price the platform owner agreed with a
+ * large gym (null = the standard flat price). past_due_since starts the grace period after a failed payment.
+ */
+export const gymBilling = pgTable(
+  "gym_billing",
+  {
+    gymId: text("gym_id").primaryKey(),
+    status: text("status").notNull().default("TRIALING"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    priceCents: integer("price_cents"),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }),
+    /** The owner asked for a custom plan (a gym with more coaches than the flat plan covers). */
+    planRequestedAt: timestamp("plan_requested_at", { withTimezone: true }),
+    warned7: boolean("warned_7").notNull().default(false),
+    warned1: boolean("warned_1").notNull().default(false),
+    warnedGrace: boolean("warned_grace").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gym_billing_customer_idx").on(t.stripeCustomerId)],
+);
+export type GymBillingRow = typeof gymBilling.$inferSelect;
+
+/**
  * Class events, for the occupancy analytics: someone joined the waitlist of a full class, or a client left a class they had a place in.
  * Only counts are kept (no client is recorded), because the history is otherwise lost: waitlists are cleared when a class finishes.
  * kind: WAITLIST | CANCEL | LATE_CANCEL (left inside the coach's notice window).
@@ -1619,6 +1646,22 @@ export const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS class_events_coach_idx ON class_events (coach_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS class_events_group_idx ON class_events (group_id)`,
+  `CREATE TABLE IF NOT EXISTS gym_billing (
+    gym_id text PRIMARY KEY,
+    status text NOT NULL DEFAULT 'TRIALING',
+    stripe_customer_id text,
+    stripe_subscription_id text,
+    price_cents integer,
+    period_end timestamptz,
+    cancel_at_period_end boolean NOT NULL DEFAULT false,
+    past_due_since timestamptz,
+    plan_requested_at timestamptz,
+    warned_7 boolean NOT NULL DEFAULT false,
+    warned_1 boolean NOT NULL DEFAULT false,
+    warned_grace boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gym_billing_customer_idx ON gym_billing (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS attendance (
     id text PRIMARY KEY,
     kind text NOT NULL,

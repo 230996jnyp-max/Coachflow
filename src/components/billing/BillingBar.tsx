@@ -20,8 +20,26 @@ export function BillingBar() {
   const [busy, setBusy] = useState(false);
   const justSubscribed = !hideSuccess && path === "/trainer" && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("billing") === "success";
 
+  const gp = b?.gymPlan;
   return (
     <>
+      {gp && gp.status === "GRACE" && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+          <span className="flex items-center gap-2 font-semibold text-danger">
+            <AlertTriangle size={18} /> {gp.isOwner ? `The payment for ${gp.name} didn't go through. The gym is paused in ${gp.graceDaysLeft} day${gp.graceDaysLeft === 1 ? "" : "s"} unless the card is updated.` : `${gp.name}'s payment didn't go through. Please let ${gp.ownerName} know: the gym is paused in ${gp.graceDaysLeft} day${gp.graceDaysLeft === 1 ? "" : "s"}.`}
+          </span>
+          {gp.isOwner && (
+            <Link href="/gym-admin" className="inline-flex min-h-9 items-center rounded-lg border border-danger/40 px-3 text-xs font-bold text-danger">
+              Update billing
+            </Link>
+          )}
+        </div>
+      )}
+      {gp && gp.isOwner && gp.status === "TRIALING" && (gp.trialDaysLeft ?? 99) <= 7 && (
+        <Link href="/gym-admin" className="mb-4 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 text-xs font-bold text-accent">
+          <Clock size={14} /> Gym free month: {gp.trialDaysLeft} day{gp.trialDaysLeft === 1 ? "" : "s"} left. Subscribe
+        </Link>
+      )}
       {b && b.role === "COACH" && !b.exempt && (
         <div className="mb-4 space-y-2">
           {justSubscribed && (
