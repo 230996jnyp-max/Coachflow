@@ -1,7 +1,7 @@
 "use client";
 
 import { format, parseISO } from "date-fns";
-import { CalendarPlus, ChevronRight, FileUp, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
+import { Bot, CalendarPlus, ChevronRight, FileUp, LayoutGrid, MessageCircle, Plus, Rows3, Search, Send, Ticket, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -105,6 +105,11 @@ export default function ClientsPage() {
         subtitle={`${active.length} active clients${needAttention ? ` · ${needAttention} need${needAttention === 1 ? "s" : ""} attention` : ""}`}
         actions={
           <>
+            <Link href="/autopilot">
+              <Button variant="secondary" data-tour="clients-autopilot">
+                <Bot size={16} /> Autopilot
+              </Button>
+            </Link>
             <Button variant="secondary" onClick={() => setNudging(true)} disabled={active.length === 0}>
               <Send size={16} /> Nudge clients
             </Button>

@@ -5,6 +5,7 @@ import { Activity, HeartPulse, Mail, MessageCircle, MessagesSquare, Phone, Ruler
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
+import { ClientAutopilot } from "@/components/autopilot/ClientAutopilot";
 import { GoalCard } from "@/components/goal/GoalCard";
 import { badgeStatuses } from "@/lib/badges";
 import { Sparkline } from "@/components/progress/Sparkline";
@@ -276,6 +277,7 @@ export function ClientOverview({ clientId, onTab }: { clientId: string; onTab: (
             )}
           </Card>
           <CoachNotes clientId={clientId} />
+          <ClientAutopilot clientId={clientId} />
         </div>
       </div>
 

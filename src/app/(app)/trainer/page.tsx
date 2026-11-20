@@ -7,6 +7,7 @@ import { useState } from "react";
 import { PendingAttendance } from "@/components/attendance/PendingAttendance";
 import { ClientActivityBanner } from "@/components/ClientActivityBanner";
 import { NeedsYou } from "@/components/clients/NeedsYou";
+import { AutopilotDashboard } from "@/components/autopilot/AutopilotDashboard";
 import { ProgramSuggestions } from "@/components/programs/ProgramSuggestions";
 import { CoachCodeCard, LinkRequests } from "@/components/coachlink/CoachLink";
 import { SpecialtiesCard } from "@/components/sports/Focus";
@@ -65,6 +66,7 @@ export default function TrainerDashboard() {
       <HomeSlot side="coach" id="needs">
         <div className="space-y-6 empty:hidden">
           <NeedsYou />
+          <AutopilotDashboard />
           <ProgramSuggestions />
         </div>
       </HomeSlot>
