@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createSession, hashPassword, needsRehash, verifyPassword } from "@/lib/server/auth";
 import { db } from "@/lib/server/db";
 import { HttpError, readJson, route, str } from "@/lib/server/http";
+import { assertBelow, ipTag, record } from "@/lib/server/rateLimit";
 import { users } from "@/lib/server/schema";
 
 export const runtime = "nodejs";
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 const MAX_FAILS = 5;
 const LOCK_MS = 15 * 60 * 1000;
 const FAIL = "Incorrect username or password, or the account is deactivated.";
+/** One network address may get this many sign-ins wrong in ten minutes (across all accounts) before it has to wait. */
+const IP_FAILS = 25;
+const IP_WINDOW_MS = 10 * 60 * 1000;
 
 // A real bcrypt hash of a random string, used so unknown usernames take as long as known ones.
 let dummyHash: Promise<string> | undefined;
@@ -20,6 +24,9 @@ export const POST = route(async (req) => {
   const username = str(body.username, "Username", { max: 200 }).toLowerCase();
   const password = typeof body.password === "string" ? body.password : "";
   if (!password || password.length > 200) throw new HttpError(401, FAIL);
+
+  const ip = ipTag(req);
+  await assertBelow(`login-fail:${ip}`, IP_FAILS, IP_WINDOW_MS, "Too many failed sign-ins from this connection. Please wait a few minutes and try again.");
 
   const d = await db();
   // Staff can sign in with their username or their email; clients use their username.
@@ -33,6 +40,7 @@ export const POST = route(async (req) => {
   if (!user) {
     dummyHash ??= hashPassword(Math.random().toString(36));
     await verifyPassword(password, await dummyHash);
+    await record(`login-fail:${ip}`);
     throw new HttpError(401, FAIL);
   }
   if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
@@ -44,6 +52,7 @@ export const POST = route(async (req) => {
   if (ok && !user.active && user.disabledAt) throw new HttpError(403, "This account has been disabled. Please contact c.darshstrength@gmail.com.", "disabled");
   if (!ok || !user.active) {
     if (!ok) {
+      await record(`login-fail:${ip}`);
       const fails = user.failedAttempts + 1;
       await d
         .update(users)

@@ -214,7 +214,7 @@ async function purgeCoach(id: string): Promise<void> {
   await d.delete(coachLinks).where(eq(coachLinks.coachId, id));
 }
 
-async function purgeAccount(row: UserRow): Promise<void> {
+export async function purgeAccount(row: UserRow): Promise<void> {
   const d = await db();
   // A coach who runs a gym takes the gym with them (its other coaches become independent); a member just leaves it.
   for (const g of await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, row.id))) await deleteGymEverything(g.id);

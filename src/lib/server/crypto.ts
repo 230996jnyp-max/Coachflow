@@ -42,11 +42,14 @@ export const decryptJson = <T>(token: string, aad: string): T => JSON.parse(decr
 
 const WORDS = ["amber", "bold", "cedar", "delta", "ember", "forge", "grove", "harbor", "iron", "jade", "knight", "lunar", "maple", "nova", "onyx", "pilot", "quartz", "raven", "stone", "tiger", "umber", "vivid", "willow", "zephyr"];
 
-/** Human-friendly temporary password, e.g. "Raven-Cedar-4821-x" (≈ 50 bits of randomness). */
+/**
+ * Human-friendly temporary password, e.g. "Raven-Cedar-Onyx-4821-x" (about 31 bits). That is plenty for something that is used once,
+ * must be replaced at first sign-in, and can only be guessed a few times before the account locks; it is not meant to last.
+ */
 export function tempPassword(): string {
   const w = () => {
     const s = WORDS[randomInt(WORDS.length)];
     return s[0].toUpperCase() + s.slice(1);
   };
-  return `${w()}-${w()}-${randomInt(1000, 10000)}-${"abcdefghjkmnpqrstuvwxyz"[randomInt(23)]}`;
+  return `${w()}-${w()}-${w()}-${randomInt(1000, 10000)}-${"abcdefghjkmnpqrstuvwxyz"[randomInt(23)]}`;
 }

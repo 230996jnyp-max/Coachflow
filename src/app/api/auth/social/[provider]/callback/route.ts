@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSession } from "@/lib/server/auth";
+import { createSession, currentUser } from "@/lib/server/auth";
 import { HttpError } from "@/lib/server/http";
 import { hit, ipTag } from "@/lib/server/rateLimit";
 import { clearStateCookie, completeOAuth, modeOf, readStateCookie, resolveSocial, setPendingCookie, SocialError, type Mode } from "@/lib/server/social";
@@ -32,6 +32,8 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     if (!code || code.length > 2000) throw new SocialError("state");
     const done = await completeOAuth(provider, { code, state: u.searchParams.get("state") ?? "", cookie, origin });
     await clearStateCookie();
+    // Connecting a provider only counts when the person signed in now is the one who started it.
+    if (done.mode === "link" && (await currentUser())?.id !== done.userId) return go("/settings/profile?social=error");
     const out = await resolveSocial(done.mode, done.profile, done.userId);
     switch (out.kind) {
       case "signin":

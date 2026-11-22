@@ -35,7 +35,12 @@ export function route<Ctx = unknown>(handler: (req: Request, ctx: Ctx) => Promis
 /** Reject cross-site state-changing requests (cookies are SameSite=Lax; this is defence in depth). */
 export function assertSameOrigin(req: Request) {
   const origin = req.headers.get("origin");
-  if (!origin) return; // non-browser clients (curl) don't send Origin; they can't ride a victim's cookie
+  if (!origin) {
+    // Non-browser clients (curl) send neither header; they can't ride a victim's cookie. A browser that says the request came from
+    // another site is refused even when it left Origin out.
+    if (req.headers.get("sec-fetch-site") === "cross-site") throw forbidden("Cross-site request blocked.");
+    return;
+  }
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   let originHost = "";
   try {

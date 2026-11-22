@@ -187,10 +187,31 @@ export async function verifyCaptcha(token: unknown, ip: string): Promise<void> {
 }
 
 /* ---------------- Availability ---------------- */
+/**
+ * An account that was started with an address but never confirmed it and has never been signed in to holds nothing. It must not keep the
+ * address from its real owner: anyone can type someone else's email into the sign-up form, and the owner would otherwise be locked out
+ * (or, worse, confirm that account's link later and land in an account whose password somebody else chose). So such an account does not
+ * count as "in use", and is removed when a new sign-up uses the address.
+ */
+const staleUnconfirmed = (address: string) => sql`lower(${users.email}) = ${address.toLowerCase()} and ${users.emailVerified} = false and ${users.lastLoginAt} is null and ${users.role} <> 'OWNER'`;
+
+async function releaseStaleSignup(address: string): Promise<void> {
+  const d = await db();
+  const rows = await d.select().from(users).where(staleUnconfirmed(address));
+  if (!rows.length) return;
+  const { purgeAccount } = await import("./accountAdmin");
+  for (const row of rows) await purgeAccount(row);
+}
+
 export async function emailInUse(address: string): Promise<boolean> {
   const d = await db();
-  const rows = await d.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${address.toLowerCase()}`).limit(1);
-  return rows.length > 0 || (await usernameTaken(address.toLowerCase(), ""));
+  const addr = address.toLowerCase();
+  const rows = await d
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`(lower(${users.email}) = ${addr} or ${users.username} = ${addr}) and not (${users.emailVerified} = false and ${users.lastLoginAt} is null and ${users.role} <> 'OWNER')`)
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function availability(input: { username?: string; email?: string }): Promise<{ username?: boolean; email?: boolean }> {
@@ -311,6 +332,8 @@ export async function createAccount(input: SignupInput, ip: string, origin: stri
     };
   }
 
+  // Only now, with everything else checked: an unconfirmed older sign-up with this address makes way for this one.
+  await releaseStaleSignup(input.email);
   let row: UserRow;
   try {
     [row] = await d

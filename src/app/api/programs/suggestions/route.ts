@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
-import { route } from "@/lib/server/http";
+import { assertSameOrigin, route } from "@/lib/server/http";
 import * as P from "@/lib/server/programs";
 
 export const runtime = "nodejs";
@@ -12,7 +12,8 @@ export const GET = route(async () => {
   return NextResponse.json({ suggestions: await P.listSuggestions(me) });
 });
 
-export const POST = route(async () => {
+export const POST = route(async (req) => {
+  assertSameOrigin(req);
   const me = await requireUser(["OWNER", "COACH"]);
   const made = await P.generateSuggestions(me.id);
   return NextResponse.json({ made, suggestions: await P.listSuggestions(me) });

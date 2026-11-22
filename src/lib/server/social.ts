@@ -3,10 +3,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { jwtVerify, SignJWT, type JWTPayload } from "jose";
 import { cookies } from "next/headers";
+import { purgeAccount } from "./accountAdmin";
 import { usernameTaken } from "./accounts";
 import { db, isLocalTestMode } from "./db";
 import { users, type UserRow } from "./schema";
-import { afterConfirmed } from "./signup";
 import { findIdentity, isProvider, linkIdentity, unlinkIdentity, type ProviderId } from "./socialStore";
 
 /*
@@ -291,23 +291,20 @@ export async function resolveSocial(mode: Mode, profile: SocialProfile, linkUser
   }
 
   if (!profile.email) return { kind: "no_email" };
-  const existing = await userByEmail(profile.email);
+  let existing = await userByEmail(profile.email);
+  if (existing && mode === "login" && profile.emailTrusted && !existing.emailVerified && existing.active) {
+    // An account that was started with this address but never confirmed it. The person Google just vouched for owns the address, so
+    // they must not be let into it: whoever started it may have chosen its password (a "pre-hijack"). It holds nothing yet (it could
+    // not be signed in to), so it is removed and they sign up fresh with Google.
+    await purgeAccount(existing);
+    existing = null;
+  }
   if (existing) {
     if (mode === "signup") return { kind: "exists" };
     if (!profile.emailTrusted) return { kind: "conflict" };
     if (!existing.active) return { kind: "disabled" };
-    let user = existing;
-    if (!existing.emailVerified) {
-      // Google confirmed this address, so it counts as confirmed here too.
-      const d = await db();
-      const [row] = await d.update(users).set({ emailVerified: true, updatedAt: new Date() }).where(eq(users.id, existing.id)).returning();
-      if (row) {
-        user = row;
-        await afterConfirmed(row);
-      }
-    }
-    await linkIdentity(profile.provider, profile.subject, user.id, profile.email);
-    return { kind: "signin", user };
+    await linkIdentity(profile.provider, profile.subject, existing.id, profile.email);
+    return { kind: "signin", user: existing };
   }
   return { kind: "new", pending: { provider: profile.provider, subject: profile.subject, email: profile.email, name: profile.name, trusted: profile.emailTrusted } };
 }
