@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { BarChart3, Building2, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -77,6 +77,11 @@ export function ProfileMenu({ side = "bottom", showName = false }: { side?: "bot
             <Link href="/settings" role="menuitem" onClick={() => setOpen(false)} className={item}>
               <Settings size={18} className="text-muted" /> Settings
             </Link>
+            {isTrainer && (
+              <Link href="/business" role="menuitem" onClick={() => setOpen(false)} className={item}>
+                <BarChart3 size={18} className="text-success" /> Business
+              </Link>
+            )}
             {hasPortalAccess(user.gym) && (
               <Link href="/gym-admin" role="menuitem" onClick={() => setOpen(false)} className={item}>
                 <Building2 size={18} className="text-accent" /> Gym admin

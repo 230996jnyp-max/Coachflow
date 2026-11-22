@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/store";
-import { LiveClients, LiveLogger, LiveProgress } from "./LiveScreens";
+import { LiveClients, LiveGym, LiveLogger, LiveProgress } from "./LiveScreens";
 
 /* The product, shown: a linked pair of phones in the hero and a tabbed showcase. Every picture is a real screen from the app with demo data. */
 
@@ -20,13 +20,15 @@ const SHOTS = {
 } as const;
 
 type Shot = keyof typeof SHOTS;
-type Who = "train" | "coach";
+type Who = "train" | "coach" | "gym";
 
 const PAIR: Record<Who, { leftCap: string; rightCap: string; link: boolean; pulses: [string, string, string] }> = {
   // Someone training on their own: their log, and what it builds.
   train: { leftCap: "Log it", rightCap: "Watch it climb", link: false, pulses: ["Set logged", "New best", "Streak kept"] },
   // A coach: the client's side and their own, linked.
   coach: { leftCap: "Your client logs it", rightCap: "You see it", link: true, pulses: ["Set logged", "You're notified", "Note sent"] },
+  // A gym owner: a coach's phone, and the owner's numbers that move with it.
+  gym: { leftCap: "Your coach runs it", rightCap: "You see the numbers", link: true, pulses: ["Session logged", "Attendance counted", "Numbers update"] },
 };
 
 /** Two live phones that play one 10 second story together. Training alone: a set is ticked, the volume and chart rise, a new best is flagged. Coaching: the client ticks sets, the coach's list reacts, and a note goes back. */
@@ -36,7 +38,7 @@ export function LinkedPair({ who }: { who: Who }) {
     <div className="wc-pair" data-lead={who === "train" ? "you" : "coach"} data-link={p.link} key={who}>
       <figure className="wc-side" data-side="you">
         <div className="wc-phone">
-          <LiveLogger note={who === "coach"} />
+          {who === "gym" ? <LiveClients /> : <LiveLogger note={who === "coach"} />}
         </div>
         <figcaption>{p.leftCap}</figcaption>
       </figure>
@@ -49,7 +51,7 @@ export function LinkedPair({ who }: { who: Who }) {
         ))}
       </div>
       <figure className="wc-side" data-side="coach">
-        <div className="wc-phone">{who === "coach" ? <LiveClients /> : <LiveProgress />}</div>
+        <div className="wc-phone">{who === "coach" ? <LiveClients /> : who === "gym" ? <LiveGym /> : <LiveProgress />}</div>
         <figcaption>{p.rightCap}</figcaption>
       </figure>
     </div>
@@ -58,7 +60,7 @@ export function LinkedPair({ who }: { who: Who }) {
 
 type Tab = { title: string; text: string; shot: Shot };
 
-const TABS: Record<Who, Tab[]> = {
+const TABS: Record<Exclude<Who, "gym">, Tab[]> = {
   train: [
     { title: "Log every set", text: "Last time's weights sit beside each set, so you know exactly what to beat.", shot: "logger" },
     { title: "See the climb", text: "Weekly volume, streaks and totals build up as you train.", shot: "progress" },
@@ -73,7 +75,7 @@ const TABS: Record<Who, Tab[]> = {
 };
 
 /** Tabs that swap the phone. They advance by themselves until someone picks one. */
-export function Showcase({ who }: { who: Who }) {
+export function Showcase({ who }: { who: Exclude<Who, "gym"> }) {
   return <ShowcaseTabs key={who} tabs={TABS[who]} />;
 }
 

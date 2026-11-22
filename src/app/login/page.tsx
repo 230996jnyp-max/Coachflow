@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { InstallButton } from "@/components/InstallButton";
 import { Splash } from "@/components/Providers";
+import { SocialButtons, socialMessage } from "@/components/signup/SocialButtons";
 import { Button, Card, Field, Input, Notice } from "@/components/ui";
 import { useViewer } from "@/lib/hooks";
 import { IDLE_NOTICE, savedUsername, takeIdleNotice } from "@/lib/idle";
@@ -26,6 +27,8 @@ export default function LoginPage() {
   const [submitted, setSubmitted] = useState(false);
   const [fading, setFading] = useState(false);
   const [idleNotice, setIdleNotice] = useState(false);
+  // Coming back from "Continue with Google / Facebook / Microsoft" without being signed in: say why.
+  const [socialNote, setSocialNote] = useState<ReturnType<typeof socialMessage>>(null);
   const [unverified, setUnverified] = useState(false);
   const [resent, setResent] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -56,6 +59,8 @@ export default function LoginPage() {
         passwordRef.current?.focus();
       }
       if (takeIdleNotice()) setIdleNotice(true);
+      const q = new URLSearchParams(window.location.search);
+      setSocialNote(socialMessage(q.get("social"), q.get("provider")));
     });
   }, [ready, user]);
 
@@ -93,6 +98,11 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-muted">Train. Track. Book. Your coaching, in your pocket.</p>
         </div>
 
+        {socialNote && (
+          <div className="mb-4">
+            <Notice tone={socialNote.tone}>{socialNote.text}</Notice>
+          </div>
+        )}
         {idleNotice && (
           <div className="mb-4">
             <Notice tone="warn">{IDLE_NOTICE}</Notice>
@@ -157,6 +167,7 @@ export default function LoginPage() {
             <Button type="submit" size="lg" className="w-full" disabled={busy}>
               <LogIn size={18} /> {busy ? "Signing in…" : "Log in"}
             </Button>
+            <SocialButtons mode="login" divider="before" />
             <p className="text-center text-sm">
               <Link href="/forgot" className="font-semibold text-accent hover:underline">
                 Forgot your password?

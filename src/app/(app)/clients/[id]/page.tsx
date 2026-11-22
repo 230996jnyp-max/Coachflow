@@ -20,6 +20,7 @@ import { TrainerBookModal, type TrainerBookInit } from "@/components/booking/Tra
 import { CredentialsModal, genPassword, GOALS, type Credentials } from "@/components/clients/ClientForms";
 import { ClientOverview } from "@/components/clients/ClientOverview";
 import { ImportClientsModal } from "@/components/clients/ImportClientsModal";
+import { ClientPayments } from "@/components/payments/PayActions";
 import { CoachIntake } from "@/components/intake/CoachIntake";
 import { PlanTab } from "@/components/plan/PlanTab";
 import { CoachNutrition } from "@/components/nutrition/CoachNutrition";
@@ -108,6 +109,8 @@ export default function ClientDetailPage() {
 
 function Sessions({ clientId }: { clientId: string }) {
   const [init, setInit] = useState<TrainerBookInit | null>(null);
+  const { clients } = useViewer();
+  const name = clients.find((c) => c.user.id === clientId)?.user.name ?? "your client";
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -115,6 +118,7 @@ function Sessions({ clientId }: { clientId: string }) {
           <CalendarPlus size={16} /> Book session
         </Button>
       </div>
+      <ClientPayments clientId={clientId} clientName={name} />
       <CreditHistory clientId={clientId} />
       <BookingList clientId={clientId} filters={["upcoming", "past", "cancelled"]} />
       <TrainerBookModal init={init} onClose={() => setInit(null)} />

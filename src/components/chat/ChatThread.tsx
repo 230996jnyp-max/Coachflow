@@ -1,11 +1,12 @@
 "use client";
 
 import { format, isSameDay, parseISO } from "date-fns";
-import { AlertCircle, ArrowLeft, Bell, Bookmark, Check, Mail, Megaphone, PanelRight, RotateCcw, Send } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bell, Bookmark, Check, Loader2, Mail, Megaphone, PanelRight, RotateCcw, Send, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Avatar, Button, Modal } from "@/components/ui";
 import { discardFailed, markRead, sendChat, setActiveThread, showBrowserNotification, useChat, type LocalMessage } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
+import { api } from "@/lib/store";
 import type { ChatRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ClientSidePanel } from "./ClientSidePanel";
@@ -39,6 +40,9 @@ export function ChatThread({
   const [text, setText] = useState("");
   const [replies, setReplies] = useState(false);
   const [panel, setPanel] = useState<boolean | null>(null);
+  const [smart, setSmart] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const wide = useWide();
   const box = useRef<HTMLTextAreaElement>(null);
   const [perm, setPerm] = useState<string>(() => (typeof Notification === "undefined" ? "unsupported" : Notification.permission));
@@ -49,6 +53,20 @@ export function ChatThread({
     setActiveThread(thread);
     return () => setActiveThread(null);
   }, [thread]);
+
+  // Smart replies: a "Draft reply" button, only for a coach who switched them on, in a client's chat.
+  const wantsSmart = !!user && user.role === "TRAINER" && thread.startsWith("c:");
+  useEffect(() => {
+    if (!wantsSmart) return;
+    let alive = true;
+    void (async () => {
+      const r = await api<{ smart: { enabled: boolean } }>("/api/autopilot/smart");
+      if (alive && r.ok && r.data) setSmart(r.data.smart.enabled);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [wantsSmart]);
 
   useEffect(() => {
     if (messages.length) markRead(thread);
@@ -73,6 +91,17 @@ export function ChatThread({
   const insertReply = (picked: string) => {
     setText((t) => (t.trim() ? `${t.trimEnd()} ${picked}` : picked).slice(0, 2000));
     setTimeout(() => box.current?.focus(), 0);
+  };
+
+  const draftReply = async () => {
+    setDrafting(true);
+    setDraftError(null);
+    const r = await api<{ text: string }>("/api/autopilot/smart/draft", { body: { thread } });
+    setDrafting(false);
+    if (r.ok && r.data) {
+      setText(r.data.text);
+      setTimeout(() => box.current?.focus(), 0);
+    } else setDraftError(r.error ?? "Couldn't draft a reply.");
   };
 
   const send = () => {
@@ -197,6 +226,11 @@ export function ChatThread({
           })}
         </div>
 
+        {draftError && (
+          <div role="alert" className="border-t border-line px-3 py-1.5 text-xs text-danger">
+            {draftError}
+          </div>
+        )}
         <form
           className="flex items-end gap-2 border-t border-line p-2.5"
           onSubmit={(e) => {
@@ -204,6 +238,18 @@ export function ChatThread({
             send();
           }}
         >
+          {staff && smart && (
+            <button
+              type="button"
+              onClick={() => void draftReply()}
+              disabled={drafting}
+              aria-label="Draft a reply with AI"
+              title="Draft a reply with AI (you read and send it)"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line text-accent hover:border-accent/50 disabled:opacity-50"
+            >
+              {drafting ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+            </button>
+          )}
           {staff && (
             <button
               type="button"

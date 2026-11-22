@@ -157,7 +157,8 @@ export function canCancel(b: Booking, now: Date, settings: AppSettings, role: Ro
   if (!ACTIVE_UPCOMING.includes(b.status)) return "This session can no longer be cancelled.";
   if (role === "TRAINER") return null;
   const cutoff = addMinutes(parseISO(b.start), -settings.noticeHours * 60);
-  if (isBefore(cutoff, now))
+  // With a late-cancellation charge the client may still cancel (the dialog warns them first), so it is not a block.
+  if (isBefore(cutoff, now) && !settings.lateCancelCharge)
     return `Sessions can only be cancelled ${settings.noticeHours}h or more before they start — message your trainer.`;
   return null;
 }

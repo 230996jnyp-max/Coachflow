@@ -4,14 +4,18 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { pictureToUpload } from "./image";
 import type { MediaKind, Prefs } from "./prefs";
 import { showBillingNotice } from "./billingNotice";
-import { del, get, set } from "idb-keyval";
+import { del, get, keys, set } from "idb-keyval";
 import { parseISO } from "date-fns";
 import { SEED_EXERCISES } from "@/data/exercises";
 import { DB_VERSION, DEFAULT_SETTINGS, createEmptyDB } from "./seed";
 import { annotatePRs } from "./stats";
 import { sendInvite } from "./notify";
+import { forgetPushOnSignOut, relinkPush } from "./pushClient";
 import { clearActive, isIdleStale, markActive, readLastActive, rememberUsername, setIdleNotice, setRemembered } from "./idle";
 import { SyncQueue, type SyncResult } from "./syncQueue";
+import { diaryOutbox } from "./diaryOutbox";
+import { buildSnapshot, dbFromSnapshot, type Snapshot } from "./offline";
+import { isReachable, onBackOnline, reportReachable, resetSyncStatus, setOfflineOpen, setPending } from "./syncStatus";
 import type { TravelNeighbor } from "./travel";
 import { uid } from "./utils";
 import type {
@@ -84,12 +88,71 @@ let bodyQueueing = false;
 let bodySafe = false;
 let bodySince: string | undefined;
 
+/** The app was opened with no signal, from the copy kept on this phone (see offline.ts); cleared once the server has been reached again. */
+let offlineOpen = false;
+let rejoining = false;
+/** True once what is on screen came from the server (or from the kept copy), so it is safe to keep a fresh copy for the next offline start. */
+let snapArmed = false;
+let snapTimer: ReturnType<typeof setTimeout> | undefined;
+const snapKey = (userId: string) => `coachflow-offline-v1:${userId}`;
+const LAST_USER_KEY = "coachflow-offline-last-v1";
+
 function emit() {
   listeners.forEach((l) => l());
 }
 function setState(next: State) {
   state = next;
   emit();
+  scheduleSnapshot();
+}
+
+/** Keeps a fresh copy of the person's own data on the phone (at most once every few seconds) so the app can open with no signal. */
+function scheduleSnapshot() {
+  if (!snapArmed || !state.sessionUserId || snapTimer) return;
+  snapTimer = setTimeout(() => {
+    snapTimer = undefined;
+    void writeSnapshot();
+  }, 4000);
+}
+
+async function writeSnapshot(): Promise<void> {
+  const me = state.sessionUserId;
+  if (!me || !snapArmed) return;
+  const snap = buildSnapshot(state.db, me);
+  if (!snap) return;
+  try {
+    await set(snapKey(me), snap);
+    await set(LAST_USER_KEY, me);
+  } catch {
+    /* private window or storage full: the app just needs a signal to open next time */
+  }
+}
+
+/** Another person signed in on this device: the copy kept for whoever used it before is deleted (their unsent changes are not touched). */
+async function forgetOtherCopies(keepUserId: string): Promise<void> {
+  try {
+    for (const k of await keys()) {
+      if (typeof k !== "string") continue;
+      const copy = k.startsWith("coachflow-offline-v1:") || k.startsWith("coachflow-diary-cache-v1:");
+      if (copy && !k.endsWith(`:${keepUserId}`)) await del(k);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Signing out on purpose: the kept copy of this person's data (and food diary) is removed from the phone. */
+async function forgetOfflineCopy(userId: string): Promise<void> {
+  snapArmed = false;
+  if (snapTimer) clearTimeout(snapTimer);
+  snapTimer = undefined;
+  try {
+    await del(snapKey(userId));
+    await del(LAST_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+  await diaryOutbox.forget(userId);
 }
 
 /** Writes this user's device-local data. Account data (users/clients) is never written to the browser. */
@@ -166,6 +229,7 @@ const metricQ = new SyncQueue({
   },
   remove: async (id, o) => classify(await api(`/api/progress/metrics/${id}`, { method: "DELETE", keepalive: o.keepalive })),
   onDrop: () => void refreshBody(true),
+  onSettled: () => refreshBodyPending(),
 });
 
 const photoQ = new SyncQueue({
@@ -180,6 +244,7 @@ const photoQ = new SyncQueue({
   },
   remove: async (id) => classify(await api(`/api/progress/photos/${id}`, { method: "DELETE" })),
   onDrop: () => void refreshBody(true),
+  onSettled: () => refreshBodyPending(),
 });
 
 function diffById<T extends { id: string }>(before: T[], after: T[], q: SyncQueue, removals = true) {
@@ -204,6 +269,7 @@ function track(prev: DB, next: DB) {
       for (const x of next.photos) if (!had.has(x.id)) photoQ.save(x.id);
       for (const id of had) if (!has.has(id)) photoQ.remove(id);
     }
+    refreshBodyPending();
   }
   if (!state.sessionUserId || !trainingLoaded) return;
   diffById(prev.workouts, next.workouts, workoutQ);
@@ -246,7 +312,15 @@ function refreshUnsent() {
   const n = u.save.length + u.remove.length + pendingEnds.length + (workoutQ.settled || u.save.length + u.remove.length ? 0 : 1);
   if (n === unsentN) return;
   unsentN = n;
+  setPending("training", n);
   unsentListeners.forEach((l) => l());
+}
+
+/** How many check-ins and photos have not reached the server yet (for the "waiting to sync" count). */
+function refreshBodyPending() {
+  const m = metricQ.unsent();
+  const p = photoQ.unsent();
+  setPending("checkins", m.save.length + m.remove.length + p.save.length + p.remove.length);
 }
 /** How many changes (workouts, or a finished session) have not reached the server yet. */
 export function useUnsent(): number {
@@ -278,6 +352,11 @@ async function writeOutbox(): Promise<void> {
 function persistOutbox() {
   refreshUnsent();
   if (outboxTimer) clearTimeout(outboxTimer);
+  // With no signal the unsent workout may be the only copy, and the next screen can be a full page load at any moment: write it now.
+  if (!isReachable()) {
+    void writeOutbox();
+    return;
+  }
   outboxTimer = setTimeout(() => void writeOutbox(), 250);
 }
 
@@ -506,6 +585,7 @@ export async function api<T = Record<string, unknown>>(path: string, init: { met
       cache: "no-store",
       keepalive: init.keepalive,
     });
+    reportReachable(true);
     let data: (T & { error?: string; code?: string }) | null = null;
     try {
       data = (await res.json()) as T & { error?: string; code?: string };
@@ -515,6 +595,7 @@ export async function api<T = Record<string, unknown>>(path: string, init: { met
     if (res.status === 402 && typeof window !== "undefined") window.dispatchEvent(new Event("coachflow-billing")); // paused: the paywall will show
     return { ok: res.ok, status: res.status, data: res.ok ? data : null, error: res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`), code: res.ok ? undefined : data?.code };
   } catch {
+    reportReachable(false);
     return { ok: false, status: 0, data: null, error: "Can not reach the server. Check your connection." };
   }
 }
@@ -525,33 +606,45 @@ interface BootstrapData {
   clients: ClientProfile[];
 }
 
-/** Loads the session (if any) and this user's device-local data. Returns true when signed in. */
-async function establishSession(): Promise<boolean> {
-  // A device that was active recently (or has just signed in) is almost certainly still signed in, so everything the first screen
-  // needs is requested at once instead of one after another. Recent workouts come first; the full history follows in the background.
-  const likely = readLastActive() !== null && !isIdleStale();
-  const early = likely ? { training: api<TrainingData>("/api/training?recent=1"), schedule: api<ScheduleData>("/api/schedule"), groups: api<GroupsData>("/api/groups") } : null;
-  const r = await api<BootstrapData>("/api/bootstrap");
-  if (!r.ok || !r.data?.user) {
-    // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
-    if (isIdleStale()) setIdleNotice();
-    if (isIdleStale()) clearActive();
-    setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
-    return false;
-  }
-  const me = r.data.user;
-  const trainingReq = early?.training ?? api<TrainingData>("/api/training?recent=1");
-  const scheduleReq = early?.schedule ?? api<ScheduleData>("/api/schedule");
-  const groupsReq = early?.groups ?? api<GroupsData>("/api/groups");
-  let local: DB | undefined;
+/**
+ * After a good online load, asks the service worker to keep the app's screens (and their scripts) so they open with no signal.
+ * At most every 12 hours; only in the installed/production build, where the service worker runs.
+ */
+function askToSaveScreens() {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator) || process.env.NODE_ENV !== "production") return;
+  const key = "coachflow-screens-saved-3";
+  // A new version of the app has different scripts: its screens are saved again straight away, whatever the 12 hours say.
+  let fingerprint = "0";
   try {
-    local = await get<DB>(localKey(me.id));
+    const srcs = Array.from(document.scripts).map((x) => x.src).filter((x) => x.includes("/_next/static/")).sort().join("|");
+    let h = 0;
+    for (let i = 0; i < srcs.length; i++) h = (h * 31 + srcs.charCodeAt(i)) | 0;
+    fingerprint = String(h);
   } catch {
-    local = undefined;
+    /* keep the default */
   }
-  if (!local || local.version !== DB_VERSION) local = createEmptyDB();
+  try {
+    const [was, at] = (localStorage.getItem(key) ?? "|0").split("|");
+    if (was === fingerprint && Date.now() - Number(at) < 12 * 3_600_000) return;
+  } catch {
+    /* storage unavailable: ask anyway */
+  }
+  // Noted as done only once the service worker has the request, so a worker that isn't running yet is asked again next time.
+  void navigator.serviceWorker.ready
+    .then((reg) => {
+      if (!reg.active) return;
+      reg.active.postMessage({ type: "save-screens" });
+      try {
+        localStorage.setItem(key, `${fingerprint}|${Date.now()}`);
+      } catch {
+        /* ignore */
+      }
+    })
+    .catch(() => undefined);
+}
 
-  // Switching accounts: drop anything queued for the previous one.
+/** Drops everything queued in memory and the "what has been loaded" flags (a new sign-in, or the signal coming back). */
+function resetQueues() {
   outboxFrozen = false;
   pendingEnds = [];
   if (outboxTimer) clearTimeout(outboxTimer);
@@ -567,6 +660,102 @@ async function establishSession(): Promise<boolean> {
   bodyQueueing = false;
   bodySafe = false;
   bodySince = undefined;
+}
+
+/**
+ * The server can't be reached: opens the app from the copy this phone kept at the last load, if the person was signed in recently and
+ * didn't sign out on purpose. Everything they do then (workouts, food, check-ins) is kept on the phone and sent once the signal is back.
+ */
+async function openOffline(): Promise<boolean> {
+  if (readLastActive() === null || isIdleStale()) return false;
+  let snap: Snapshot | undefined;
+  let local: DB | undefined;
+  try {
+    const last = await get<string>(LAST_USER_KEY);
+    if (last) {
+      snap = await get<Snapshot>(snapKey(last));
+      local = await get<DB>(localKey(last));
+    }
+  } catch {
+    return false;
+  }
+  const db = dbFromSnapshot(snap);
+  if (!snap || !db) return false;
+  const me = db.users.find((u) => u.id === snap.userId);
+  if (!me) return false;
+  db.exercises = [...SEED_EXERCISES, ...db.exercises.filter((e) => e.custom || e.global)]; // the built-in library is part of the app, not of the copy
+  resetQueues();
+  // Check-ins and photos still waiting from an earlier visit are on the device copy; keep them alongside the kept ones.
+  if (local && local.version === DB_VERSION) {
+    const haveM = new Set(db.metrics.map((m) => m.id));
+    const haveP = new Set(db.photos.map((x) => x.id));
+    db.metrics = [...db.metrics, ...local.metrics.filter((m) => !haveM.has(m.id))];
+    db.photos = [...db.photos, ...local.photos.filter((x) => !haveP.has(x.id) && x.dataUrl.startsWith("data:"))];
+  }
+  offlineOpen = true;
+  setOfflineOpen(true);
+  bodyQueueing = true; // check-ins made now are queued like workouts
+  trainingLoaded = true;
+  setState({ ready: true, sessionUserId: me.id, db });
+  await restoreOutbox(me.id);
+  void diaryOutbox.bind(api, me.id);
+  snapArmed = true;
+  return true;
+}
+
+/** The signal is back after an offline start: sends what waited, then loads everything from the server the normal way. */
+async function rejoin(): Promise<void> {
+  if (!offlineOpen || rejoining || !state.sessionUserId) return;
+  rejoining = true;
+  try {
+    await Promise.all([exerciseQ.flush(), templateQ.flush(), metricQ.flush(), photoQ.flush()]);
+    await workoutQ.flush();
+    await diaryOutbox.flush();
+    if (persistTimer) clearTimeout(persistTimer);
+    flush(); // this phone's own copy of check-ins and photos still waiting
+    await writeOutbox(); // whatever workout change is still unsent survives the reload below
+    await establishSession();
+  } finally {
+    rejoining = false;
+  }
+}
+
+/** Loads the session (if any) and this user's device-local data. Returns true when signed in. */
+async function establishSession(): Promise<boolean> {
+  // A device that was active recently (or has just signed in) is almost certainly still signed in, so everything the first screen
+  // needs is requested at once instead of one after another. Recent workouts come first; the full history follows in the background.
+  const likely = readLastActive() !== null && !isIdleStale();
+  const early = likely ? { training: api<TrainingData>("/api/training?recent=1"), schedule: api<ScheduleData>("/api/schedule"), groups: api<GroupsData>("/api/groups") } : null;
+  const r = await api<BootstrapData>("/api/bootstrap");
+  if (r.status === 0 && (await openOffline())) return true; // no signal: open from the copy kept on this phone
+  if (!r.ok || !r.data?.user) {
+    // Re-opened after more than 4 hours away: the session has timed out, so say why on the login page.
+    if (isIdleStale()) setIdleNotice();
+    if (isIdleStale()) clearActive();
+    snapArmed = false;
+    offlineOpen = false;
+    setOfflineOpen(false);
+    setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
+    return false;
+  }
+  const me = r.data.user;
+  offlineOpen = false;
+  setOfflineOpen(false);
+  snapArmed = false;
+  void relinkPush(me.id); // phone notifications stay on after an inactivity sign-out
+  const trainingReq = early?.training ?? api<TrainingData>("/api/training?recent=1");
+  const scheduleReq = early?.schedule ?? api<ScheduleData>("/api/schedule");
+  const groupsReq = early?.groups ?? api<GroupsData>("/api/groups");
+  let local: DB | undefined;
+  try {
+    local = await get<DB>(localKey(me.id));
+  } catch {
+    local = undefined;
+  }
+  if (!local || local.version !== DB_VERSION) local = createEmptyDB();
+
+  // Switching accounts: drop anything queued for the previous one.
+  resetQueues();
 
   // A device that has not uploaded its old local data yet does so first, then reads what the server has.
   let migrated = true;
@@ -615,8 +804,13 @@ async function establishSession(): Promise<boolean> {
   }
   void syncBody(); // check-ins and photos, in the background
   void refreshAssignments(); // workouts the coach assigned
+  void diaryOutbox.bind(api, me.id); // food added with no signal goes out now
   if (!(sched.ok && sched.data)) await refreshSchedule();
   if (!(grp.ok && grp.data)) await refreshGroups();
+  snapArmed = serverOk; // from here on the phone keeps a fresh copy for the next time it has no signal
+  scheduleSnapshot();
+  void forgetOtherCopies(me.id);
+  if (serverOk) askToSaveScreens();
   return true;
 }
 
@@ -712,13 +906,34 @@ export async function initStore() {
         void refreshAssignments();
       } else {
         flushTraining(true);
+        void writeOutbox();
       }
     });
-    window.addEventListener("pagehide", () => flushTraining(true));
-    // The signal is back: send what waited (workouts first, then a finished session).
+    window.addEventListener("pagehide", () => {
+      flushTraining(true);
+      // Whatever has not reached the server stays on this phone: written now, not after the usual short wait.
+      if (persistTimer) clearTimeout(persistTimer);
+      flush();
+      void writeOutbox();
+    });
+    // The signal is back: send what waited (workouts first, then a finished session, then food).
     window.addEventListener("online", () => {
+      void api("/api/ping"); // tells the app the server answers (and runs the "back online" steps below)
       flushTraining(false);
       void sendPendingEnds();
+      void diaryOutbox.flush();
+    });
+    // While the server can't be reached, check every few seconds, so a signal that returns without the browser noticing is found.
+    setInterval(() => {
+      if (!isReachable()) void api("/api/ping");
+    }, 8000);
+    onBackOnline(() => {
+      if (offlineOpen) void rejoin();
+      else {
+        flushTraining(false);
+        void sendPendingEnds();
+        void diaryOutbox.flush();
+      }
     });
   }
 }
@@ -776,8 +991,19 @@ export async function loginResult(username: string, password: string, stayHere =
   return { error: ok ? null : "Signed in, but your account could not be loaded. Please try again." };
 }
 
-export async function logout() {
+/** The server has just started a session for this browser (the emailed link, a finished sign-up, Google). Loads everything; true when it worked. */
+export async function adoptSession(): Promise<boolean> {
+  markActive(); // tells establishSession that this device is signed in, so it can load everything at once
+  const ok = await establishSession();
+  if (!ok) clearActive();
+  return ok;
+}
+
+/** Signs out. `idle` = the inactivity timeout (phone notifications stay on); a sign-out on purpose also stops them on this device. */
+export async function logout(opts: { idle?: boolean } = {}) {
+  const leaving = state.sessionUserId;
   if (persistTimer) clearTimeout(persistTimer);
+  snapArmed = false; // a late timer must not write a copy after this
   // Make sure nothing typed in the last moment is lost before the session ends.
   await Promise.all([exerciseQ.flush(), templateQ.flush(), metricQ.flush(), photoQ.flush()]);
   await workoutQ.flush();
@@ -797,6 +1023,13 @@ export async function logout() {
   bodyQueueing = false;
   bodySafe = false;
   bodySince = undefined;
+  if (leaving && !opts.idle) {
+    await forgetPushOnSignOut(leaving);
+    await forgetOfflineCopy(leaving); // a sign-out on purpose also removes the copy kept for opening with no signal
+  }
+  diaryOutbox.unbind();
+  offlineOpen = false;
+  resetSyncStatus();
   await api("/api/auth/logout", { method: "POST", body: {} });
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
 }
@@ -1386,6 +1619,7 @@ export function deletePhoto(id: string) {
 interface RulesData {
   sessionMinutes: number;
   noticeHours: number;
+  lateCancelCharge?: boolean;
   autoConfirm: boolean;
   allowCustomGym: boolean;
   utcOffsetMin?: number;
@@ -1406,12 +1640,12 @@ interface ScheduleData {
 
 /** The parts of the local database that come from the schedule endpoint. */
 function scheduleSlice(db: DB, data: ScheduleData): Pick<DB, "gyms" | "slots" | "bookings" | "settings"> {
-  const { sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
+  const { sessionMinutes, noticeHours, lateCancelCharge = false, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties = [], sports = [] } = data.settings;
   return {
     gyms: data.gyms,
     slots: data.slots,
     bookings: data.bookings,
-    settings: { ...db.settings, sessionMinutes, noticeHours, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
+    settings: { ...db.settings, sessionMinutes, noticeHours, lateCancelCharge, autoConfirm, allowCustomGym, travelEnabled, travelDefaultMin, travelParkingMin, travelMaxMin, specialties, sports },
   };
 }
 
@@ -1523,6 +1757,15 @@ export async function cancelBookingAs(id: string, role: Role): Promise<string | 
   if (!r.ok || !r.data) return r.error ?? "Could not cancel the session.";
   replaceBooking(r.data.booking);
   if (state.db.settings.emailInvites !== false) void sendInvite(r.data.booking, state.db, "CANCEL", role === "CLIENT" ? "TRAINER" : "CLIENT");
+  return null;
+}
+
+/** The coach forgives a late cancellation: the client's session credit goes back. */
+export async function waiveLateCancel(id: string): Promise<string | null> {
+  const r = await api<{ booking: Booking }>(`/api/bookings/${id}`, { method: "PATCH", body: { action: "waive" } });
+  if (!r.ok || !r.data) return r.error ?? "Could not waive it.";
+  replaceBooking(r.data.booking);
+  void refreshAccounts();
   return null;
 }
 
@@ -1833,7 +2076,7 @@ export async function fetchCreditLog(clientId?: string): Promise<{ stats: Attend
 
 /* ---------------- Settings ---------------- */
 let rulesTimer: ReturnType<typeof setTimeout> | undefined;
-const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
+const RULE_KEYS: (keyof AppSettings)[] = ["sessionMinutes", "noticeHours", "lateCancelCharge", "autoConfirm", "allowCustomGym", "travelEnabled", "travelDefaultMin", "travelParkingMin", "travelMaxMin", "specialties", "sports"];
 
 /** Booking rules live on the server (shared with clients); everything else (brand, rest timer, email toggles) stays on this device. */
 function pushRules() {
@@ -1843,6 +2086,7 @@ function pushRules() {
     body: {
       sessionMinutes: s.sessionMinutes,
       noticeHours: s.noticeHours,
+      lateCancelCharge: s.lateCancelCharge === true,
       autoConfirm: s.autoConfirm,
       allowCustomGym: s.allowCustomGym,
       travelEnabled: s.travelEnabled,

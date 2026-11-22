@@ -162,7 +162,7 @@ export const PATCH = route<Ctx>(async (req, ctx) => {
     }
     case "removeMember": {
       const clientId = str(body.clientId, "Client", { max: 80 });
-      await leaveGroup(g, clientId);
+      await leaveGroup(g, clientId, { byClient: false });
       await notify([clientId], "group_removed", { title: "Removed from a class", body: `Your coach removed you from “${det.title}”. No group credit was used.`, link: "/book" });
       return out();
     }

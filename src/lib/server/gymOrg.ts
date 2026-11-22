@@ -9,6 +9,8 @@ import { db } from "./db";
 import { badRequest, conflict, email as parseEmail, forbidden, notFound, str } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
 import { notify } from "./groups";
+import { billingEnforced } from "./billing";
+import { coverCoach, gymBlocked } from "./gymPlan";
 import { hit } from "./rateLimit";
 import {
   coachSettings,
@@ -24,7 +26,6 @@ import {
   users,
   type UserRow,
 } from "./schema";
-import { trialEnforced } from "./trial";
 
 /*
  * A gym is run by a coach who owns it (a normal coach account). Everyone else joins with the gym's 6-digit code (the gym approves them)
@@ -118,7 +119,7 @@ export async function gymInfoFor(userId: string): Promise<GymInfo | undefined> {
     logoV: m.gym.logoV,
     bannerV: m.gym.bannerV,
     theme: m.gym.theme,
-    ...(t ? { trial: { endsAt: t.toISOString(), daysLeft: trialDaysLeft(t) ?? 0, expired: trialOver(t), enforced: trialEnforced() } } : {}),
+    ...(t ? { trial: { endsAt: t.toISOString(), daysLeft: trialDaysLeft(t) ?? 0, expired: trialOver(t), enforced: billingEnforced() } } : {}),
   };
 }
 
@@ -148,7 +149,8 @@ export async function peopleWith(gymId: string, perm: GymPerm): Promise<string[]
 export async function gymTrialBlocks(userId: string): Promise<boolean | null> {
   const m = await membershipOf(userId);
   if (!m || m.member.status !== "ACTIVE") return null;
-  return trialEnforced() && trialOver(m.gym.trialEndsAt);
+  // The gym's own plan decides (free month, subscription, grace after a failed payment); only once BILLING_ENFORCED=1.
+  return gymBlocked(m.gym);
 }
 
 /* ---------------- Creating a gym ---------------- */
@@ -233,6 +235,7 @@ export async function joinWithCode(user: UserRow, code: unknown): Promise<{ stat
     await d.insert(gymMembers).values({ gymId: gym.id, userId: user.id, roleId: inviteRole.id, status: "ACTIVE", joinedAt: new Date() });
     await d.delete(gymInvites).where(eq(gymInvites.id, invite.id));
     await applyDefaults(user.id, gym);
+    void coverCoach(user.id, gym); // a paying gym covers them: their own subscription stops renewing
     await audit(gym.id, user.id, "joined", `${nameOf(user)} joined by invitation as ${inviteRole.name}`);
     await notify(await peopleWith(gym.id, "coaches.manage"), "gym_joined", { title: "A coach joined your gym", body: `${nameOf(user)} joined ${gym.name} as ${inviteRole.name}.`, link: "/gym-admin" }, { email: false });
     return { status: "ACTIVE", gymName: gym.name };
@@ -328,6 +331,7 @@ export async function approveMember(m: Membership, actor: UserRow, userId: strin
   const d = await db();
   await d.update(gymMembers).set({ status: "ACTIVE", roleId: role.id, joinedAt: new Date() }).where(and(eq(gymMembers.gymId, m.gym.id), eq(gymMembers.userId, userId)));
   await applyDefaults(userId, m.gym);
+  void coverCoach(userId, m.gym);
   await audit(m.gym.id, actor.id, "approved", `${nameOf(user)} as ${role.name}`);
   await notify([userId], "gym_approved", { title: `Welcome to ${m.gym.name}`, body: `${m.gym.name} approved you as ${role.name}. The gym's theme, niches and locations were added to your account; you can change any of them.`, link: "/settings/coaching" });
 }
@@ -491,7 +495,7 @@ export async function gymSettings(gym: GymRow): Promise<GymSettings> {
     logoV: gym.logoV,
     bannerV: gym.bannerV,
     status: gym.status,
-    ...(t ? { trial: { endsAt: t.toISOString(), daysLeft: trialDaysLeft(t) ?? 0, expired: trialOver(t), enforced: trialEnforced() } } : {}),
+    ...(t ? { trial: { endsAt: t.toISOString(), daysLeft: trialDaysLeft(t) ?? 0, expired: trialOver(t), enforced: billingEnforced() } } : {}),
     branches: branches.map((b) => ({ id: b.id, name: b.name, address: b.address })),
   };
 }

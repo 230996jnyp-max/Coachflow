@@ -7,6 +7,7 @@ import { NumberInput } from "@/components/NumberInput";
 import { Button, Field, Input, Modal, Notice, Segmented, Tabs, Textarea } from "@/components/ui";
 import { searchCommonFoods } from "@/lib/commonFoods";
 import { MEALS, recentFoods, sumMacros, type Candidate, type DietaryProfile, type FoodEntry, type MealType, type PackagedFood } from "@/lib/nutrition";
+import { useSyncStatus } from "@/lib/syncStatus";
 import { candidateFromCommon, candidateFromEntry, candidateFromEstimate, candidateFromPackaged, estimateFood, lookupBarcode, manualCandidate, saveCandidates, searchPackaged, shrinkImage } from "@/lib/nutritionClient";
 import { FoodEditor } from "./FoodEditor";
 import { Scanner } from "./Scanner";
@@ -16,7 +17,9 @@ type Add = (list: Candidate[], opts?: { review?: boolean; note?: string }) => vo
 
 /** Add food to a day: from a photo, a few words, a search, a barcode, a recent food or by typing the numbers. Everything ends in one review step. */
 export function AddFood({ day, initialMeal, entries, profile, onClose, onSaved }: { day: string; initialMeal: MealType; entries: FoodEntry[]; profile: Pick<DietaryProfile, "diets" | "allergies">; onClose: () => void; onSaved: () => void }) {
-  const [tab, setTab] = useState<Tab>("photo");
+  const { online } = useSyncStatus();
+  // With no signal the photo, describe and scan tabs (they ask the server) can't work, so it opens on the built-in foods.
+  const [tab, setTab] = useState<Tab>(() => (online ? "photo" : "search"));
   const [basket, setBasket] = useState<Candidate[]>([]);
   const [review, setReview] = useState(false);
   const [note, setNote] = useState("");
@@ -81,6 +84,7 @@ export function AddFood({ day, initialMeal, entries, profile, onClose, onSaved }
               { value: "manual", label: "Manual", icon: <Keyboard size={16} /> },
             ]}
           />
+          {!online && (tab === "photo" || tab === "describe" || tab === "scan") && <Notice>No signal. This needs the server. Search (the built-in foods), Recent and Manual work offline, and what you save waits on your phone until you are back online.</Notice>}
           {tab === "photo" && <PhotoTab meal={meal} onAdd={add} />}
           {tab === "describe" && <DescribeTab meal={meal} onAdd={add} />}
           {tab === "search" && (

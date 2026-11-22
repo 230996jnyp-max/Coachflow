@@ -26,14 +26,15 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "lucide-react": "^1.59.0",
-    "next": "16.4.2",
+    "next": "16.4.6",
     "nodemailer": "^10.1.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
     "stripe": "^23.1.0",
-    "unpdf": "^1.9.1"
+    "unpdf": "^1.9.1",
+    "web-push": "^4.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10",
@@ -42,8 +43,9 @@
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

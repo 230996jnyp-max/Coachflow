@@ -4,6 +4,7 @@ import { Bell, Compass, KeyRound, LifeBuoy, Mail, MapPin, Moon, Pencil, Plus, Tr
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
+import { ConnectedSignIn } from "./ConnectedSignIn";
 import { GymAffiliation } from "@/components/gym/GymAffiliation";
 import { HaveACoachCard } from "@/components/coachlink/CoachLink";
 import { FormPreviewModal, FormsPreviewRows } from "@/components/intake/FormsPreview";
@@ -11,6 +12,7 @@ import { HomeAddressField } from "@/components/HomeAddressField";
 import { InstallButton } from "@/components/InstallButton";
 import { InviteStatus, SyncAllButton } from "@/components/booking/CalendarActions";
 import { NumberInput } from "@/components/NumberInput";
+import { PhoneNotifications } from "./PhoneNotifications";
 import { SpecialtiesCard } from "@/components/sports/Focus";
 import { ThemePicker } from "@/components/ThemeSwitcher";
 import { UsernameField } from "@/components/UsernameField";
@@ -70,6 +72,7 @@ export function ProfileSection() {
             <KeyRound size={16} /> Change password
           </Button>
         </Link>
+        <ConnectedSignIn />
       </Block>
       {!isTrainer && !isPersonal && (
         <Block title="Home address">
@@ -134,6 +137,8 @@ export function NotificationsSection() {
           )}
         </div>
       </Block>
+
+      <PhoneNotifications />
 
       <Block title="Quiet hours" hint="No pop-ups or sounds between these times. Messages still arrive and show as unread.">
         <Toggle checked={!!quiet} onChange={(on) => savePrefs({ quiet: on ? { from: "22:00", to: "07:00" } : null })} label="Keep quiet at night" />
@@ -299,13 +304,17 @@ export function CoachingSection() {
             <Field label="Session length (minutes)">
               <NumberInput commitOnBlur label="Session length (minutes)" min={15} max={480} step={15} value={s.sessionMinutes} onChange={(v) => updateSettings({ sessionMinutes: v ?? s.sessionMinutes })} />
             </Field>
-            <Field label="Minimum notice (hours)" hint="Clients can’t book or cancel inside this window.">
+            <Field label="Minimum notice (hours)" hint={s.lateCancelCharge ? "Clients can’t book inside this window. They can still cancel, and it uses a credit." : "Clients can’t book or cancel inside this window."}>
               <NumberInput commitOnBlur label="Minimum notice (hours)" min={0} max={720} value={s.noticeHours} onChange={(v) => updateSettings({ noticeHours: v ?? s.noticeHours })} />
             </Field>
             <Field label="Default rest timer (seconds)">
               <NumberInput commitOnBlur label="Default rest timer (seconds)" min={15} max={600} step={15} value={s.restSeconds} onChange={(v) => updateSettings({ restSeconds: v ?? s.restSeconds })} />
             </Field>
           </div>
+          <Toggle checked={s.lateCancelCharge === true} onChange={(v) => updateSettings({ lateCancelCharge: v })} label="Late cancellation uses a session credit (instead of blocking it)" />
+          <p className="-mt-2 text-xs text-muted">
+            Inside your notice window a client can still cancel, but they are told first and 1 credit is used. You get a note and can waive it from the cancelled session.
+          </p>
           <Toggle checked={s.autoConfirm} onChange={(v) => updateSettings({ autoConfirm: v })} label="Auto-confirm client bookings (off = require trainer approval)" />
           <Toggle checked={s.allowCustomGym} onChange={(v) => updateSettings({ allowCustomGym: v })} label="Let clients enter a custom gym / condo address" />
           <div className="space-y-3 rounded-xl border border-line p-3">

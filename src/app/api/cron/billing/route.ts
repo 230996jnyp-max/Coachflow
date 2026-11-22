@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { sendTrialReminders } from "@/lib/server/billing";
+import { sweep } from "@/lib/server/consult";
+import { sendGymReminders } from "@/lib/server/gymPlan";
+import { retryPendingRewards } from "@/lib/server/referrals";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,5 +21,8 @@ function authorised(req: Request): boolean {
 export async function GET(req: Request) {
   if (!authorised(req)) return NextResponse.json({ error: "Not allowed." }, { status: 401 });
   const sent = await sendTrialReminders(process.env.APP_URL || new URL(req.url).origin);
-  return NextResponse.json({ ok: true, ...sent });
+  const rewards = await retryPendingRewards(); // referral free months that could not be given yet
+  const gyms = await sendGymReminders(process.env.APP_URL || new URL(req.url).origin); // gym free month ending, failed payment grace running out
+  const consults = await sweep(true); // consult holds nobody took, hours that ended, trainer shares now due
+  return NextResponse.json({ ok: true, ...sent, rewards, gyms, consults });
 }

@@ -71,6 +71,8 @@ export interface ClientProfile {
   coachId: string;
   /** Remaining group-class credits (separate from the 1-on-1 package). Used when a class is completed. */
   groupClassCredits: number;
+  /** The last day the package can be used (yyyy-MM-dd), set by the coach. */
+  packageExpires?: string;
   /** Where the coach trains this client at home (a picked map place, or typed text when maps are unavailable). Private: only the client and their coach see it. */
   homePlace?: PlaceInfo;
   homeText?: string;
@@ -414,6 +416,8 @@ export interface AppSettings {
   sessionMinutes: number;
   /** Minimum hours before a session that a client may book or cancel. */
   noticeHours: number;
+  /** Inside the notice window a client can still cancel, and one session credit is used. */
+  lateCancelCharge: boolean;
   autoConfirm: boolean;
   allowCustomGym: boolean;
   /** Travel buffer between sessions at different locations (see lib/travel.ts). */
@@ -579,6 +583,8 @@ export interface Assignment {
   exercises: TemplateExercise[];
   /** The coach ticked it off by hand (for example it was done on the gym floor, which is logged separately). */
   doneManually?: boolean;
+  /** Set when it came from a program: which one, and which week and day of it. */
+  program?: { enrolmentId: string; programId: string; name: string; week: number; day: number };
   createdAt: string;
 }
 

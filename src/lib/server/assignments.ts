@@ -29,15 +29,35 @@ const FUTURE_DAYS = 180;
 const LOAD_PAST_DAYS = 100;
 const LOAD_FUTURE_DAYS = 200;
 
-interface Plan {
+/** Where an assignment came from when it belongs to a program (see programs.ts). `locked` = the coach changed this day by hand, so Live Sync leaves it alone. */
+export interface ProgRef {
+  enrolmentId: string;
+  programId: string;
+  name: string;
+  week: number;
+  day: number;
+  slotId: string;
+  locked?: boolean;
+}
+
+export interface Plan {
   title: string;
   note: string;
   templateId?: string;
   exercises: TemplateExercise[];
   doneManually?: boolean;
+  prog?: ProgRef;
 }
 
-type Row = typeof assignments.$inferSelect;
+export type Row = typeof assignments.$inferSelect;
+
+export function openPlan(row: Row): Plan | null {
+  try {
+    return decryptJson<Plan>(row.dataEnc, aad(row.id));
+  } catch {
+    return null;
+  }
+}
 
 function open(row: Row): Assignment | null {
   try {
@@ -52,6 +72,7 @@ function open(row: Row): Assignment | null {
       ...(row.seriesId ? { seriesId: row.seriesId } : {}),
       exercises: p.exercises ?? [],
       ...(p.doneManually ? { doneManually: true } : {}),
+      ...(p.prog ? { program: { enrolmentId: p.prog.enrolmentId, programId: p.prog.programId, name: p.prog.name, week: p.prog.week, day: p.prog.day } } : {}),
       createdAt: row.createdAt.toISOString(),
     };
   } catch (e) {
@@ -60,7 +81,8 @@ function open(row: Row): Assignment | null {
   }
 }
 
-const shift = (days: number) => dayKey(new Date(Date.now() + days * 86_400_000));
+export const shift = (days: number) => dayKey(new Date(Date.now() + days * 86_400_000));
+export { FUTURE_DAYS, MAX_PER_CLIENT, PAST_DAYS };
 
 function checkDate(v: unknown): string {
   const date = realDate(v, "The day");
@@ -160,7 +182,7 @@ export async function updateAssignment(me: UserRow, id: string, patch: { date?: 
   const a = open(row);
   if (!a) throw notFound("That workout is gone.");
   const d = await db();
-  const plan: Plan = { title: a.title, note: a.note, templateId: a.templateId, exercises: a.exercises, doneManually: a.doneManually };
+  const plan: Plan = { title: a.title, note: a.note, templateId: a.templateId, exercises: a.exercises, doneManually: a.doneManually, ...(openPlan(row)?.prog ? { prog: openPlan(row)!.prog } : {}) };
   let date = row.date;
   if (patch.date !== undefined) {
     date = checkDate(patch.date);
@@ -174,6 +196,8 @@ export async function updateAssignment(me: UserRow, id: string, patch: { date?: 
     if (typeof patch.doneManually !== "boolean") throw badRequest("Done must be true or false.");
     plan.doneManually = patch.doneManually || undefined;
   }
+  // A day the coach changed by hand is theirs: Live Sync will not rewrite it.
+  if (plan.prog && (patch.note !== undefined || date !== row.date)) plan.prog = { ...plan.prog, locked: true };
   await d
     .update(assignments)
     .set({ date, dataEnc: encryptJson(plan, aad(id)), updatedAt: new Date() })
@@ -231,3 +255,17 @@ export async function purgeClientAssignments(clientId: string): Promise<void> {
   await d.delete(assignments).where(eq(assignments.clientId, clientId));
 }
 
+
+/** Adds one assignment row for a plan (used by programs). Returns its id. */
+export async function insertPlanRow(clientId: string, coachId: string, date: string, plan: Plan): Promise<string> {
+  const d = await db();
+  const id = `as_${randomUUID()}`;
+  await d.insert(assignments).values({ id, clientId, coachId, date, seriesId: null, dataEnc: encryptJson(plan, aad(id)) });
+  return id;
+}
+
+/** Rewrites an assignment row's plan (and day). Used by Live Sync and by approved suggestions. */
+export async function rewritePlanRow(row: Row, plan: Plan, date?: string): Promise<void> {
+  const d = await db();
+  await d.update(assignments).set({ date: date ?? row.date, dataEnc: encryptJson(plan, aad(row.id)), updatedAt: new Date() }).where(eq(assignments.id, row.id));
+}

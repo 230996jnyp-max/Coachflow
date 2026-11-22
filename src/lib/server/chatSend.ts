@@ -5,9 +5,17 @@ import { bodyAad, contactEmail, displayName, hydrate, roleLabel } from "./chat";
 import { encrypt, encryptJson } from "./crypto";
 import { db } from "./db";
 import { escapeHtml, layout, sendMail } from "./mail";
+import { sendPush } from "./push";
 import { messages, type UserRow } from "./schema";
 
 export type EmailMeta = NonNullable<ChatMessage["email"]>;
+
+/** Pushes "new message from …" to a phone. It says who wrote, never what (a lock screen can be read by anyone). */
+export function pushNewMessage(from: UserRow, toIds: string[], thread: string, broadcast = false): void {
+  const name = displayName(from);
+  const who = from.role === "OWNER" ? `${name} (App Owner)` : from.role === "COACH" ? `Coach ${name.replace(/^Coach\s+/i, "")}` : name;
+  void sendPush(toIds, { title: broadcast ? `Announcement from ${who}` : `New message from ${who}`, body: "Open CoachFlow to read it.", url: "/messages", tag: `chat:${thread}` });
+}
 
 /** Emails `to` a notification that `from` wrote to them. Never throws; returns delivery metadata. */
 export async function notifyByEmail(opts: { from: UserRow; to: UserRow; text: string; origin: string; broadcast?: boolean }): Promise<EmailMeta> {

@@ -27,7 +27,7 @@ export function IdleGuard() {
       if (signingOut) return;
       signingOut = true;
       setIdleNotice();
-      await logout(); // saves any pending workout edits first, then ends the session
+      await logout({ idle: true }); // saves any pending workout edits first, then ends the session
       window.location.replace("/login");
     };
 

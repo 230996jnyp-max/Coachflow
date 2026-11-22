@@ -6,7 +6,7 @@
 export const GYM_PERMS = [
   { id: "schedule.view", label: "See the master schedule", hint: "Every coach's sessions and classes, first names and workouts." },
   { id: "schedule.manage", label: "Run the schedule", hint: "Create classes, arrange cover, move clients between coaches." },
-  { id: "hours.view", label: "See hours and payroll", hint: "Completed hours per coach, and the CSV download." },
+  { id: "hours.view", label: "See hours, payroll and coach performance", hint: "Completed hours per coach and the CSV download, plus each coach's attendance, client retention and activity (counts only)." },
   { id: "coaches.manage", label: "Manage the team", hint: "Approve join requests, invite and remove people, set rates, regenerate the gym code." },
   { id: "branding.manage", label: "Change branding and defaults", hint: "Name, logo, banner, theme, niches, locations and halls." },
   { id: "roles.manage", label: "Manage roles", hint: "Create roles and choose who has which." },

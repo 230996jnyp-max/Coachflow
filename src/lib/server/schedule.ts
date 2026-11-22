@@ -12,6 +12,8 @@ import { attendance, bookings, coachSettings, groupSessions, gyms, slots, users,
 export interface Rules extends TravelRules {
   sessionMinutes: number;
   noticeHours: number;
+  /** Inside the notice window a client can still cancel, and one session credit is used. */
+  lateCancelCharge: boolean;
   autoConfirm: boolean;
   allowCustomGym: boolean;
   /** Coach's UTC offset in minutes (Singapore = 480); positions availability windows. */
@@ -24,6 +26,7 @@ export interface Rules extends TravelRules {
 export const DEFAULT_RULES: Rules = {
   sessionMinutes: 60,
   noticeHours: 12,
+  lateCancelCharge: false,
   autoConfirm: true,
   allowCustomGym: true,
   utcOffsetMin: 480,
@@ -105,6 +108,7 @@ export async function rulesFor(coachId: string): Promise<Rules> {
     ? {
         sessionMinutes: r.sessionMinutes,
         noticeHours: r.noticeHours,
+        lateCancelCharge: r.lateCancelCharge,
         autoConfirm: r.autoConfirm,
         allowCustomGym: r.allowCustomGym,
         utcOffsetMin: r.utcOffsetMin,

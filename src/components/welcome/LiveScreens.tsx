@@ -190,3 +190,42 @@ export function LiveClients() {
     </div>
   );
 }
+
+const GYM_DAYS = [0.5, 0.58, 0.55, 0.62, 0.6, 0.8, 0.4];
+
+/** A gym owner's overview. The week's session count goes up as the coach's phone logs one, and a class is flagged as full. */
+export function LiveGym() {
+  return (
+    <div className="lv" aria-hidden="true">
+      <div className="lv-in">
+        <Bar />
+        <div className="lv-head">
+          <strong>Gym overview</strong>
+          <small>6 coaches, this week</small>
+        </div>
+        <div className="lv-tiles">
+          <div className="lv-tile">
+            <small>Sessions</small>
+            <span className="lv-swap lv-big">
+              <b className="lv-v1">212</b>
+              <b className="lv-v2">213</b>
+              <b className="lv-v3">214</b>
+            </span>
+          </div>
+          <div className="lv-tile">
+            <small>Classes full</small>
+            <span className="lv-big lv-amber">78%</span>
+          </div>
+        </div>
+        <div className="lv-chart-title">Sessions by day</div>
+        <div className="lv-chart">
+          {GYM_DAYS.map((h, i) => (
+            <i key={i} style={{ transform: `scaleY(${h})` }} />
+          ))}
+          <i className="lv-grow" />
+        </div>
+        <div className="lv-toast lv-toast-green">Saturday 9 am is full</div>
+      </div>
+    </div>
+  );
+}

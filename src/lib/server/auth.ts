@@ -138,7 +138,7 @@ export async function requireUser(roles?: DbRole[], opts: { skipBilling?: boolea
   const { gymTrialBlocks } = await import("./gymOrg");
   const byGym = u.role === "COACH" ? await gymTrialBlocks(u.id) : null;
   if (byGym !== null) {
-    if (byGym) throw new HttpError(402, "Your gym's free month has ended. Subscriptions are opening soon.", "trial_over");
+    if (byGym) throw new HttpError(402, "Your gym is paused until its subscription is renewed. Ask your gym owner.", "gym_paused");
   } else if (u.role === "COACH" || (u.role === "CLIENT" && u.coachId)) {
     await assertBillingOk(u);
   } else if (trialBlocked(u)) {

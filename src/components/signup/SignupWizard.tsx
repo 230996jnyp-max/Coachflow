@@ -2,17 +2,20 @@
 
 import { ArrowLeft, ArrowRight, Building2, Check, Dumbbell, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NumberInput } from "@/components/NumberInput";
 import { ThemeMenu } from "@/components/ThemeSwitcher";
 import { Button, Card, Field, Input, Notice, Segmented, Select, Textarea } from "@/components/ui";
 import { CATALOG } from "@/lib/gyms";
 import { cleanGymCode } from "@/lib/gymPerms";
+import { cleanReferralCode } from "@/lib/referral";
 import { checkAge, cleanCoachCode, CLIENT_GOALS, coachTitle, LEVELS, PERSONAL_GOALS, TRIAL_DAYS, WEEKLY_TARGETS, type Level, type SignupRole } from "@/lib/signupRules";
 import { CORE_SPORTS, sportLabel } from "@/lib/sports";
-import { api } from "@/lib/store";
+import { adoptSession, api } from "@/lib/store";
 import { cn, lengthUnit, toKg, weightUnit } from "@/lib/utils";
 import { Captcha } from "./Captcha";
+import { providerLabel, SocialButtons, socialMessage } from "./SocialButtons";
 
 const BLURB: Record<string, string> = {
   "Strength & Gym": "Hypertrophy and general fitness",
@@ -60,7 +63,7 @@ const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
-export function SignupWizard({ initialRole = null, initialGymCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string }) {
+export function SignupWizard({ initialRole = null, initialGymCode = "", initialRef = "", initialCoachCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string; initialRef?: string; initialCoachCode?: string }) {
   // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
   const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
@@ -96,12 +99,21 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
   const [gymName, setGymName] = useState("");
   // A gym code from an invitation link (?gym=123456), or typed here. Looked up as soon as it is complete.
   const [gymCode, setGymCode] = useState(cleanGymCode(initialGymCode) ?? "");
+  // A referral code from an invitation link (?ref=CF7K4Q9P), or typed here. Looked up as soon as it is complete.
+  const [refCode, setRefCode] = useState(cleanReferralCode(initialRef) ?? "");
+  const [refFound, setRefFound] = useState<string | null>(null);
+  // What kind of code it is (a coach's, a client's or a solo user's) and, for a client's, the coach the friend will join.
+  const [refKind, setRefKind] = useState<"COACH" | "CLIENT" | "SOLO" | null>(null);
+  const [refCoach, setRefCoach] = useState<string | null>(null);
+  const [refError, setRefError] = useState<string | null>(null);
   const [gymFound, setGymFound] = useState<string | null>(null);
   const [gymError, setGymError] = useState<string | null>(null);
   const [gymChoice, setGymChoice] = useState<string[]>([]);
   const [gymText, setGymText] = useState("");
   // A coach code typed on the welcome page arrives through this tab's session storage (once). It is looked up below so the coach's name shows.
   const [code, setCode] = useState(() => {
+    // A coach's public page link (?coach=123456) brings the code with it.
+    if (initialCoachCode) return cleanCoachCode(initialCoachCode) ?? "";
     if (typeof window === "undefined") return "";
     try {
       const v = sessionStorage.getItem("cf_signup_coach_code") ?? "";
@@ -122,7 +134,12 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
   const [captcha, setCaptcha] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ email: string; role: SignupRole } | null>(null);
+  // `wait` is a secret only this browser holds: it lets this screen move on by itself once the email is confirmed (on any device).
+  const [done, setDone] = useState<{ email: string; role: SignupRole; wait?: string } | null>(null);
+  const router = useRouter();
+  // Came back from Google, Facebook or Microsoft with no account yet: their name and email are filled in and the password is skipped.
+  const [social, setSocial] = useState<{ provider: string; email: string; trusted: boolean } | null>(null);
+  const [socialNote, setSocialNote] = useState<ReturnType<typeof socialMessage>>(null);
   const [resent, setResent] = useState(false);
 
   // A code that came from the welcome page is checked straight away, so step 3 already names the coach.
@@ -138,6 +155,24 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
       alive = false;
     };
     // Only for the code present when the form opens; typing a code is handled by onCode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A referral code that came in with the address is checked straight away, so step 3 already names who invited them.
+  useEffect(() => {
+    if (!refCode) return;
+    let alive = true;
+    void api<{ name: string; kind: "COACH" | "CLIENT" | "SOLO"; coachName?: string }>("/api/signup/referral", { body: { code: refCode } }).then((r) => {
+      if (!alive) return;
+      if (r.ok && r.data) {
+        setRefFound(r.data.name);
+        setRefKind(r.data.kind);
+        setRefCoach(r.data.coachName ?? null);
+      } else setRefError(r.error ?? "We couldn't find that referral code.");
+    });
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -160,6 +195,60 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [step, done]);
+
+  // Once the emailed link has been opened (here or on a phone), this page is signed in and goes straight into the app.
+  const waitSecret = done?.wait;
+  useEffect(() => {
+    if (!waitSecret) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const r = await api<{ status: string; role?: string }>("/api/auth/signup-status", { body: { wait: waitSecret } });
+      if (!live) return;
+      if (r.ok && r.data?.status === "ok") {
+        if (await adoptSession()) router.replace(r.data.role === "COACH" ? "/trainer" : "/home");
+        return;
+      }
+      // Still waiting: ask again shortly. Anything else (expired, an error): stop; the resend button and the sign-in link are still here.
+      if (r.ok && r.data?.status === "waiting") timer = setTimeout(poll, 4000);
+    };
+    timer = setTimeout(poll, 3000);
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [waitSecret, router]);
+
+  // Back from a provider: pick up who they are (keeping anything already typed), or say why it did not finish.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const code = q.get("social");
+    if (!code) return;
+    let live = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!live) return;
+      if (code !== "1") {
+        setSocialNote(socialMessage(code, q.get("provider")));
+        return;
+      }
+      const r = await api<{ pending: { provider: string; email: string; name: string; trusted: boolean; username: string } | null }>("/api/auth/social/pending");
+      if (!live) return;
+      const p = r.ok ? r.data?.pending : null;
+      if (!p) {
+        setSocialNote(socialMessage("error", null));
+        return;
+      }
+      setSocial({ provider: p.provider, email: p.email, trusted: p.trusted });
+      setFullName((v) => v || p.name);
+      setEmail(p.email);
+      setUsername((v) => v || p.username);
+      setSocialNote(q.get("from") === "login" ? { tone: "info", text: `You don't have a CoachFlow account yet. Let's finish setting you up with ${providerLabel(p.provider)}.` } : null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const age = dob ? checkAge(dob) : null;
   const toggle = (set: React.Dispatch<React.SetStateAction<string[]>>, k: string, max = 6) => set((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : cur.length >= max ? cur : [...cur, k]));
@@ -191,14 +280,33 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     if (taken.username) return "That username is taken. Try another.";
     if (!EMAIL_RE.test(email.trim())) return "Enter a valid email address.";
     if (taken.email) return "That email can't be used (it already has an account, or it's a temporary mailbox).";
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return "Password: at least 8 characters with a letter and a number.";
-    if (password !== confirm) return "The two passwords don't match.";
+    if (!social && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return "Password: at least 8 characters with a letter and a number.";
+    if (!social && password !== confirm) return "The two passwords don't match.";
     if (phone.replace(/\D/g, "").length < 6) return "Enter your phone / WhatsApp number.";
     if (!dob) return "Enter your date of birth.";
     if (age && !age.ok) return age.error;
     if (age && age.ok && age.needsGuardian && !guardian) return "Under 18s need a parent or guardian's OK. Tick the box to confirm.";
     if (!terms) return "Accept the Terms and the Privacy Policy to continue.";
     return null;
+  };
+
+  const onRefCode = (v: string) => {
+    const typed = v.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12);
+    setRefCode(typed);
+    setRefFound(null);
+    setRefKind(null);
+    setRefCoach(null);
+    setRefError(null);
+    const clean = cleanReferralCode(typed);
+    if (clean) {
+      void api<{ name: string; kind: "COACH" | "CLIENT" | "SOLO"; coachName?: string }>("/api/signup/referral", { body: { code: clean } }).then((r) => {
+        if (r.ok && r.data) {
+          setRefFound(r.data.name);
+          setRefKind(r.data.kind);
+          setRefCoach(r.data.coachName ?? null);
+        } else setRefError(r.error ?? "We couldn't find that referral code.");
+      });
+    }
   };
 
   const onGymCode = (v: string) => {
@@ -214,19 +322,55 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     }
   };
 
+  // A friend invited by a client joins that client's coach, so no coach code is needed.
+  const viaClient = role === "CLIENT" && !!refFound && refKind === "CLIENT" && !!refCoach;
+
+  /** The optional invitation-code box, worded for the kind of sign-up. */
+  const referralField = () => {
+    const hint = role === "CLIENT" ? "Invited by a friend who trains with the same coach? Enter their code and you won't need your coach's code." : role === "PERSONAL" ? "Invited by a friend who trains on their own? Enter their code and you both get something: you start with an extra 30 days free." : "Invited by another coach? Enter their code (it looks like CF-7K4Q9P) and you both get something: you start with an extra 30 days free.";
+    return (
+      <div>
+        <Field label="Referral code (optional)" hint={refError ? undefined : hint} error={refError}>
+          <Input value={refCode} onChange={(e) => onRefCode(e.target.value)} autoComplete="off" autoCapitalize="characters" maxLength={12} placeholder="CF-XXXXXX" className="font-mono tracking-widest" />
+        </Field>
+        {refFound && (
+          <p className="mt-2 text-sm font-semibold text-success">
+            ✓ Invited by {refFound}
+            <span className="mt-0.5 block text-xs font-normal text-muted">
+              {role === "CLIENT" ? (viaClient ? `You'll ask ${coachTitle(refCoach ?? "")} to take you on, the same coach as ${refFound}. They have to accept you.` : "") : `Your free trial starts at ${TRIAL_DAYS + 30} days instead of ${TRIAL_DAYS}.`}
+            </span>
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const step3Error = (): string | null => {
+    // A code has to be the right kind for this sign-up: coaches' codes for coaches, clients' codes to join a coach, solo codes for solo accounts.
+    const wantKind = role === "CLIENT" ? "CLIENT" : role === "PERSONAL" ? "SOLO" : "COACH";
+    const refProblem = refCode
+      ? refFound
+        ? refKind && refKind !== wantKind
+          ? wantKind === "CLIENT" ? "That code is for something else. To join a coach, use their 6-digit code, or a link from one of their clients." : wantKind === "SOLO" ? "That code is for something else. Use a link from someone who trains on their own, or clear it." : "That code is from a client or solo user, so it can't be used to sign up as a coach. Clear it, or use a coach's code."
+          : null
+        : refError ?? (cleanReferralCode(refCode) ? "Checking the referral code…" : "A referral code starts with CF and has 6 more letters or numbers. Clear it if nobody invited you.")
+      : null;
     if (role === "GYM") {
       if (gymName.trim().length < 2) return "Enter the name of your gym or academy.";
-      return niches.length === 0 ? "Pick at least one thing you coach." : null;
+      return niches.length === 0 ? "Pick at least one thing you coach." : refProblem;
     }
     if (role === "COACH") {
       if (niches.length === 0) return "Pick at least one thing you coach.";
+      if (refProblem) return refProblem;
       if (gymCode && !gymFound) return gymError ?? (gymCode.length === 6 ? "Checking the gym code…" : "A gym code is six digits. Clear it if you coach independently.");
       return null;
     }
     if (role === "CLIENT") {
-      if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
-      if (!coach) return codeError ?? "Checking your coach's code…";
+      if (refProblem) return refProblem;
+      if (!viaClient) {
+        if (!cleanCoachCode(code)) return "Enter your coach's 6-digit code.";
+        if (!coach) return codeError ?? "Checking your coach's code…";
+      }
       if (!goal) return "Pick your main goal.";
       if (!level) return "Pick your experience level.";
       return null;
@@ -234,7 +378,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     if (niches.length === 0) return "Pick at least one thing you train.";
     if (!level) return "Pick your experience level.";
     if (!goal) return "Pick your main goal.";
-    return null;
+    return refProblem;
   };
 
   const next = () => {
@@ -250,13 +394,14 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     setBusy(true);
     setError(null);
     const gyms = [...gymChoice, ...gymText.split(",").map((g) => g.trim()).filter(Boolean)];
-    const r = await api("/api/signup", {
+    const r = await api<{ wait?: string; signedIn?: boolean }>("/api/signup", {
       body: {
         role,
         fullName: fullName.trim(),
         username: username.trim().toLowerCase(),
         email: email.trim().toLowerCase(),
-        password,
+        password: social ? "" : password,
+        social: social ? true : undefined,
         phone: phone.trim(),
         dob,
         unit,
@@ -271,6 +416,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
         coachCode: cleanCoachCode(code) ?? "",
         gymName: role === "GYM" ? gymName.trim() : undefined,
         gymCode: role === "COACH" ? gymCode : undefined,
+        referralCode: refCode ? (cleanReferralCode(refCode) ?? "") : undefined,
         medicalNotes: medical.trim(),
         focuses,
         weeklyTarget: weekly,
@@ -281,7 +427,13 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
     });
     setBusy(false);
     if (!r.ok) return setError(r.error ?? "Something went wrong. Please try again.");
-    setDone({ email: email.trim().toLowerCase(), role });
+    // Google already confirmed the address: the account is ready and this device is signed in, so go straight in.
+    if (r.data?.signedIn) {
+      await adoptSession();
+      router.replace(role === "COACH" || role === "GYM" ? "/trainer" : "/home");
+      return;
+    }
+    setDone({ email: email.trim().toLowerCase(), role, wait: r.data?.wait });
   };
 
   const resend = async () => {
@@ -312,7 +464,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
             <Mail size={44} className="mx-auto rounded-full bg-accent/15 p-2.5 text-accent" />
             <h2 className="text-lg font-bold">Check your email</h2>
             <p className="text-sm text-muted">
-              We sent a confirmation link to <strong className="text-ink">{done.email}</strong>. Open it to start your {TRIAL_DAYS}-day free trial, then sign in.
+              We sent a confirmation link to <strong className="text-ink">{done.email}</strong>. Open it to start your {TRIAL_DAYS}-day free trial. You&apos;ll be taken straight into the app, with no second sign-in.
             </p>
             {done.role === "CLIENT" && <p className="text-sm text-muted">Once you confirm, your coach gets your request. You can start logging workouts straight away while you wait for them to accept.</p>}
             <p className="text-xs text-muted">The link works for 48 hours. Check your spam folder if you can&apos;t see it.</p>
@@ -327,6 +479,21 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
           </Card>
         ) : (
           <Card className="p-5">
+            {socialNote && (
+              <div className="mb-4">
+                <Notice tone={socialNote.tone}>
+                  {socialNote.text}
+                  {socialNote.signIn && (
+                    <>
+                      {" "}
+                      <Link href="/login" className="font-semibold underline">
+                        Log in
+                      </Link>
+                    </>
+                  )}
+                </Notice>
+              </div>
+            )}
             <div className="mb-4 flex gap-1.5" aria-hidden="true">
               {[1, 2, 3].map((n) => (
                 <div key={n} className={cn("h-1.5 flex-1 rounded-full", n <= step ? "bg-accent" : "bg-line")} />
@@ -353,8 +520,10 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
                   <Input value={username} onChange={(e) => { setUsername(e.target.value); setTaken((t) => ({ ...t, username: undefined })); }} onBlur={() => void checkAvail("username")} autoCapitalize="none" autoCorrect="off" autoComplete="username" maxLength={32} />
                 </Field>
                 <Field label="Email address" error={taken.email ? "This email can't be used. It may already have an account." : null}>
-                  <Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setTaken((t) => ({ ...t, email: undefined })); }} onBlur={() => void checkAvail("email")} autoCapitalize="none" autoComplete="email" maxLength={200} />
+                  <Input type="email" value={email} readOnly={!!social} onChange={(e) => { setEmail(e.target.value); setTaken((t) => ({ ...t, email: undefined })); }} onBlur={() => !social && void checkAvail("email")} autoCapitalize="none" autoComplete="email" maxLength={200} />
                 </Field>
+                {!social && (
+                  <>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Password">
                     <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" maxLength={128} />
@@ -364,6 +533,9 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
                   </Field>
                 </div>
                 <p className="-mt-2 text-xs text-muted">At least 8 characters, with a letter and a number.</p>
+                  </>
+                )}
+                {social && <p className="text-xs text-muted">No password needed: you&apos;ll sign in with {providerLabel(social.provider)}. You can set one later with &ldquo;Forgot your password?&rdquo;.</p>}
                 <Field label="Phone / WhatsApp number">
                   <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" inputMode="tel" maxLength={30} />
                 </Field>
@@ -392,6 +564,12 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
 
             {step === 1 && (
               <div className="space-y-4">
+                {!social && <SocialButtons mode="signup" divider="after" />}
+                {social && (
+                  <Notice tone="success">
+                    Signed in with {providerLabel(social.provider)} as {social.email}. Choose how you&apos;ll use CoachFlow, then answer a few questions. No password needed.
+                  </Notice>
+                )}
                 <h2 className="text-lg font-bold">I am a…</h2>
                 <div className="grid grid-cols-2 gap-3" role="group" aria-label="How will you use CoachFlow?">
                   {CARDS.map((c) => {
@@ -458,6 +636,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
                   <Input className="mt-2" value={gymText} onChange={(e) => setGymText(e.target.value)} maxLength={200} placeholder="Other places, separated by commas" />
                   <p className="mt-1 text-xs text-muted">You can pick exact branches on the map in Settings later.</p>
                 </div>
+                {referralField()}
                 {role === "COACH" && (
                   <div>
                     <Field label="Gym or academy code (optional)" hint={gymError ? undefined : "Working with a gym or coaching academy? Enter its 6-digit code. Leave it blank if you are an independent freelance coach."} error={gymError}>
@@ -477,16 +656,19 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
             {step === 3 && role === "CLIENT" && (
               <div className="space-y-4">
                 <h2 className="text-lg font-bold">Connect with your coach</h2>
+                {referralField()}
+                {!viaClient && (
                 <Field label="Your coach's 6-digit code" hint="Ask your coach for it. It's on their dashboard.">
                   <Input value={code} onChange={(e) => onCode(e.target.value)} inputMode="numeric" autoComplete="off" maxLength={7} placeholder="123456" className="text-center text-lg tracking-[0.3em]" />
                 </Field>
-                {coach && (
+                )}
+                {!viaClient && coach && (
                   <Notice tone="success">
                     ✓ Matched with {coachTitle(coach.name)}
                     {coach.tagline ? ` · ${coach.tagline}` : ""}
                   </Notice>
                 )}
-                {codeError && <Notice tone="error">{codeError}</Notice>}
+                {!viaClient && codeError && <Notice tone="error">{codeError}</Notice>}
                 <Field label="Main goal">
                   <Select value={goal} onChange={(e) => setGoal(e.target.value)}>
                     <option value="">Choose…</option>
@@ -533,6 +715,7 @@ export function SignupWizard({ initialRole = null, initialGymCode = "" }: { init
                   </Field>
                 </div>
                 <p className="text-xs text-muted">Heights in {lengthUnit(unit)} and body measurements can be added later in Progress.</p>
+                {referralField()}
               </div>
             )}
 

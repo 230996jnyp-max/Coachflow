@@ -10,8 +10,9 @@ import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { badRequest, conflict, forbidden, notFound } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
-import { attendance, bookings, groupMembers, groupRequests, groupSessions, notifications, templates, users, workouts, type AttendanceRow, type GroupMemberRow, type GroupRequestRow, type GroupRow, type UserRow } from "./schema";
+import { attendance, bookings, classEvents, groupMembers, groupRequests, groupSessions, notifications, templates, users, workouts, type AttendanceRow, type GroupMemberRow, type GroupRequestRow, type GroupRow, type UserRow } from "./schema";
 import { attendanceFor, attendanceInfo, attKey, logCredit, setMark } from "./credits";
+import { sendPush } from "./push";
 import { rulesFor, toBooking } from "./schedule";
 import { customExercisesFor, insertWorkoutIfAbsent, parseTemplateExercise, recentDoneWorkouts } from "./training";
 
@@ -99,6 +100,8 @@ export async function notify(userIds: string[], kind: string, n: NoteBody, opts:
   try {
     const d = await db();
     const rows = await usersByIds(ids);
+    // The same notice also goes to their phone (not waited for, and silent inside their quiet hours).
+    void sendPush(rows.map((r) => r.id), { title: n.title, body: n.body, url: n.link, tag: kind });
     for (const u of rows) {
       const id = newId("n");
       await d.insert(notifications).values({ id, userId: u.id, kind, bodyEnc: encryptJson(n, aadN(id)) });
@@ -556,6 +559,16 @@ export async function classConflict(coachId: string, start: Date, end: Date, ign
   return rows.some((r) => r.id !== ignoreId);
 }
 
+/** Notes that someone joined a full class's waitlist or left a class, for the occupancy analytics (counts only, no one is named). Never throws. */
+async function recordClassEvent(g: GroupRow, kind: "WAITLIST" | "CANCEL" | "LATE_CANCEL"): Promise<void> {
+  try {
+    const d = await db();
+    await d.insert(classEvents).values({ id: newId("ce"), groupId: g.id, coachId: g.coachId, kind, minutesBefore: Math.round((g.startAt.getTime() - Date.now()) / 60000) });
+  } catch (e) {
+    console.error("class event failed", e);
+  }
+}
+
 /** A client takes a spot (or joins the waitlist) in a coach class. */
 export async function bookSpot(me: UserRow, g: GroupRow): Promise<"CONFIRMED" | "WAITLIST"> {
   assertMyCoach(me, g);
@@ -578,9 +591,11 @@ export async function bookSpot(me: UserRow, g: GroupRow): Promise<"CONFIRMED" | 
     const rank = rows.findIndex((r) => r.clientId === me.id);
     if (rank >= g.capacity) {
       await d.update(groupMembers).set({ status: "WAITLIST" }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, me.id)));
+      await recordClassEvent(g, "WAITLIST");
       return "WAITLIST";
     }
   }
+  if (status === "WAITLIST") await recordClassEvent(g, "WAITLIST");
   if (status === "CONFIRMED") {
     await logReserved(me.id, g.coachId, openGroup(g).title);
     await ensureWorkoutFor(g, me.id);
@@ -589,7 +604,8 @@ export async function bookSpot(me: UserRow, g: GroupRow): Promise<"CONFIRMED" | 
 }
 
 /** Leaves a class or the waitlist. Never costs a credit. */
-export async function leaveGroup(g: GroupRow, clientId: string): Promise<void> {
+/** `byClient: false` when a coach removes someone: that is not a client cancelling, so it is not counted in the analytics. */
+export async function leaveGroup(g: GroupRow, clientId: string, opts: { byClient?: boolean } = {}): Promise<void> {
   const d = await db();
   const [m] = await d.select().from(groupMembers).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.clientId, clientId))).limit(1);
   if (!m || (m.status !== "CONFIRMED" && m.status !== "WAITLIST")) throw badRequest("They aren't in this class.");
@@ -600,6 +616,10 @@ export async function leaveGroup(g: GroupRow, clientId: string): Promise<void> {
   // Their (not yet started) workout copy goes with them.
   await removeUnstartedWorkout(g, clientId);
   const wasConfirmed = m.status === "CONFIRMED";
+  if (wasConfirmed && g.kind === "CLASS" && opts.byClient !== false) {
+    const notice = (await rulesFor(g.coachId)).noticeHours * 3600000;
+    await recordClassEvent(g, g.startAt.getTime() - Date.now() < notice ? "LATE_CANCEL" : "CANCEL");
+  }
   if (wasConfirmed && g.kind === "CLASS") await promoteWaitlist(g);
   // A shared session just lost an approver: pending requests may now be fully approved.
   if (wasConfirmed && g.kind === "SHARED") {

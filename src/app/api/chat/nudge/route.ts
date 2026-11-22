@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { loadClientFor } from "@/lib/server/accounts";
 import { requireUser } from "@/lib/server/auth";
 import { displayName } from "@/lib/server/chat";
-import { storeMessages } from "@/lib/server/chatSend";
+import { pushNewMessage, storeMessages } from "@/lib/server/chatSend";
 import { badRequest, readJson, route, str } from "@/lib/server/http";
 import { hit } from "@/lib/server/rateLimit";
 
@@ -49,5 +49,6 @@ export const POST = route(async (req) => {
     entries.push({ thread: `c:${id}`, text: text.replaceAll("{first_name}", firstOf(displayName(row))), email: { status: "off" } });
   }
   const messages = entries.length ? await storeMessages(entries, me) : [];
+  for (const e of entries) pushNewMessage(me, [e.thread.slice(2)], e.thread);
   return NextResponse.json({ sent: entries.length, skipped, messages });
 });

@@ -29,6 +29,14 @@ export async function openStripe(kind: "checkout" | "portal"): Promise<string | 
   return null;
 }
 
+/** A gym owner starts Stripe Checkout (subscribe) or the customer portal (manage the card) for the gym. Returns an error message, or null after sending the browser away. */
+export async function openGymStripe(kind: "checkout" | "portal"): Promise<string | null> {
+  const r = await api<{ url: string }>("/api/gym/billing", { body: { action: kind } });
+  if (!r.ok || !r.data?.url) return r.error ?? "Couldn't open Stripe. Please try again.";
+  window.location.assign(r.data.url);
+  return null;
+}
+
 /** Keeps the billing info fresh for a signed-in person. `userId` changes when someone signs in or out. */
 export function useBillingLoader(userId: string | undefined) {
   useEffect(() => {

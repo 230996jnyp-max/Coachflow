@@ -1,14 +1,14 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
-import { Copy, Power, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, Field, Input, Modal, Notice, SectionTitle, Textarea } from "@/components/ui";
+import { useState } from "react";
+import { Badge, Button, Field, Input, Modal, Notice, Textarea } from "@/components/ui";
+import { planLabel, type GymPlanStatus } from "@/lib/gymBilling";
 import { api } from "@/lib/store";
 
-interface GymRow {
+export interface GymRow {
   id: string;
   name: string;
+  adminId: string;
   adminName: string;
   adminEmail: string;
   code: string;
@@ -19,123 +19,56 @@ interface GymRow {
   aiUses30d: number;
   createdAt: string;
   trialEndsAt: string | null;
+  plan: { status: string; priceCents: number; custom: boolean; requested: boolean };
 }
 
-type Action = "disable" | "enable" | "delete";
 
-/** Every gym: its admin, its 6-digit code, how many coaches are linked and how much AI it uses. No client counts, ever. */
-export function GymsPanel() {
-  const [gyms, setGyms] = useState<GymRow[] | null>(null);
+/** The gym's plan in a line, and where the platform owner sets a custom monthly price for a large gym (S$, empty = the flat price). */
+export function GymPlanEditor({ gym, onSaved }: { gym: GymRow; onSaved: (text: string) => void }) {
+  const [value, setValue] = useState(gym.plan.custom ? String(gym.plan.priceCents / 100) : "");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [act, setAct] = useState<{ gym: GymRow; action: Action } | null>(null);
-  const [flash, setFlash] = useState<{ tone: "success" | "warn"; text: string } | null>(null);
-
-  const load = useCallback(async () => {
-    const r = await api<{ gyms: GymRow[] }>("/api/admin/gyms");
-    if (r.ok && r.data) {
-      setGyms(r.data.gyms);
-      setError(null);
-    } else setError(r.error ?? "Could not load gyms.");
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    api<{ gyms: GymRow[] }>("/api/admin/gyms").then((r) => {
-      if (!alive) return;
-      if (r.ok && r.data) setGyms(r.data.gyms);
-      else setError(r.error ?? "Could not load gyms.");
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!gyms) return <Card className="p-6 text-center text-sm text-muted">Loading…</Card>;
-
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await api<{ priceCents: number | null }>("/api/admin/gyms/" + gym.id + "/billing", { method: "PUT", body: { priceDollars: value.trim() === "" ? null : Number(value) } });
+    setBusy(false);
+    if (!r.ok) return setError(r.error ?? "Could not save the price.");
+    onSaved(value.trim() === "" ? gym.name + " is back on the flat price." : gym.name + " now pays S$" + value + " a month.");
+  };
   return (
-    <div className="space-y-4">
-      <SectionTitle>Gyms and academies</SectionTitle>
-      {flash && <Notice tone={flash.tone}>{flash.text}</Notice>}
-      {gyms.length === 0 && <Card className="p-6 text-center text-sm text-muted">No gyms yet. They appear here when someone signs up with the Gym card.</Card>}
-      <div className="space-y-2">
-        {gyms.map((g) => (
-          <Card key={g.id} className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-lg font-bold">{g.name}</span>
-              {g.status === "DISABLED" && <Badge className="border-danger/30 bg-danger/15 text-danger">Switched off</Badge>}
-              {g.pending > 0 && <Badge className="border-pr/30 bg-pr/15 text-pr">{g.pending} waiting</Badge>}
-            </div>
-            <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-              <div>
-                <span className="text-muted">Admin </span>
-                {g.adminName}
-              </div>
-              <div className="truncate">
-                <span className="text-muted">Email </span>
-                {g.adminEmail || "—"}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted">Gym code</span> <span className="font-mono font-semibold tracking-widest">{g.code}</span>
-                <button type="button" aria-label="Copy gym code" onClick={() => void navigator.clipboard.writeText(g.code).catch(() => undefined)} className="text-muted hover:text-ink">
-                  <Copy size={14} />
-                </button>
-              </div>
-              <div>
-                <span className="text-muted">Coaches linked </span>
-                <strong>{g.coaches}</strong>
-              </div>
-              <div>
-                <span className="text-muted">AI uses </span>
-                <strong>{g.aiUses}</strong> <span className="text-muted">({g.aiUses30d} in the last 30 days)</span>
-              </div>
-              <div className="text-muted">
-                Created {format(parseISO(g.createdAt), "d MMM yyyy")}
-                {g.trialEndsAt ? ` · trial ends ${format(parseISO(g.trialEndsAt), "d MMM yyyy")}` : ""}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {g.status === "DISABLED" ? (
-                <Button size="sm" variant="success" onClick={() => setAct({ gym: g, action: "enable" })}>
-                  <Power size={14} /> Switch on
-                </Button>
-              ) : (
-                <Button size="sm" variant="secondary" onClick={() => setAct({ gym: g, action: "disable" })}>
-                  <Power size={14} /> Switch off
-                </Button>
-              )}
-              <Button size="sm" variant="danger" onClick={() => setAct({ gym: g, action: "delete" })}>
-                <Trash2 size={14} /> Delete…
-              </Button>
-            </div>
-          </Card>
-        ))}
+    <div className="space-y-2 rounded-xl border border-line bg-field/40 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted">Plan</span>
+        <strong>{planLabel[gym.plan.status as GymPlanStatus] ?? gym.plan.status}</strong>
+        <span className="text-muted">
+          · S${gym.plan.priceCents / 100} a month{gym.plan.custom ? " (custom)" : ""}
+        </span>
+        {gym.plan.requested && <Badge className="border-pr/30 bg-pr/15 text-pr">Asked for a custom plan ({gym.coaches} coaches)</Badge>}
       </div>
-      <p className="text-xs text-muted">Only coach counts and AI use are shown. Client names and counts stay private to each coach.</p>
-
-      {act && (
-        <GymActionModal
-          gym={act.gym}
-          action={act.action}
-          onClose={() => setAct(null)}
-          onDone={(text, tone) => {
-            setAct(null);
-            setFlash({ tone, text });
-            void load();
-          }}
-        />
-      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-muted">
+          Custom price (S$ a month)
+          <Input className="mt-1 w-36" type="number" min={1} max={10000} step="1" placeholder="Flat price" value={value} onChange={(e) => setValue(e.target.value)} />
+        </label>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save price"}
+        </Button>
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }
 
-const COPY: Record<Action, { title: string; body: (g: GymRow) => string; button: string }> = {
+export type GymAction = "disable" | "enable" | "delete";
+
+const COPY: Record<GymAction, { title: string; body: (g: GymRow) => string; button: string }> = {
   disable: { title: "Switch this gym off?", body: (g) => `${g.name}'s gym tools stop working and its code stops accepting new coaches. Coaches and clients keep their own accounts, and nothing is deleted. The gym's admin is emailed.`, button: "Switch off" },
   enable: { title: "Switch this gym back on?", body: (g) => `${g.name}'s gym tools work again. The gym's admin is emailed.`, button: "Switch on" },
   delete: { title: "Delete this gym for good?", body: (g) => `${g.name}, its roles, halls, history and gym code are erased. Its ${g.coaches} coach${g.coaches === 1 ? "" : "es"} keep their own accounts and clients and become independent. The gym's admin is emailed.`, button: "Delete gym" },
 };
 
-function GymActionModal({ gym, action, onClose, onDone }: { gym: GymRow; action: Action; onClose: () => void; onDone: (text: string, tone: "success" | "warn") => void }) {
+export function GymActionModal({ gym, action, onClose, onDone }: { gym: GymRow; action: GymAction; onClose: () => void; onDone: (text: string, tone: "success" | "warn") => void }) {
   const c = COPY[action];
   const [reason, setReason] = useState("");
   const [typed, setTyped] = useState("");

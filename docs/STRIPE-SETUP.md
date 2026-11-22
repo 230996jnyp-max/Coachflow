@@ -26,6 +26,8 @@ Never paste a secret key into chat, email or a screenshot. Put it straight into 
 5. Open `coachflow/.env.local` and add a line (no spaces, no quotes):
    `STRIPE_SECRET_KEY=sk_test_...`
 
+> **Gyms:** the same command also creates the product **CoachFlow Gym Plan** with one monthly price of S$100 (lookup key `coachflow_gym_sgd_100`), used for a small gym's subscription. A gym with a custom price is charged through an inline price at checkout, so nothing more is needed in Stripe. If you set CoachFlow up before gym plans existed, run `npm run stripe:setup` once more (live: add `--live`).
+
 ## 2. Create the product, the 9 prices and the customer portal (automatic)
 
 In a terminal in the `coachflow` folder:

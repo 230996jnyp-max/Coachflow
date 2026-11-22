@@ -30,13 +30,15 @@ export const users = pgTable(
     theme: text("theme"),
     /** A coach's 6-digit code, shared so clients can find them at sign-up (null for everyone else). Unique. */
     coachCode: text("coach_code"),
+    /** A coach's own referral code (CF + 6 characters), made the first time it is needed. */
+    referralCode: text("referral_code"),
     /** False only for someone who signed themselves up and hasn't opened the link in their verification email yet. */
     emailVerified: boolean("email_verified").notNull().default(true),
     /** End of the 30-day free trial of a self sign-up (coach or personal). Null = no trial (coach-made clients, older accounts). */
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     /** Personal look and feel as JSON (accent, background, text size, bio ...). See lib/prefs.ts. Nothing sensitive. */
     prefs: text("prefs"),
-    /** When they last signed in (shown to the owner on the Sign-ups tab). */
+    /** When they last signed in (shown to the owner on the Users tab). */
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     /** Set when the owner disables the account: it can't sign in, and the data is kept. */
     disabledAt: timestamp("disabled_at", { withTimezone: true }),
@@ -462,6 +464,10 @@ export const coachSettings = pgTable("coach_settings", {
   coachId: text("coach_id").primaryKey(),
   sessionMinutes: integer("session_minutes").notNull().default(60),
   noticeHours: integer("notice_hours").notNull().default(12),
+  /** A client may cancel inside the notice window, and the session credit is used (otherwise they are blocked and told to message the coach). */
+  lateCancelCharge: boolean("late_cancel_charge").notNull().default(false),
+  /** Session credits a client earns when a friend they invited joins this coach (0 = referral rewards are off). */
+  referralRewardCredits: integer("referral_reward_credits").notNull().default(0),
   autoConfirm: boolean("auto_confirm").notNull().default(true),
   allowCustomGym: boolean("allow_custom_gym").notNull().default(true),
   utcOffsetMin: integer("utc_offset_min").notNull().default(480),
@@ -544,6 +550,31 @@ export const coachBilling = pgTable("coach_billing", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 export type CoachBillingRow = typeof coachBilling.$inferSelect;
+
+/**
+ * Coach referrals: one row per coach who signed up with someone's referral code. `status` goes SIGNED_UP, then PAID (the new coach became a
+ * paying subscriber), then REWARDED (the inviter got their free month) or CAPPED (they had already earned the maximum).
+ */
+export const referrals = pgTable(
+  "referrals",
+  {
+    id: text("id").primaryKey(),
+    referrerId: text("referrer_id").notNull(),
+    refereeId: text("referee_id").notNull(),
+    code: text("code").notNull(),
+    /** COACH (a coach invited a coach), CLIENT (a client invited a friend to their coach) or SOLO (someone training alone invited a friend). */
+    kind: text("kind").notNull().default("COACH"),
+    status: text("status").notNull().default("SIGNED_UP"),
+    /** TRIAL_EXTENSION | STRIPE_CREDIT | EXEMPT, once rewarded. */
+    rewardKind: text("reward_kind"),
+    rewardNote: text("reward_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    rewardedAt: timestamp("rewarded_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("referrals_referee_idx").on(t.refereeId), index("referrals_referrer_idx").on(t.referrerId)],
+);
+export type ReferralRow = typeof referrals.$inferSelect;
 
 /** How many AI calls a person made today, by kind (limits protect the shared free AI quota). */
 export const aiUsage = pgTable(
@@ -806,6 +837,72 @@ export const notifications = pgTable(
 );
 
 /**
+ * A gym's subscription (the gym's free month is gym_orgs.trial_ends_at). One row per gym, made when it is first needed.
+ * status: TRIALING | ACTIVE | PAST_DUE | CANCELED, kept from Stripe. price_cents is a custom monthly price the platform owner agreed with a
+ * large gym (null = the standard flat price). past_due_since starts the grace period after a failed payment.
+ */
+export const gymBilling = pgTable(
+  "gym_billing",
+  {
+    gymId: text("gym_id").primaryKey(),
+    status: text("status").notNull().default("TRIALING"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    priceCents: integer("price_cents"),
+    periodEnd: timestamp("period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }),
+    /** The owner asked for a custom plan (a gym with more coaches than the flat plan covers). */
+    planRequestedAt: timestamp("plan_requested_at", { withTimezone: true }),
+    warned7: boolean("warned_7").notNull().default(false),
+    warned1: boolean("warned_1").notNull().default(false),
+    warnedGrace: boolean("warned_grace").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gym_billing_customer_idx").on(t.stripeCustomerId)],
+);
+export type GymBillingRow = typeof gymBilling.$inferSelect;
+
+/**
+ * Class events, for the occupancy analytics: someone joined the waitlist of a full class, or a client left a class they had a place in.
+ * Only counts are kept (no client is recorded), because the history is otherwise lost: waitlists are cleared when a class finishes.
+ * kind: WAITLIST | CANCEL | LATE_CANCEL (left inside the coach's notice window).
+ */
+export const classEvents = pgTable(
+  "class_events",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    kind: text("kind").notNull(),
+    /** How long before the class started it happened (negative once it had started). */
+    minutesBefore: integer("minutes_before").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("class_events_coach_idx").on(t.coachId, t.createdAt), index("class_events_group_idx").on(t.groupId)],
+);
+
+/**
+ * Phone and browser push subscriptions (Web Push): one row per device a person turned "Phone notifications" on for. The endpoint and keys
+ * are only ever read by the server to deliver a notification; nothing here is sent back to a browser.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("push_subs_endpoint_idx").on(t.endpoint), index("push_subs_user_idx").on(t.userId)],
+);
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+
+/**
  * One row per person per session once the coach has marked them Present or No-Show. `charged` says whether a credit is
  * currently taken for it, so changing a mark later only ever moves the balance by the difference (never double counts).
  */
@@ -841,7 +938,91 @@ export const creditLog = pgTable(
   (t) => [index("credit_log_client_idx").on(t.clientId, t.createdAt)],
 );
 
+/*
+ * Payments between a coach and their clients. The money never touches this app: a client pays into the coach's own Stripe account
+ * (Connect, Standard) or straight to the coach by PayNow / cash, and this only keeps the records and adds the credits.
+ */
+
+/** One row per coach who set up payments: their Stripe account (if any) and the PayNow number they show clients. */
+export const paymentSettings = pgTable("payment_settings", {
+  coachId: text("coach_id").primaryKey(),
+  stripeAccountId: text("stripe_account_id"),
+  chargesEnabled: boolean("charges_enabled").notNull().default(false),
+  detailsSubmitted: boolean("details_submitted").notNull().default(false),
+  payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
+  /** The coach's PayNow mobile number or UEN, shown to a client who chooses the no-fee option. */
+  paynow: text("paynow"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** What a coach sells: a number of session credits (and optional group credits) for a price. */
+export const paymentPackages = pgTable(
+  "payment_packages",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    name: text("name").notNull(),
+    sessions: integer("sessions").notNull(),
+    groupCredits: integer("group_credits").notNull().default(0),
+    priceCents: integer("price_cents").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("payment_packages_coach_idx").on(t.coachId)],
+);
+
+/**
+ * One row per payment (asked for, paid, refunded). The package, price and credits are copied at the time, so changing a package later never
+ * changes what was sold. `applied_*` is what was really added to the client, so a refund takes back exactly that (never more than is left).
+ */
+export const paymentOrders = pgTable(
+  "payment_orders",
+  {
+    id: text("id").primaryKey(),
+    /** An unguessable code for the pay link, so a parent or guardian can pay without an account. */
+    token: text("token").notNull(),
+    /** Short reference the payer types into a PayNow transfer. */
+    ref: text("ref").notNull(),
+    coachId: text("coach_id").notNull(),
+    clientId: text("client_id").notNull(),
+    packageId: text("package_id"),
+    name: text("name").notNull(),
+    sessions: integer("sessions").notNull().default(0),
+    groupCredits: integer("group_credits").notNull().default(0),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("sgd"),
+    /** STRIPE (card, Apple Pay, Google Pay, PayNow through Stripe), PAYNOW (direct to the coach, they confirm) or MANUAL (cash, bank transfer: the coach records it). */
+    method: text("method").notNull().default("STRIPE"),
+    manualKind: text("manual_kind"),
+    /** PENDING, AWAITING (the payer says they paid by PayNow; the coach confirms), PAID, REFUNDED, CANCELLED. */
+    status: text("status").notNull().default("PENDING"),
+    stripeSessionId: text("stripe_session_id"),
+    paymentIntentId: text("payment_intent_id"),
+    receiptUrl: text("receipt_url"),
+    appliedSessions: integer("applied_sessions").notNull().default(0),
+    appliedGroup: integer("applied_group").notNull().default(0),
+    noteEnc: text("note_enc"),
+    createdBy: text("created_by").notNull().default("COACH"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("payment_orders_token_idx").on(t.token), index("payment_orders_coach_idx").on(t.coachId, t.createdAt), index("payment_orders_client_idx").on(t.clientId, t.createdAt)],
+);
+
+/** Stripe event ids already handled, so a webhook that is sent twice only adds credits once. */
+export const paymentEvents = pgTable("payment_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type UserRow = typeof users.$inferSelect;
+export type PaymentOrderRow = typeof paymentOrders.$inferSelect;
+export type PaymentPackageRow = typeof paymentPackages.$inferSelect;
+export type PaymentSettingsRow = typeof paymentSettings.$inferSelect;
 export type AttendanceRow = typeof attendance.$inferSelect;
 export type GroupRow = typeof groupSessions.$inferSelect;
 export type GroupMemberRow = typeof groupMembers.$inferSelect;
@@ -853,6 +1034,196 @@ export type CustomExerciseRow = typeof customExercises.$inferSelect;
 export type ExerciseTrackingRow = typeof exerciseTracking.$inferSelect;
 export type BookingRow = typeof bookings.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;
+
+/*
+ * The AI trainer (for people training on their own) and the coaches' monthly review that teaches it.
+ *  - ai_trainer_profiles / ai_trainer_plans: a person's health answers, goals and weekly plans. Everything about the person is encrypted.
+ *  - ai_reviews: a coach's monthly review of made-up profiles (nothing about a real person). status SUBMITTED (waiting for the owner, flagged),
+ *    APPROVED or REJECTED. Approved reviews create ai_rules, which every plan is checked against.
+ *  - ai_review_credits: the 10% discount earned by an approved review: APPLIED once it is on their Stripe account, PENDING until they subscribe.
+ */
+export const aiTrainerProfiles = pgTable("ai_trainer_profiles", {
+  userId: text("user_id").primaryKey(),
+  dataEnc: text("data_enc").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiTrainerPlans = pgTable(
+  "ai_trainer_plans",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    weekStart: text("week_start").notNull(),
+    dataEnc: text("data_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_trainer_plans_user_idx").on(t.userId, t.weekStart)],
+);
+
+export const aiReviews = pgTable(
+  "ai_reviews",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    /** yyyy-MM, Singapore time. One review per coach per month. */
+    month: text("month").notNull(),
+    status: text("status").notNull().default("STARTED"),
+    flagged: boolean("flagged").notNull().default(false),
+    /** JSON array of why the owner is asked to look. */
+    flags: text("flags").notNull().default("[]"),
+    seconds: integer("seconds").notNull().default(0),
+    /** JSON array of the coach's answers (made-up profiles only). */
+    answers: text("answers").notNull().default("[]"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    decisionNote: text("decision_note").notNull().default(""),
+    /** What happened with the discount: STRIPE_CREDIT, PENDING, EXEMPT, NONE. */
+    discountKind: text("discount_kind"),
+    discountNote: text("discount_note").notNull().default(""),
+  },
+  (t) => [uniqueIndex("ai_reviews_coach_month_idx").on(t.coachId, t.month)],
+);
+
+export const aiRules = pgTable(
+  "ai_rules",
+  {
+    id: text("id").primaryKey(),
+    reviewId: text("review_id").notNull(),
+    coachId: text("coach_id").notNull(),
+    /** JSON arrays. */
+    tags: text("tags").notNull(),
+    exerciseIds: text("exercise_ids").notNull(),
+    text: text("text").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_rules_active_idx").on(t.active, t.createdAt)],
+);
+
+export const aiReviewCredits = pgTable(
+  "ai_review_credits",
+  {
+    id: text("id").primaryKey(),
+    coachId: text("coach_id").notNull(),
+    reviewId: text("review_id").notNull(),
+    cents: integer("cents").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    note: text("note").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+  },
+  (t) => [index("ai_review_credits_coach_idx").on(t.coachId, t.status)],
+);
+/**
+ * "Continue with Google / Facebook / Microsoft": which provider account belongs to which CoachFlow account. Only the provider's own id for the
+ * person and the email it gave are kept (never a token or a password).
+ */
+export const oauthIdentities = pgTable(
+  "oauth_identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.subject] }), index("oauth_identities_user_idx").on(t.userId)],
+);
+export type AiReviewRow = typeof aiReviews.$inferSelect;
+export type AiRuleRow = typeof aiRules.$inferSelect;
+
+/**
+ * A coach's public profile page (/coach/<username>): what they chose to show anyone with the link. Plain text on purpose: it is public.
+ * No contact details are ever kept here. `takes_consults` = this coach is offered paid consults from people training on their own.
+ */
+export const coachPublic = pgTable("coach_public", {
+  coachId: text("coach_id").primaryKey(),
+  isPublic: boolean("is_public").notNull().default(true),
+  /** JSON: { headline, about, experienceYears, certifications[], area, showPackages }. */
+  data: text("data").notNull().default("{}"),
+  takesConsults: boolean("takes_consults").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type CoachPublicRow = typeof coachPublic.$inferSelect;
+
+/**
+ * Consult a trainer: one paid hour on a video call between someone training on their own (solo_id) and the trainer who accepted it.
+ * status: PAYING (at Stripe Checkout) | OPEN (paid by a card hold, waiting for a trainer) | LIVE (accepted, the hour is running) | DONE |
+ * EXPIRED (nobody accepted; the hold was released) | CANCELLED. The money is a card hold on the CoachFlow Stripe account, captured when a
+ * trainer accepts; the trainer's share is sent to their connected Stripe account after `payout_due_at` unless a report holds it.
+ * The question and anything health-related are encrypted.
+ */
+export const consults = pgTable(
+  "consults",
+  {
+    id: text("id").primaryKey(),
+    soloId: text("solo_id").notNull(),
+    trainerId: text("trainer_id"),
+    status: text("status").notNull().default("PAYING"),
+    priceCents: integer("price_cents").notNull(),
+    trainerCents: integer("trainer_cents").notNull(),
+    refundedCents: integer("refunded_cents").notNull().default(0),
+    /** Encrypted JSON: { question, shareHealth }. */
+    dataEnc: text("data_enc").notNull(),
+    checkoutSessionId: text("checkout_session_id"),
+    paymentIntentId: text("payment_intent_id"),
+    acceptBy: timestamp("accept_by", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** SOLO | TRAINER when one of them ended it before the hour was up. */
+    endedBy: text("ended_by"),
+    roomName: text("room_name"),
+    roomUrl: text("room_url"),
+    soloJoinedAt: timestamp("solo_joined_at", { withTimezone: true }),
+    trainerJoinedAt: timestamp("trainer_joined_at", { withTimezone: true }),
+    /** NONE | HELD | PAID | CANCELLED. */
+    payoutStatus: text("payout_status").notNull().default("NONE"),
+    payoutDueAt: timestamp("payout_due_at", { withTimezone: true }),
+    transferId: text("transfer_id"),
+    stars: integer("stars"),
+    review: text("review"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("consults_status_idx").on(t.status), index("consults_solo_idx").on(t.soloId), index("consults_trainer_idx").on(t.trainerId)],
+);
+export type ConsultRow = typeof consults.$inferSelect;
+
+/** A report about a consult, made by either side. The owner resolves it (refund, payout, warnings). Details are encrypted. */
+export const consultReports = pgTable(
+  "consult_reports",
+  {
+    id: text("id").primaryKey(),
+    consultId: text("consult_id").notNull(),
+    reporterId: text("reporter_id").notNull(),
+    /** SOLO | TRAINER. */
+    reporterRole: text("reporter_role").notNull(),
+    reason: text("reason").notNull(),
+    detailsEnc: text("details_enc").notNull(),
+    /** OPEN | RESOLVED. */
+    status: text("status").notNull().default("OPEN"),
+    /** JSON of what the owner decided: { refund, refundCents, sanction, note }. */
+    resolution: text("resolution"),
+    /** The owner upheld it (any refund or sanction). Counted when advising on later reports. */
+    upheld: boolean("upheld").notNull().default(false),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("consult_reports_status_idx").on(t.status, t.createdAt), index("consult_reports_consult_idx").on(t.consultId)],
+);
+export type ConsultReportRow = typeof consultReports.$inferSelect;
+
+/** People the owner stopped from consults: a trainer suspended from taking them, or a person blocked from asking. One row per person. */
+export const consultBlocks = pgTable("consult_blocks", {
+  userId: text("user_id").primaryKey(),
+  reason: text("reason").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Idempotent DDL applied once per server instance (see db.ts). Mirrors the tables above. */
 export const DDL = [
@@ -880,6 +1251,8 @@ export const DDL = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme text`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS coach_code text`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_coach_code_idx ON users (coach_code) WHERE coach_code IS NOT NULL`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code text`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_referral_code_idx ON users (referral_code) WHERE referral_code IS NOT NULL`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz`,
   `CREATE INDEX IF NOT EXISTS users_email_idx ON users (lower(email))`,
@@ -1099,6 +1472,7 @@ export const DDL = [
     coach_id text PRIMARY KEY,
     session_minutes integer NOT NULL DEFAULT 60,
     notice_hours integer NOT NULL DEFAULT 12,
+    late_cancel_charge boolean NOT NULL DEFAULT false,
     auto_confirm boolean NOT NULL DEFAULT true,
     allow_custom_gym boolean NOT NULL DEFAULT true,
     utc_offset_min integer NOT NULL DEFAULT 480
@@ -1143,6 +1517,8 @@ export const DDL = [
     token_enc text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS late_cancel_charge boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS referral_reward_credits integer NOT NULL DEFAULT 0`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS templates_seeded boolean NOT NULL DEFAULT false`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_enabled boolean NOT NULL DEFAULT true`,
   `ALTER TABLE coach_settings ADD COLUMN IF NOT EXISTS travel_default_min integer NOT NULL DEFAULT 30`,
@@ -1217,6 +1593,22 @@ export const DDL = [
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS coach_billing_customer ON coach_billing (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS referrals (
+    id text PRIMARY KEY,
+    referrer_id text NOT NULL,
+    referee_id text NOT NULL,
+    code text NOT NULL,
+    kind text NOT NULL DEFAULT 'COACH',
+    status text NOT NULL DEFAULT 'SIGNED_UP',
+    reward_kind text,
+    reward_note text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    paid_at timestamptz,
+    rewarded_at timestamptz
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS referrals_referee_idx ON referrals (referee_id)`,
+  `CREATE INDEX IF NOT EXISTS referrals_referrer_idx ON referrals (referrer_id)`,
+  `ALTER TABLE referrals ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'COACH'`,
   `CREATE TABLE IF NOT EXISTS ai_usage (
     user_id text NOT NULL,
     day text NOT NULL,
@@ -1322,6 +1714,44 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    endpoint text NOT NULL,
+    p256dh text NOT NULL,
+    auth text NOT NULL,
+    user_agent text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_sent_at timestamptz
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS push_subs_endpoint_idx ON push_subscriptions (endpoint)`,
+  `CREATE INDEX IF NOT EXISTS push_subs_user_idx ON push_subscriptions (user_id)`,
+  `CREATE TABLE IF NOT EXISTS class_events (
+    id text PRIMARY KEY,
+    group_id text NOT NULL,
+    coach_id text NOT NULL,
+    kind text NOT NULL,
+    minutes_before integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS class_events_coach_idx ON class_events (coach_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS class_events_group_idx ON class_events (group_id)`,
+  `CREATE TABLE IF NOT EXISTS gym_billing (
+    gym_id text PRIMARY KEY,
+    status text NOT NULL DEFAULT 'TRIALING',
+    stripe_customer_id text,
+    stripe_subscription_id text,
+    price_cents integer,
+    period_end timestamptz,
+    cancel_at_period_end boolean NOT NULL DEFAULT false,
+    past_due_since timestamptz,
+    plan_requested_at timestamptz,
+    warned_7 boolean NOT NULL DEFAULT false,
+    warned_1 boolean NOT NULL DEFAULT false,
+    warned_grace boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gym_billing_customer_idx ON gym_billing (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS attendance (
     id text PRIMARY KEY,
     kind text NOT NULL,
@@ -1394,6 +1824,184 @@ export const DDL = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS assessment_photos_view_idx ON assessment_photos (assessment_id, view)`,
+  `CREATE TABLE IF NOT EXISTS payment_settings (
+    coach_id text PRIMARY KEY,
+    stripe_account_id text,
+    charges_enabled boolean NOT NULL DEFAULT false,
+    details_submitted boolean NOT NULL DEFAULT false,
+    payouts_enabled boolean NOT NULL DEFAULT false,
+    paynow text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS payment_packages (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    name text NOT NULL,
+    sessions integer NOT NULL,
+    group_credits integer NOT NULL DEFAULT 0,
+    price_cents integer NOT NULL,
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS payment_packages_coach_idx ON payment_packages (coach_id)`,
+  `CREATE TABLE IF NOT EXISTS payment_orders (
+    id text PRIMARY KEY,
+    token text NOT NULL,
+    ref text NOT NULL,
+    coach_id text NOT NULL,
+    client_id text NOT NULL,
+    package_id text,
+    name text NOT NULL,
+    sessions integer NOT NULL DEFAULT 0,
+    group_credits integer NOT NULL DEFAULT 0,
+    amount_cents integer NOT NULL,
+    currency text NOT NULL DEFAULT 'sgd',
+    method text NOT NULL DEFAULT 'STRIPE',
+    manual_kind text,
+    status text NOT NULL DEFAULT 'PENDING',
+    stripe_session_id text,
+    payment_intent_id text,
+    receipt_url text,
+    applied_sessions integer NOT NULL DEFAULT 0,
+    applied_group integer NOT NULL DEFAULT 0,
+    note_enc text,
+    created_by text NOT NULL DEFAULT 'COACH',
+    expires_at timestamptz,
+    paid_at timestamptz,
+    refunded_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_token_idx ON payment_orders (token)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_coach_idx ON payment_orders (coach_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_client_idx ON payment_orders (client_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS payment_events (
+    id text PRIMARY KEY,
+    type text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `ALTER TABLE bookings ADD COLUMN IF NOT EXISTS original_coach_id text`,
   `ALTER TABLE group_sessions ADD COLUMN IF NOT EXISTS original_coach_id text`,
+  `CREATE TABLE IF NOT EXISTS ai_trainer_profiles (
+    user_id text PRIMARY KEY,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS ai_trainer_plans (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    week_start text NOT NULL,
+    data_enc text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_trainer_plans_user_idx ON ai_trainer_plans (user_id, week_start)`,
+  `CREATE TABLE IF NOT EXISTS ai_reviews (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    month text NOT NULL,
+    status text NOT NULL DEFAULT 'STARTED',
+    flagged boolean NOT NULL DEFAULT false,
+    flags text NOT NULL DEFAULT '[]',
+    seconds integer NOT NULL DEFAULT 0,
+    answers text NOT NULL DEFAULT '[]',
+    started_at timestamptz NOT NULL DEFAULT now(),
+    submitted_at timestamptz,
+    decided_at timestamptz,
+    decided_by text,
+    decision_note text NOT NULL DEFAULT '',
+    discount_kind text,
+    discount_note text NOT NULL DEFAULT ''
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ai_reviews_coach_month_idx ON ai_reviews (coach_id, month)`,
+  `CREATE TABLE IF NOT EXISTS ai_rules (
+    id text PRIMARY KEY,
+    review_id text NOT NULL,
+    coach_id text NOT NULL,
+    tags text NOT NULL,
+    exercise_ids text NOT NULL,
+    text text NOT NULL DEFAULT '',
+    active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_rules_active_idx ON ai_rules (active, created_at)`,
+  `CREATE TABLE IF NOT EXISTS ai_review_credits (
+    id text PRIMARY KEY,
+    coach_id text NOT NULL,
+    review_id text NOT NULL,
+    cents integer NOT NULL,
+    status text NOT NULL DEFAULT 'PENDING',
+    note text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    applied_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_review_credits_coach_idx ON ai_review_credits (coach_id, status)`,
+  `CREATE TABLE IF NOT EXISTS oauth_identities (
+    provider text NOT NULL,
+    subject text NOT NULL,
+    user_id text NOT NULL,
+    email text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider, subject)
+  )`,
+  `CREATE INDEX IF NOT EXISTS oauth_identities_user_idx ON oauth_identities (user_id)`,
+  `CREATE TABLE IF NOT EXISTS coach_public (
+    coach_id text PRIMARY KEY,
+    is_public boolean NOT NULL DEFAULT true,
+    data text NOT NULL DEFAULT '{}',
+    takes_consults boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS consults (
+    id text PRIMARY KEY,
+    solo_id text NOT NULL,
+    trainer_id text,
+    status text NOT NULL DEFAULT 'PAYING',
+    price_cents integer NOT NULL,
+    trainer_cents integer NOT NULL,
+    refunded_cents integer NOT NULL DEFAULT 0,
+    data_enc text NOT NULL,
+    checkout_session_id text,
+    payment_intent_id text,
+    accept_by timestamptz,
+    accepted_at timestamptz,
+    ends_at timestamptz,
+    ended_at timestamptz,
+    ended_by text,
+    room_name text,
+    room_url text,
+    solo_joined_at timestamptz,
+    trainer_joined_at timestamptz,
+    payout_status text NOT NULL DEFAULT 'NONE',
+    payout_due_at timestamptz,
+    transfer_id text,
+    stars integer,
+    review text,
+    reviewed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS consults_status_idx ON consults (status)`,
+  `CREATE INDEX IF NOT EXISTS consults_solo_idx ON consults (solo_id)`,
+  `CREATE INDEX IF NOT EXISTS consults_trainer_idx ON consults (trainer_id)`,
+  `CREATE TABLE IF NOT EXISTS consult_reports (
+    id text PRIMARY KEY,
+    consult_id text NOT NULL,
+    reporter_id text NOT NULL,
+    reporter_role text NOT NULL,
+    reason text NOT NULL,
+    details_enc text NOT NULL,
+    status text NOT NULL DEFAULT 'OPEN',
+    resolution text,
+    upheld boolean NOT NULL DEFAULT false,
+    resolved_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS consult_reports_status_idx ON consult_reports (status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS consult_reports_consult_idx ON consult_reports (consult_id)`,
+  `CREATE TABLE IF NOT EXISTS consult_blocks (
+    user_id text PRIMARY KEY,
+    reason text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ];

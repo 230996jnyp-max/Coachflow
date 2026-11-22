@@ -27,6 +27,7 @@ import {
   assignments,
   attendance,
   authTokens,
+  oauthIdentities,
   bookings,
   calendarTokens,
   clientNotes,
@@ -55,7 +56,7 @@ import {
 } from "./schema";
 
 /*
- * What the owner can do to an account from the Sign-ups tab. Names, emails and phone numbers are read so the owner can recognise who is
+ * What the owner can do to an account from the Users tab. Names, emails and phone numbers are read so the owner can recognise who is
  * who; workouts, notes, food logs, body data and photos are never read here. Every action is logged, and the person is emailed about it.
  */
 
@@ -78,6 +79,10 @@ export interface PersonRow {
   age: "adult" | "under 18" | "unknown";
   /** Clients: their coach's name. Coaches: their clients' count, niches and code. */
   coachName?: string;
+  /** Clients: the id of their coach (so the owner's list can nest them under that coach). */
+  coachId?: string;
+  /** A temporary password was issued and not yet replaced (the person has not signed in since). */
+  mustChangePassword?: boolean;
   clientCount?: number;
   niches?: string[];
   coachCode?: string;
@@ -132,7 +137,8 @@ export async function listPeople(limit = 500): Promise<PersonRow[]> {
       lastLoginAt: r.lastLoginAt ? r.lastLoginAt.toISOString() : null,
       trialEndsAt: r.trialEndsAt ? r.trialEndsAt.toISOString() : null,
       age: !dob ? "unknown" : isMinorAge(ageOn(dob)) ? "under 18" : "adult",
-      ...(kind === "client" && r.coachId ? { coachName: coachName.get(r.coachId) ?? "—" } : {}),
+      ...(kind === "client" && r.coachId ? { coachName: coachName.get(r.coachId) ?? "—", coachId: r.coachId } : {}),
+      mustChangePassword: r.mustChangePassword,
       ...(kind === "coach" ? { clientCount: clientsOf.get(r.id) ?? 0, niches: nichesOf.get(r.id) ?? [], coachCode: r.coachCode ?? undefined } : {}),
     };
   });
@@ -208,7 +214,7 @@ async function purgeCoach(id: string): Promise<void> {
   await d.delete(coachLinks).where(eq(coachLinks.coachId, id));
 }
 
-async function purgeAccount(row: UserRow): Promise<void> {
+export async function purgeAccount(row: UserRow): Promise<void> {
   const d = await db();
   // A coach who runs a gym takes the gym with them (its other coaches become independent); a member just leaves it.
   for (const g of await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, row.id))) await deleteGymEverything(g.id);
@@ -219,6 +225,7 @@ async function purgeAccount(row: UserRow): Promise<void> {
   await d.delete(notifications).where(eq(notifications.userId, row.id));
   await d.delete(calendarTokens).where(eq(calendarTokens.userId, row.id));
   await d.delete(authTokens).where(eq(authTokens.userId, row.id));
+  await d.delete(oauthIdentities).where(eq(oauthIdentities.userId, row.id));
   await d.delete(userMedia).where(eq(userMedia.userId, row.id));
   await d.delete(aiUsage).where(eq(aiUsage.userId, row.id));
   await d.delete(users).where(eq(users.id, row.id));

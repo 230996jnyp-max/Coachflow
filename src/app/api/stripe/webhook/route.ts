@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
  * and the upcoming-invoice notice (when the price is re-checked against the roster).
  */
 export async function POST(req: Request) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  // The name in the docs is STRIPE_WEBHOOK_SECRET; the longer spelling is accepted too, because that is how it was first saved in Vercel.
+  const secret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_KEY;
   const signature = req.headers.get("stripe-signature");
   if (!secret) return NextResponse.json({ error: "Webhook isn't configured." }, { status: 503 });
   if (!signature) return NextResponse.json({ error: "Missing signature." }, { status: 400 });

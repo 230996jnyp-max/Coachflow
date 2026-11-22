@@ -2,7 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { addDays, effectiveStatus, isBlockedStatus, lookupKey, sgd, tierFor, TRIAL_DAYS, trialDaysLeft, type BillingInfo, type BillingStatus } from "@/lib/billing";
-import { db } from "./db";
+import { db, isLocalTestMode } from "./db";
 import { badRequest, HttpError } from "./http";
 import { escapeHtml, layout, sendMail } from "./mail";
 import { coachBilling, users, type CoachBillingRow, type UserRow } from "./schema";
@@ -23,7 +23,15 @@ export const stripeReady = (): boolean => !!process.env.STRIPE_SECRET_KEY;
 let client: Stripe | null = null;
 export function stripe(): Stripe {
   if (!process.env.STRIPE_SECRET_KEY) throw new HttpError(503, "Billing isn't set up yet. Please try again later.");
-  return (client ??= new Stripe(process.env.STRIPE_SECRET_KEY));
+  if (!client) {
+    // Local testing only: talk to a stand-in Stripe (host:port) instead of the real one.
+    const fake = process.env.PAYMENTS_FAKE_STRIPE;
+    if (fake && isLocalTestMode()) {
+      const [host, port] = fake.split(":");
+      client = new Stripe(process.env.STRIPE_SECRET_KEY, { host, port: Number(port), protocol: "http" });
+    } else client = new Stripe(process.env.STRIPE_SECRET_KEY);
+  }
+  return client;
 }
 /** Tests only: swap in a stand-in for Stripe. */
 export function setStripeForTests(c: unknown) {
@@ -124,7 +132,9 @@ export async function billingInfo(me: UserRow): Promise<BillingInfo> {
     };
   }
   if (me.role === "COACH" && (await coveredByGym(me.id))) {
-    return { ...base, role: "COACH", exempt: true, gym: true, status: "LIFETIME_FREE", blocked: false, trialDaysLeft: 0, trialEnds: null, activeClients: await activeClientCount(me.id), tierCents: 0, renewsOn: null, hasSubscription: false, cancelAtPeriodEnd: false };
+    const { gymPlanForUser } = await import("./gymPlan");
+    const plan = await gymPlanForUser(me.id);
+    return { ...base, role: "COACH", exempt: true, gym: true, ...(plan ? { gymPlan: plan } : {}), status: "LIFETIME_FREE", blocked: enforced && !!plan?.blocked, trialDaysLeft: 0, trialEnds: null, activeClients: await activeClientCount(me.id), tierCents: 0, renewsOn: null, hasSubscription: false, cancelAtPeriodEnd: false };
   }
   const row = await ensureBilling(me);
   const status = effectiveStatus(fields(row));
@@ -284,6 +294,14 @@ const asDate = (unix?: number | null): Date | null => (unix ? new Date(unix * 10
 
 /** Applies one verified Stripe event. Safe to receive more than once. Returns whether it was one we act on. */
 export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
+  // A gym's subscription (its id is in the event's metadata, or the customer is a gym's) is handled in gymPlan.ts.
+  const { handleGymEvent } = await import("./gymPlan");
+  const gymResult = await handleGymEvent(event);
+  if (gymResult !== null) return gymResult;
+  // A consult payment (metadata.kind = "consult") is handled in consult.ts.
+  const { handleConsultEvent } = await import("./consult");
+  const consultResult = await handleConsultEvent(event);
+  if (consultResult !== null) return consultResult;
   const d = await db();
   switch (event.type) {
     case "checkout.session.completed": {
@@ -321,6 +339,18 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
         })
         .where(eq(coachBilling.coachId, coachId));
       forget(coachId);
+      // Stripe says "active" once the first real payment went through: the coach who invited this one earns their free month.
+      if (sub.status === "active") {
+        const { onCoachPaid } = await import("./referrals");
+        await onCoachPaid(coachId);
+        // A discount earned from the monthly AI review before they subscribed goes onto their account now.
+        try {
+          const { applyPendingReviewCredits } = await import("./aiReview");
+          await applyPendingReviewCredits(coachId);
+        } catch (e) {
+          console.error("pending review credit", e instanceof Error ? e.message : e);
+        }
+      }
       return true;
     }
     case "customer.subscription.deleted": {

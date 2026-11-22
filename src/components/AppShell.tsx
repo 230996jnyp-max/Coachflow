@@ -1,6 +1,7 @@
 "use client";
 
 import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
+import { SyncBanner } from "@/components/SyncBanner";
 import { BillingBar } from "@/components/billing/BillingBar";
 import { BillingGate } from "@/components/billing/BillingGate";
 import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
@@ -8,6 +9,7 @@ import { useBilling, useBillingLoader } from "@/lib/billingState";
 import { useNicheStepPending } from "@/lib/nicheGate";
 import {
   Apple,
+  BarChart3,
   Building2,
   CalendarDays,
   ChevronsLeft,
@@ -20,9 +22,11 @@ import {
   MessageCircle,
   Settings,
   ShieldCheck,
+  Sparkles,
   Timer,
   UserRound,
   Users,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -55,6 +59,8 @@ const TRAINER_NAV: NavItem[] = [
   { href: "/schedule", label: "Schedule", icon: <CalendarDays size={22} />, mobile: true },
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
   { href: "/messages", label: "Messages", icon: <MessageCircle size={22} />, mobile: true },
+  { href: "/business", label: "Business", icon: <BarChart3 size={22} /> },
+  { href: "/consult", label: "Consults", icon: <Video size={22} /> },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Settings", icon: <Settings size={22} /> },
 ];
@@ -69,12 +75,16 @@ const CLIENT_NAV: NavItem[] = [
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Profile", icon: <UserRound size={22} /> },
 ];
+/** Only for someone training on their own (no coach): the AI trainer. */
+const AI_TRAINER_NAV: NavItem = { href: "/ai-trainer", label: "AI trainer", icon: <Sparkles size={22} />, mobile: true };
+/** Someone on their own can pay for an hour with a real trainer (desktop menu; on phones it is on the AI trainer page). */
+const CONSULT_NAV: NavItem = { href: "/consult", label: "Consult a trainer", icon: <Video size={22} /> };
 
-const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor"];
+const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor", "/business"];
 const OWNER_ONLY = ["/admin"];
 const ADMIN_NAV: NavItem = { href: "/admin", label: "Admin", icon: <ShieldCheck size={22} /> };
 const GYM_NAV: NavItem = { href: "/gym-admin", label: "Gym", icon: <Building2 size={22} /> };
-const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition", "/intake"];
+const CLIENT_ONLY = ["/home", "/progress", "/book", "/nutrition", "/intake", "/pay"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, user, isTrainer, db, isPersonal, isMinor } = useViewer();
@@ -102,7 +112,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       (!isTrainer && TRAINER_ONLY.some((p) => pathname.startsWith(p))) ||
       (!user.isOwner && OWNER_ONLY.some((p) => pathname.startsWith(p))) ||
       (pathname.startsWith("/gym-admin") && !hasPortalAccess(user.gym)) ||
-      (isPersonal && ["/book", "/messages", "/classes", "/intake"].some((p) => pathname.startsWith(p))) ||
+      (isPersonal && ["/book", "/messages", "/classes", "/intake", "/pay"].some((p) => pathname.startsWith(p))) ||
+      ((!isPersonal || isMinor) && pathname.startsWith("/ai-trainer")) ||
       (isMinor && pathname.startsWith("/nutrition")));
   // Accounts using a temporary password must choose their own before doing anything else.
   const mustChange = !!user?.mustChangePassword && !pathname.startsWith("/settings/password");
@@ -142,7 +153,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isTrainer && (nicheStep || (db.settings.specialties ?? []).length === 0) && !user.mustChangePassword) return <NicheStep />;
 
   // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
-  const clientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  const baseClientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
+  // The AI trainer sits after Workout for someone on their own (not for under-18s: no AI features for them).
+  const clientNav = isPersonal && !isMinor ? [...baseClientNav.slice(0, 2), AI_TRAINER_NAV, CONSULT_NAV, ...baseClientNav.slice(2)] : baseClientNav;
   // A coach whose gym role opens the gym portal gets a Gym entry (on phones it is in the profile menu).
   const withGym = hasPortalAccess(user.gym) ? [...TRAINER_NAV.slice(0, 4), GYM_NAV, ...TRAINER_NAV.slice(4)] : TRAINER_NAV;
   const nav = isTrainer ? (user.isOwner ? [...withGym.slice(0, withGym.length - 2), ADMIN_NAV, ...withGym.slice(withGym.length - 2)] : withGym) : clientNav;
@@ -225,6 +238,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className={cn("pb-28 md:pb-10", slim ? "md:pl-[72px]" : "md:pl-64")}>
         <div className={cn("mx-auto w-full px-4 py-5 md:px-8 md:py-8", pathname.startsWith("/floor/") ? "max-w-7xl" : "max-w-5xl")}>
           {user.trial && !isTrainer && <TrialBar trial={user.trial} />}
+          {!onFloor && <SyncBanner />}
           <BillingBar />
           {isTrainer && !pathname.startsWith("/floor/") && <FloorBanner />}
           {children}

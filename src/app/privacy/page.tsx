@@ -11,6 +11,7 @@ export default function PrivacyPage() {
         <ul>
           <li>Account details: name, username, email, phone / WhatsApp number, date of birth, unit preference and your password (stored only as a one-way hash).</li>
           <li>Training information you enter: workouts, routines, body measurements, progress photos, goals, injury or medical notes, food diary entries and chat messages.</li>
+          <li>If you sign in with Google, Facebook or Microsoft: the provider&apos;s ID for you, plus the name and email address it shares with us. We do not receive your provider password and do not keep any access token.</li>
           <li>Booking details if you use a coach: sessions, places, attendance and credits.</li>
           <li>If you join the waitlist for the AI personal trainer: your email address, which side of the app you came from, and when you joined. We use it only to tell you when the feature is ready.</li>
           <li>Technical data needed to run the service: a sign-in cookie, and network addresses used only for abuse limits (stored in scrambled form).</li>
