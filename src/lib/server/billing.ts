@@ -298,6 +298,10 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<boolean> {
   const { handleGymEvent } = await import("./gymPlan");
   const gymResult = await handleGymEvent(event);
   if (gymResult !== null) return gymResult;
+  // A consult payment (metadata.kind = "consult") is handled in consult.ts.
+  const { handleConsultEvent } = await import("./consult");
+  const consultResult = await handleConsultEvent(event);
+  if (consultResult !== null) return consultResult;
   const d = await db();
   switch (event.type) {
     case "checkout.session.completed": {

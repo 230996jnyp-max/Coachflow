@@ -4,6 +4,7 @@ import { HeartPulse, LoaderCircle, Play, RefreshCw, ShieldAlert, Sparkles } from
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ConsultCard } from "@/components/consult/ConsultCard";
 import { FormFill } from "@/components/intake/FormParts";
 import { Badge, Button, Card, Modal, Notice, PageHeader, SectionTitle, Segmented, Textarea } from "@/components/ui";
 import { EQUIPMENT_LABEL, NOT_MEDICAL_ADVICE, TRAINER_EQUIPMENT, type PlanExercise, type TrainerEquipment } from "@/lib/aiTrainer";
@@ -219,6 +220,7 @@ export function AiTrainer() {
         }
       />
       {error && <Notice tone="error">{error}</Notice>}
+      <ConsultCard />
 
       {view.paused ? (
         <Card className="space-y-3 p-5">

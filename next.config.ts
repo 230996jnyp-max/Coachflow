@@ -3,16 +3,19 @@ import type { NextConfig } from "next";
 
 /**
  * Headers sent with every response. Camera, microphone and location stay available to the app itself (barcode and QR scanning, "Hey
- * Flow", nearby places) and are off for anything embedded. `frame-ancestors 'none'` (with X-Frame-Options for older browsers) stops
+ * Flow", nearby places) and are off for anything embedded, except the consult video call (Daily), which also gets screen share. `frame-ancestors 'none'` (with X-Frame-Options for older browsers) stops
  * the app being shown inside another site, which is how a "clickjacking" trick is set up. `object-src`, `base-uri` and `form-action`
  * close three other well-known gaps. Script and style sources are not restricted here yet: the app's own inline scripts need a
  * per-request nonce first (see the security review notes), and a wrong rule would break the live site.
  */
+/** Consult video calls run in an embedded Daily room (https://<name>.daily.co), which needs the camera, microphone and screen share. */
+const VIDEO = process.env.DAILY_DOMAIN ? `"https://${process.env.DAILY_DOMAIN.replace(/^https?:\/\//, "")}" "https://*.daily.co"` : `"https://*.daily.co"`;
+
 const SECURITY_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=(self), usb=(), serial=(), bluetooth=(), interest-cohort=()" },
+  { key: "Permissions-Policy", value: `camera=(self ${VIDEO}), microphone=(self ${VIDEO}), display-capture=(self ${VIDEO}), fullscreen=(self ${VIDEO}), geolocation=(self), payment=(self), usb=(), serial=(), bluetooth=(), interest-cohort=()` },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'" },
 ];

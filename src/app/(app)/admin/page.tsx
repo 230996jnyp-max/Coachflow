@@ -8,6 +8,7 @@ import { useBillingOverview } from "@/components/admin/BillingAdmin";
 import { PendingApprovals } from "@/components/admin/PendingApprovals";
 import { AiReviewsPanel } from "@/components/admin/AiReviewsPanel";
 import { AiUsagePanel } from "@/components/admin/AiUsagePanel";
+import { ConsultsPanel } from "@/components/admin/ConsultsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { BroadcastModal } from "@/components/chat/BroadcastModal";
 import { Button, ConfirmDialog, Notice, PageHeader } from "@/components/ui";
@@ -16,7 +17,7 @@ import { coachThread, requestThread } from "@/lib/chat";
 import { useViewer } from "@/lib/hooks";
 import { api } from "@/lib/store";
 
-type Tab = "users" | "ai" | "reviews" | "pending";
+type Tab = "users" | "consults" | "ai" | "reviews" | "pending";
 
 export default function AdminPage() {
   const { user } = useViewer();
@@ -28,7 +29,14 @@ export default function AdminPage() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [reset, setReset] = useState<CoachRow | null>(null);
   const [version, setVersion] = useState(0);
-  const [tab, setTab] = useState<Tab>("users");
+  // Notifications about a consult report open this page with ?tab=consults.
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("tab") === "consults" ? "consults" : "users";
+    } catch {
+      return "users";
+    }
+  });
   const pending = usePendingCoachRequests();
   const billing = useBillingOverview();
 
@@ -66,6 +74,7 @@ export default function AdminPage() {
   // Coaches now sign themselves up. The approvals tab only appears while a request from before that is still waiting.
   const tabs: [Tab, string][] = [
     ["users", "Users"],
+    ["consults", "Consults"],
     ["ai", "AI usage"],
     ["reviews", "AI reviews"],
     ...(pending > 0 || tab === "pending" ? ([["pending", "Earlier requests"]] as [Tab, string][]) : []),
@@ -119,6 +128,7 @@ export default function AdminPage() {
           onReset={setReset}
         />
       )}
+      {tab === "consults" && <ConsultsPanel />}
       {tab === "ai" && <AiUsagePanel />}
       {tab === "reviews" && <AiReviewsPanel />}
 

@@ -26,6 +26,7 @@ import {
   Timer,
   UserRound,
   Users,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -59,6 +60,7 @@ const TRAINER_NAV: NavItem[] = [
   { href: "/workout", label: "Workout", icon: <Dumbbell size={22} />, mobile: true },
   { href: "/messages", label: "Messages", icon: <MessageCircle size={22} />, mobile: true },
   { href: "/business", label: "Business", icon: <BarChart3 size={22} /> },
+  { href: "/consult", label: "Consults", icon: <Video size={22} /> },
   { href: "/exercises", label: "Exercises", icon: <ListChecks size={22} /> },
   { href: "/settings", label: "Settings", icon: <Settings size={22} /> },
 ];
@@ -75,6 +77,8 @@ const CLIENT_NAV: NavItem[] = [
 ];
 /** Only for someone training on their own (no coach): the AI trainer. */
 const AI_TRAINER_NAV: NavItem = { href: "/ai-trainer", label: "AI trainer", icon: <Sparkles size={22} />, mobile: true };
+/** Someone on their own can pay for an hour with a real trainer (desktop menu; on phones it is on the AI trainer page). */
+const CONSULT_NAV: NavItem = { href: "/consult", label: "Consult a trainer", icon: <Video size={22} /> };
 
 const TRAINER_ONLY = ["/trainer", "/clients", "/schedule", "/floor", "/business"];
 const OWNER_ONLY = ["/admin"];
@@ -151,7 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Someone training on their own has no booking, credits or coach chat; under-18s have no calorie tracking.
   const baseClientNav = CLIENT_NAV.filter((n) => !(isPersonal && (n.href === "/book" || n.href === "/messages")) && !(isMinor && n.href === "/nutrition"));
   // The AI trainer sits after Workout for someone on their own (not for under-18s: no AI features for them).
-  const clientNav = isPersonal && !isMinor ? [...baseClientNav.slice(0, 2), AI_TRAINER_NAV, ...baseClientNav.slice(2)] : baseClientNav;
+  const clientNav = isPersonal && !isMinor ? [...baseClientNav.slice(0, 2), AI_TRAINER_NAV, CONSULT_NAV, ...baseClientNav.slice(2)] : baseClientNav;
   // A coach whose gym role opens the gym portal gets a Gym entry (on phones it is in the profile menu).
   const withGym = hasPortalAccess(user.gym) ? [...TRAINER_NAV.slice(0, 4), GYM_NAV, ...TRAINER_NAV.slice(4)] : TRAINER_NAV;
   const nav = isTrainer ? (user.isOwner ? [...withGym.slice(0, withGym.length - 2), ADMIN_NAV, ...withGym.slice(withGym.length - 2)] : withGym) : clientNav;

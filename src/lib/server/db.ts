@@ -69,7 +69,22 @@ async function ensureSchema(client: NeonQueryFunction<false, false>): Promise<vo
   }
 }
 
+/**
+ * The local test database lives in memory, and Next keeps separate copies of this module for API routes and for pages rendered on the
+ * server; kept on globalThis, both use the same database (otherwise a server-rendered page would see an empty one).
+ */
+const local = globalThis as unknown as { __coachflowLocalDb?: Promise<Db> };
+
 export function db(): Promise<Db> {
+  if (isLocalTestMode()) {
+    if (!local.__coachflowLocalDb) {
+      local.__coachflowLocalDb = open().catch((e) => {
+        local.__coachflowLocalDb = undefined;
+        throw e;
+      });
+    }
+    return local.__coachflowLocalDb;
+  }
   if (!handle) {
     handle = open().catch((e) => {
       handle = undefined;

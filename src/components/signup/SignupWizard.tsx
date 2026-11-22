@@ -63,7 +63,7 @@ const USER_RE = /^[a-z0-9_.-]{3,32}$/;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The three-step sign-up: choose Trainer / Client / Solo / Gym, then your details, then a few questions for that choice. */
-export function SignupWizard({ initialRole = null, initialGymCode = "", initialRef = "" }: { initialRole?: SignupRole | null; initialGymCode?: string; initialRef?: string }) {
+export function SignupWizard({ initialRole = null, initialGymCode = "", initialRef = "", initialCoachCode = "" }: { initialRole?: SignupRole | null; initialGymCode?: string; initialRef?: string; initialCoachCode?: string }) {
   // 1 = choose Trainer / Client / Solo / Gym, 2 = your details, 3 = a few questions for that choice. The welcome page can pre-pick.
   const [step, setStep] = useState(initialRole ? 2 : 1);
   // The welcome page can pre-pick a role; the sign-up page reads it from the address and passes it in.
@@ -112,6 +112,8 @@ export function SignupWizard({ initialRole = null, initialGymCode = "", initialR
   const [gymText, setGymText] = useState("");
   // A coach code typed on the welcome page arrives through this tab's session storage (once). It is looked up below so the coach's name shows.
   const [code, setCode] = useState(() => {
+    // A coach's public page link (?coach=123456) brings the code with it.
+    if (initialCoachCode) return cleanCoachCode(initialCoachCode) ?? "";
     if (typeof window === "undefined") return "";
     try {
       const v = sessionStorage.getItem("cf_signup_coach_code") ?? "";

@@ -425,6 +425,44 @@ For a basement gym: CoachFlow opens, shows today's workout and plan, and takes n
 - **Status.** One strip at the top of the app (`src/components/SyncBanner.tsx`, numbers from `src/lib/syncStatus.ts`): "You're offline · N changes waiting to sync", "Syncing N changes…" when a wait drags on, and a short "All changes synced". `GET /api/ping` (no sign-in) is how the app tells the server is back; it checks every 8 seconds while offline and on the browser's `online` event. When the signal returns after an offline start, everything waiting is sent and the app reloads from the server.
 - **Not offline:** payments, chat, booking and cancelling sessions, class sign-ups and AI features still need a signal.
 
+## Public coach page
+
+Every coach has a page anyone can open, to share on Instagram or WhatsApp: `/coach/<username>` (a coach whose username is their email gets `/coach/c-<coach code>` instead, so the email never appears in a link).
+
+- **What it shows:** photo, name, headline, about, years of experience, certifications, area (a neighbourhood, never an address), niches, gym name, packages and prices (if they choose), and the 1-to-5 star ratings and reviews from consults (reviewer's first name only). Never an email, a phone number or anything about their clients. A "Train with ..." button opens the client sign-up with the coach's code already in (`/signup?role=client&coach=<code>`).
+- **Where coaches set it:** Settings, **Public page & consults**: on/off switch (on by default), headline, about, years, certifications (up to 10), area, show packages. Empty fields start from the tagline and years they gave at sign-up and their bio. Switched off, the page and its photo answer "not found".
+- **Code:** `src/lib/server/coachPublic.ts`, page `src/app/coach/[slug]/page.tsx` (server-rendered, with a share title), photo `GET /api/public/coach/[slug]/avatar`, settings `GET/PUT /api/coach-profile`, table `coach_public`.
+
+## Consult a trainer (solo users, S$50)
+
+Someone training on their own can pay **S$50 for a one-hour video consult** with a CoachFlow trainer, about their AI plan, form or progress. It is a one-off payment, not a subscription.
+
+- **How it runs:** they write what they want help with (and choose whether to share their health answers), then pay at Stripe Checkout on CoachFlow's account. The card is only **held**. Every trainer who takes consults is notified; the **first to accept** takes it, the hold is captured and the hour starts. With no trainer in **30 minutes** the hold is released (never charged). The call is a private Daily room inside the app for exactly two people, which closes by itself at 60 minutes (both are warned 5 minutes before); either can end it early. The person sees the trainer's card and public page during and after, and can rate it once.
+- **What the trainer sees:** the person's first name, their question, goal, experience, equipment, this week's AI plan and last five workouts; their health questionnaire answers only if they shared them. No contact details either way.
+- **Money:** S$35 to the trainer, S$15 to CoachFlow, which also pays Stripe's card fee (about S$2, so CoachFlow nets about S$13). The trainer's share is sent to their connected Stripe account **48 hours after the consult**, so a report can be decided first; an open report holds it. A partial refund pays the trainer 70% of what was kept.
+- **Trainers:** Settings, Public page & consults, **Take consults** (needs Stripe connected in Settings, Payments). Their page then says they take consults. The **Consults** page (menu) lists requests waiting, the live call with the person's brief beside it, past consults and earnings.
+- **Reports:** either side can report (during the call, or after it until the trainer is paid). The owner gets an in-app note and an email to SUPPORT_EMAIL. **Admin, Consults** shows each report with what the app recorded (who opened the call, how long it ran, who ended it, earlier upheld reports), a **recommended action**, and the decision form: no refund / partial / full refund, and no action / warn or suspend the trainer / warn or block the person, with a note sent to them. A decision that refunds in full or suspends someone during a live call closes the call. Suspensions and blocks are listed there and can be lifted.
+- **Recommended actions** (advice only, `recommend()` in `src/lib/consults.ts`):
+
+  | Report | App's record | Recommended |
+  | --- | --- | --- |
+  | Trainer didn't turn up | trainer never opened the call | full refund, warn the trainer (suspend if it happened twice before) |
+  | Trainer didn't turn up | trainer did open it | half refund, ask both |
+  | Ended early | under 30 minutes, not ended by the person | half refund |
+  | Ended early | the person ended it, or most of the hour ran | pay the trainer |
+  | Advice not helpful | under 15 minutes or the person never joined | half refund, ask what happened |
+  | Advice not helpful | a real call | pay the trainer (warn after repeated upheld reports) |
+  | Unsafe advice | any | full refund, warn the trainer (suspend if repeated), tell the person to see a doctor |
+  | Rude or inappropriate trainer | any | full refund, suspend the trainer from consults while you talk to them |
+  | Call didn't work | under 15 minutes or one side never got in | full refund, nobody at fault |
+  | Call didn't work | connected a while | half refund |
+  | Trainer: person didn't turn up | any | pay the trainer |
+  | Trainer: person was abusive | any | pay the trainer, warn the person (block if it happened before) |
+
+- **Limits:** one consult at a time, 6 requests a day per person, 5 reports a day; under-18s can't book; a trainer takes one consult at a time.
+- **Setup:** `DAILY_API_KEY` (from the Daily dashboard; optional `DAILY_DOMAIN`, e.g. `yourname.daily.co`), plus Stripe Connect switched on (`CONNECT_ENABLED=1`, see Payments below) with coaches' accounts connected. The trainer's share is a Stripe **transfer** from CoachFlow's balance to the coach's Standard account (separate charges and transfers, same region): check in the Stripe dashboard that transfers to connected accounts are enabled before going live. Without the keys the button reads "Consults are coming soon". The daily `/api/cron/billing` job also moves consults on (expiry, end of the hour, payouts); the same happens whenever someone opens a consult page. No new webhook events: consult payments use `checkout.session.completed` / `checkout.session.expired` with `metadata.kind = "consult"`.
+- **Code:** rules `src/lib/consults.ts`, server `src/lib/server/consult.ts`, video `src/lib/server/daily.ts`, routes `/api/consults`, `/api/consults/[id]` (accept, join, end, cancel, rate, report), `/api/admin/consults` (+ `reports/[id]`, `blocks/[userId]`), tables `consults`, `consult_reports`, `consult_blocks`, page `/consult` (both sides), Admin tab `ConsultsPanel`. The video frame is allowed camera, microphone and screen share by the Permissions-Policy in `next.config.ts`.
+
 ## Referrals (Settings, Invite & earn)
 
 Everyone has an invitation code (`CF-XXXXXX`) and link. The kind of person decides who the code is for and what it earns. A code only works for its own kind of sign-up (the form says so if it is the wrong kind), and each kind has a cap.

@@ -6,6 +6,7 @@ import {
   allowedLibrary,
   buildBasicPlan,
   emptyState,
+  EQUIPMENT_LABEL,
   nextVolumeMod,
   NOT_MEDICAL_ADVICE,
   PAUSE_ADVICE,
@@ -23,7 +24,7 @@ import {
   type TrainerState,
 } from "@/lib/aiTrainer";
 import { rulesToPrompt } from "@/lib/aiReview";
-import { cleanForm } from "@/lib/intakeForms";
+import { cleanForm, PARQ_QUESTIONS } from "@/lib/intakeForms";
 import type { RoutineTemplate } from "@/lib/types";
 import { isMinorRow } from "./accounts";
 import { aiConfigured, groq, jsonFrom, TEXT_MODEL } from "./ai";
@@ -371,5 +372,43 @@ export async function soloSafety(me: UserRow): Promise<{ gentle: boolean; tags: 
     rules: await activeRules(),
     paused: !!s.state.pausedAt,
     blocked: sc.needsClearance && !s.profile.clearance,
+  };
+}
+
+/* ---------------- For a paid consult with a trainer ---------------- */
+export interface ConsultBrief {
+  ready: boolean;
+  goal: string;
+  experience: string;
+  sessionsPerWeek: number;
+  equipment: string;
+  pastInjuries: string;
+  plan: { weekStart: string; summary: string; days: { name: string; focus: string; exercises: number }[] } | null;
+  gentle: boolean;
+  needsClearance: boolean;
+  /** Only when the person chose to share their health answers for this consult: the questions they answered yes to, with their notes. */
+  health: { question: string; detail: string }[] | null;
+}
+
+/** What a trainer sees about the person during a consult: their goal and AI plan, and their health answers only if they shared them. */
+export async function consultBrief(userId: string, shareHealth: boolean): Promise<ConsultBrief> {
+  const s = await loadStored(userId);
+  const plan = await loadPlan(userId);
+  const sc = s ? screen(s.profile.parq) : null;
+  const g = s?.profile.goals;
+  return {
+    ready: !!s,
+    goal: g?.mainGoal ?? "",
+    experience: g?.experience ?? "",
+    sessionsPerWeek: s ? sessionsPerWeek(s.profile.goals) : 0,
+    equipment: s?.profile.equipment ? EQUIPMENT_LABEL[s.profile.equipment] : "",
+    pastInjuries: shareHealth ? (g?.pastInjuries ?? "") : "",
+    plan: plan ? { weekStart: plan.weekStart, summary: plan.summary, days: plan.days.map((d) => ({ name: d.name, focus: d.focus, exercises: d.exercises.length })) } : null,
+    gentle: sc?.gentle ?? false,
+    needsClearance: sc?.needsClearance ?? false,
+    health:
+      shareHealth && s
+        ? PARQ_QUESTIONS.filter((q) => s.profile.parq.answers[q.id] === "yes").map((q) => ({ question: q.text, detail: (s.profile.parq.details[q.id] ?? "").slice(0, 300) }))
+        : null,
   };
 }

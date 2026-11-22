@@ -1135,6 +1135,96 @@ export const oauthIdentities = pgTable(
 export type AiReviewRow = typeof aiReviews.$inferSelect;
 export type AiRuleRow = typeof aiRules.$inferSelect;
 
+/**
+ * A coach's public profile page (/coach/<username>): what they chose to show anyone with the link. Plain text on purpose: it is public.
+ * No contact details are ever kept here. `takes_consults` = this coach is offered paid consults from people training on their own.
+ */
+export const coachPublic = pgTable("coach_public", {
+  coachId: text("coach_id").primaryKey(),
+  isPublic: boolean("is_public").notNull().default(true),
+  /** JSON: { headline, about, experienceYears, certifications[], area, showPackages }. */
+  data: text("data").notNull().default("{}"),
+  takesConsults: boolean("takes_consults").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export type CoachPublicRow = typeof coachPublic.$inferSelect;
+
+/**
+ * Consult a trainer: one paid hour on a video call between someone training on their own (solo_id) and the trainer who accepted it.
+ * status: PAYING (at Stripe Checkout) | OPEN (paid by a card hold, waiting for a trainer) | LIVE (accepted, the hour is running) | DONE |
+ * EXPIRED (nobody accepted; the hold was released) | CANCELLED. The money is a card hold on the CoachFlow Stripe account, captured when a
+ * trainer accepts; the trainer's share is sent to their connected Stripe account after `payout_due_at` unless a report holds it.
+ * The question and anything health-related are encrypted.
+ */
+export const consults = pgTable(
+  "consults",
+  {
+    id: text("id").primaryKey(),
+    soloId: text("solo_id").notNull(),
+    trainerId: text("trainer_id"),
+    status: text("status").notNull().default("PAYING"),
+    priceCents: integer("price_cents").notNull(),
+    trainerCents: integer("trainer_cents").notNull(),
+    refundedCents: integer("refunded_cents").notNull().default(0),
+    /** Encrypted JSON: { question, shareHealth }. */
+    dataEnc: text("data_enc").notNull(),
+    checkoutSessionId: text("checkout_session_id"),
+    paymentIntentId: text("payment_intent_id"),
+    acceptBy: timestamp("accept_by", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /** SOLO | TRAINER when one of them ended it before the hour was up. */
+    endedBy: text("ended_by"),
+    roomName: text("room_name"),
+    roomUrl: text("room_url"),
+    soloJoinedAt: timestamp("solo_joined_at", { withTimezone: true }),
+    trainerJoinedAt: timestamp("trainer_joined_at", { withTimezone: true }),
+    /** NONE | HELD | PAID | CANCELLED. */
+    payoutStatus: text("payout_status").notNull().default("NONE"),
+    payoutDueAt: timestamp("payout_due_at", { withTimezone: true }),
+    transferId: text("transfer_id"),
+    stars: integer("stars"),
+    review: text("review"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("consults_status_idx").on(t.status), index("consults_solo_idx").on(t.soloId), index("consults_trainer_idx").on(t.trainerId)],
+);
+export type ConsultRow = typeof consults.$inferSelect;
+
+/** A report about a consult, made by either side. The owner resolves it (refund, payout, warnings). Details are encrypted. */
+export const consultReports = pgTable(
+  "consult_reports",
+  {
+    id: text("id").primaryKey(),
+    consultId: text("consult_id").notNull(),
+    reporterId: text("reporter_id").notNull(),
+    /** SOLO | TRAINER. */
+    reporterRole: text("reporter_role").notNull(),
+    reason: text("reason").notNull(),
+    detailsEnc: text("details_enc").notNull(),
+    /** OPEN | RESOLVED. */
+    status: text("status").notNull().default("OPEN"),
+    /** JSON of what the owner decided: { refund, refundCents, sanction, note }. */
+    resolution: text("resolution"),
+    /** The owner upheld it (any refund or sanction). Counted when advising on later reports. */
+    upheld: boolean("upheld").notNull().default(false),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("consult_reports_status_idx").on(t.status, t.createdAt), index("consult_reports_consult_idx").on(t.consultId)],
+);
+export type ConsultReportRow = typeof consultReports.$inferSelect;
+
+/** People the owner stopped from consults: a trainer suspended from taking them, or a person blocked from asking. One row per person. */
+export const consultBlocks = pgTable("consult_blocks", {
+  userId: text("user_id").primaryKey(),
+  reason: text("reason").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Idempotent DDL applied once per server instance (see db.ts). Mirrors the tables above. */
 export const DDL = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -1855,4 +1945,63 @@ export const DDL = [
     PRIMARY KEY (provider, subject)
   )`,
   `CREATE INDEX IF NOT EXISTS oauth_identities_user_idx ON oauth_identities (user_id)`,
+  `CREATE TABLE IF NOT EXISTS coach_public (
+    coach_id text PRIMARY KEY,
+    is_public boolean NOT NULL DEFAULT true,
+    data text NOT NULL DEFAULT '{}',
+    takes_consults boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS consults (
+    id text PRIMARY KEY,
+    solo_id text NOT NULL,
+    trainer_id text,
+    status text NOT NULL DEFAULT 'PAYING',
+    price_cents integer NOT NULL,
+    trainer_cents integer NOT NULL,
+    refunded_cents integer NOT NULL DEFAULT 0,
+    data_enc text NOT NULL,
+    checkout_session_id text,
+    payment_intent_id text,
+    accept_by timestamptz,
+    accepted_at timestamptz,
+    ends_at timestamptz,
+    ended_at timestamptz,
+    ended_by text,
+    room_name text,
+    room_url text,
+    solo_joined_at timestamptz,
+    trainer_joined_at timestamptz,
+    payout_status text NOT NULL DEFAULT 'NONE',
+    payout_due_at timestamptz,
+    transfer_id text,
+    stars integer,
+    review text,
+    reviewed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS consults_status_idx ON consults (status)`,
+  `CREATE INDEX IF NOT EXISTS consults_solo_idx ON consults (solo_id)`,
+  `CREATE INDEX IF NOT EXISTS consults_trainer_idx ON consults (trainer_id)`,
+  `CREATE TABLE IF NOT EXISTS consult_reports (
+    id text PRIMARY KEY,
+    consult_id text NOT NULL,
+    reporter_id text NOT NULL,
+    reporter_role text NOT NULL,
+    reason text NOT NULL,
+    details_enc text NOT NULL,
+    status text NOT NULL DEFAULT 'OPEN',
+    resolution text,
+    upheld boolean NOT NULL DEFAULT false,
+    resolved_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS consult_reports_status_idx ON consult_reports (status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS consult_reports_consult_idx ON consult_reports (consult_id)`,
+  `CREATE TABLE IF NOT EXISTS consult_blocks (
+    user_id text PRIMARY KEY,
+    reason text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ];

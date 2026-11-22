@@ -13,6 +13,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   { slug: "notifications", title: "Notifications", blurb: "Alerts, quiet hours and email", who: "everyone" },
   { slug: "appearance", title: "Appearance", blurb: "Theme, colours, background and units", who: "everyone" },
   { slug: "coaching", title: "Coaching", blurb: "Niche, gym locations and booking rules", who: "coach" },
+  { slug: "public-page", title: "Public page & consults", blurb: "Your shareable profile, and paid consults", who: "coach" },
   { slug: "payments", title: "Payments", blurb: "Packages, Stripe, PayNow and your records", who: "coach" },
   { slug: "referrals", title: "Invite & earn", blurb: "Invite friends and earn rewards", who: "everyone" },
   { slug: "ai-review", title: "Monthly AI review", blurb: "Help train the AI trainer and get 10% off", who: "coach" },
