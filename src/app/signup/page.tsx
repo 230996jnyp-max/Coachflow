@@ -7,9 +7,9 @@ import { SignupWizard } from "@/components/signup/SignupWizard";
 import { useViewer } from "@/lib/hooks";
 import type { SignupRole } from "@/lib/signupRules";
 
-/** The welcome page can pre-pick a role: ?role=coach, ?role=personal or ?role=client. */
+/** The welcome page can pre-pick a role: ?role=coach, ?role=personal, ?role=client or ?role=gym. */
 function roleFrom(v: string | null): SignupRole | null {
-  return v === "coach" ? "COACH" : v === "personal" ? "PERSONAL" : v === "client" ? "CLIENT" : null;
+  return v === "coach" ? "COACH" : v === "personal" ? "PERSONAL" : v === "client" ? "CLIENT" : v === "gym" ? "GYM" : null;
 }
 
 function Inner() {
