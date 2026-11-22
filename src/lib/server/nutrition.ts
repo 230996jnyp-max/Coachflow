@@ -6,7 +6,7 @@ import { loadClientFor } from "./accounts";
 import { decryptJson, encryptJson } from "./crypto";
 import { db } from "./db";
 import { notify } from "./groups";
-import { badRequest, forbidden, notFound } from "./http";
+import { badRequest, conflict, forbidden, notFound } from "./http";
 import { requireAdult } from "./minors";
 import { nutritionComments, nutritionEntries, nutritionSettings, nutritionTargets, type NutritionEntryRow, type UserRow } from "./schema";
 
@@ -134,10 +134,27 @@ export async function listEntries(clientId: string, from: string, to: string): P
   return rows.map(openEntry).filter((e): e is FoodEntry => e !== null).sort((a, b) => a.day.localeCompare(b.day) || a.loggedAt.localeCompare(b.loggedAt));
 }
 
+/** An id a phone picked for a food it added with no signal (24 hex characters, like the server's own). */
+const OFFLINE_ID = /^fe_[a-f0-9]{24}$/;
+
+/**
+ * Adds one food to the signed-in person's diary. A phone that was offline picks the id itself, so sending the same food twice (the signal
+ * dropped before the answer came back) stores it once: the second call returns the entry already saved.
+ */
 export async function addEntry(me: UserRow, raw: unknown): Promise<FoodEntry> {
-  const id = newId("fe");
+  const given = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).id : undefined;
+  const wanted = typeof given === "string" && OFFLINE_ID.test(given) ? given : null;
+  const id = wanted ?? newId("fe");
   const e = parseEntry(raw, id);
   const d = await db();
+  if (wanted) {
+    const [had] = await d.select().from(nutritionEntries).where(eq(nutritionEntries.id, wanted)).limit(1);
+    if (had) {
+      const saved = had.clientId === me.id ? openEntry(had) : null;
+      if (!saved) throw conflict("That food can't be saved.");
+      return saved;
+    }
+  }
   const [n] = await d.select({ n: sql<number>`count(*)::int` }).from(nutritionEntries).where(and(eq(nutritionEntries.clientId, me.id), eq(nutritionEntries.day, e.day)));
   if ((n?.n ?? 0) >= MAX_ENTRIES_PER_DAY) throw badRequest("That's a lot of foods for one day. Delete some before adding more.");
   await d.insert(nutritionEntries).values({ id, clientId: me.id, day: e.day, dataEnc: encryptJson(e, aadE(id)) });

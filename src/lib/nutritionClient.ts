@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CommonFood } from "./commonFoods";
 import { r0, type Candidate, type DietaryProfile, type Estimate, type EstimatedItem, type FoodComment, type FoodEntry, type MealType, type NutritionTargets, type PackagedFood } from "./nutrition";
+import { diaryOutbox, foodBody, newFoodId, overlayEntries } from "./diaryOutbox";
 import { api } from "./store";
 import { uid } from "./utils";
 
@@ -27,23 +28,47 @@ export function mealForTime(d: Date = new Date()): MealType {
   return h < 10 ? "breakfast" : h < 15 ? "lunch" : h < 21 ? "dinner" : "snack";
 }
 
-/** Loads a range of days (for me, or for one of my clients when I am their coach). Call `reload` after a change. */
+/**
+ * Loads a range of days (for me, or for one of my clients when I am their coach). Call `reload` after a change.
+ * My own diary also shows what is still waiting on this phone to be sent, and with no signal it opens from the days last looked at.
+ */
 export function useDiary(clientId: string | undefined, from: string, to: string) {
   const [tick, setTick] = useState(0);
-  const [state, setState] = useState<{ key: string; bundle: Bundle | null; error: string | null }>({ key: "", bundle: null, error: null });
+  const [state, setState] = useState<{ key: string; bundle: Bundle | null; error: string | null; offline: boolean }>({ key: "", bundle: null, error: null, offline: false });
   const key = `${clientId ?? "me"}|${from}|${to}|${tick}`;
   useEffect(() => {
     let alive = true;
-    void api<Bundle>(`/api/nutrition?from=${from}&to=${to}${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`).then((r) => {
+    void (async () => {
+      const r = await api<Bundle>(`/api/nutrition?from=${from}&to=${to}${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`);
       if (!alive) return;
-      setState((prev) => ({ key, bundle: r.ok && r.data ? r.data : prev.bundle, error: r.ok ? null : (r.error ?? "Couldn't load the food diary.") }));
-    });
+      if (r.ok && r.data) {
+        const data = r.data;
+        const bundle = clientId ? data : { ...data, entries: overlayEntries(data.entries, diaryOutbox.waiting, from, to) };
+        if (!clientId) void diaryOutbox.remember(dayString(), from, to, data);
+        setState({ key, bundle, error: null, offline: false });
+        return;
+      }
+      if (!clientId && r.status === 0) {
+        const kept = await diaryOutbox.recall(from, to);
+        if (!alive) return;
+        if (kept) {
+          setState({ key, bundle: { ...kept, entries: overlayEntries(kept.entries, diaryOutbox.waiting, from, to) }, error: null, offline: true });
+          return;
+        }
+      }
+      setState((prev) => ({ key, bundle: prev.bundle, error: r.error ?? "Couldn't load the food diary.", offline: false }));
+    })();
     return () => {
       alive = false;
     };
   }, [key, clientId, from, to]);
+  // My own diary reloads by itself when waiting foods are sent (or a change is queued).
+  useEffect(() => {
+    if (clientId) return;
+    return diaryOutbox.subscribe(() => setTick((t) => t + 1));
+  }, [clientId]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { bundle: state.bundle, error: state.error, loading: state.key !== key, reload };
+  return { bundle: state.bundle, error: state.error, loading: state.key !== key, reload, offline: state.offline };
 }
 
 /* ---------------- Candidates ---------------- */
@@ -124,42 +149,26 @@ function scaleTo(per100: { kcal: number; protein: number; carbs: number; fat: nu
   return { kcal: Math.round(per100.kcal * f), protein: Math.round(per100.protein * f * 10) / 10, carbs: Math.round(per100.carbs * f * 10) / 10, fat: Math.round(per100.fat * f * 10) / 10 };
 }
 
-/** What the server wants for one food in a diary day. */
-function body(c: Omit<Candidate, "key"> | FoodEntry, day: string, meal: MealType, loggedAt?: string) {
-  return {
-    day,
-    meal,
-    ...(loggedAt ? { loggedAt } : {}),
-    name: c.name,
-    ...(c.brand ? { brand: c.brand } : {}),
-    amountText: c.amountText,
-    ...(c.grams ? { grams: c.grams } : {}),
-    kcal: c.kcal,
-    protein: c.protein,
-    carbs: c.carbs,
-    fat: c.fat,
-    ...(c.per100 ? { per100: c.per100 } : {}),
-    source: c.source,
-    approx: c.approx,
-    ...(c.confidence ? { confidence: c.confidence } : {}),
-    ...(c.contains ? { contains: c.contains } : {}),
-  };
-}
-
 /* ---------------- Saving ---------------- */
 export async function saveCandidates(day: string, meal: MealType, list: Candidate[]): Promise<string | null> {
-  const r = await api("/api/nutrition", { body: { entries: list.map((c) => body(c, day, meal)) } });
-  return r.ok ? null : (r.error ?? "Couldn't save that.");
+  // Each food gets its own id and is kept on the phone first, so with no signal it waits and goes out later (once, even if retried).
+  const loggedAt = new Date().toISOString();
+  for (const c of list) {
+    const entry = { id: newFoodId(), ...foodBody(c, day, meal, loggedAt) } as FoodEntry;
+    const r = await diaryOutbox.submit({ id: entry.id, op: "add", entry });
+    if (r.error) return r.error;
+  }
+  return null;
 }
 
 export async function saveEntry(e: FoodEntry): Promise<string | null> {
-  const r = await api(`/api/nutrition/${e.id}`, { method: "PUT", body: { entry: body(e, e.day, e.meal, e.loggedAt) } });
-  return r.ok ? null : (r.error ?? "Couldn't save that.");
+  const r = await diaryOutbox.submit({ id: e.id, op: "update", entry: e });
+  return r.error;
 }
 
 export async function deleteEntry(id: string): Promise<string | null> {
-  const r = await api(`/api/nutrition/${id}`, { method: "DELETE" });
-  return r.ok ? null : (r.error ?? "Couldn't delete that.");
+  const r = await diaryOutbox.submit({ id, op: "delete" });
+  return r.error;
 }
 
 export async function saveSettings(patch: Partial<DietaryProfile>): Promise<string | null> {

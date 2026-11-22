@@ -1,6 +1,7 @@
 "use client";
 
 import { NicheSeeder, NicheStep } from "@/components/sports/NicheStep";
+import { SyncBanner } from "@/components/SyncBanner";
 import { BillingBar } from "@/components/billing/BillingBar";
 import { BillingGate } from "@/components/billing/BillingGate";
 import { refreshPendingCount, usePendingCoachRequests } from "@/lib/adminPending";
@@ -233,6 +234,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className={cn("pb-28 md:pb-10", slim ? "md:pl-[72px]" : "md:pl-64")}>
         <div className={cn("mx-auto w-full px-4 py-5 md:px-8 md:py-8", pathname.startsWith("/floor/") ? "max-w-7xl" : "max-w-5xl")}>
           {user.trial && !isTrainer && <TrialBar trial={user.trial} />}
+          {!onFloor && <SyncBanner />}
           <BillingBar />
           {isTrainer && !pathname.startsWith("/floor/") && <FloorBanner />}
           {children}

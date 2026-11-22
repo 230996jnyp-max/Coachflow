@@ -4,6 +4,7 @@ import { addDays, format, isToday, isYesterday, parseISO } from "date-fns";
 import { AlertTriangle, ChevronLeft, ChevronRight, MessageSquare, Plus, Settings2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge, Button, Card, Modal, Notice, PageHeader, Segmented } from "@/components/ui";
+import { diaryOutbox } from "@/lib/diaryOutbox";
 import { DAY_RE, dayAdd, daysBack, dietConflicts, DISCLAIMER, MEALS, sumMacros, weekSummary, type DietaryProfile, type FoodEntry, type MealType, type NutritionTargets } from "@/lib/nutrition";
 import { dayString, deleteEntry, saveEntry, saveSettings, useDiary } from "@/lib/nutritionClient";
 import { cn } from "@/lib/utils";
@@ -117,7 +118,7 @@ export function NutritionPage() {
   const today = dayString();
   const to = day > today ? day : today;
   const from = dayAdd(to, -29);
-  const { bundle, error, loading, reload } = useDiary(undefined, from, to);
+  const { bundle, error, loading, reload, offline } = useDiary(undefined, from, to);
   const [adding, setAdding] = useState<MealType | null>(null);
   const [editing, setEditing] = useState<FoodEntry | null>(null);
   const [settings, setSettings] = useState(false);
@@ -137,6 +138,7 @@ export function NutritionPage() {
   const week = weekSummary(entries, daysBack(day, 7), targets);
   const maxKcal = Math.max(targets ? targets.kcal * 1.25 : 0, ...week.days.map((d) => d.kcal), 1);
   const dayComments = comments.filter((c) => c.day === day);
+  const waiting = diaryOutbox.pendingIds();
   const left = targets ? targets.kcal - total.kcal : null;
 
   return (
@@ -163,6 +165,8 @@ export function NutritionPage() {
           <ChevronRight size={20} />
         </button>
       </div>
+
+      {offline && <p className="rounded-xl border border-line bg-field px-3 py-2 text-xs text-muted">No signal. This is the diary as you last saw it; foods you add are kept on this phone and sent when you are back online.</p>}
 
       <Card className="space-y-4 p-4">
         <div className="flex items-end justify-between gap-3">
@@ -249,6 +253,7 @@ export function NutritionPage() {
                           <span className="truncate text-sm font-semibold">{e.name}</span>
                           {warn && <AlertTriangle size={14} className="shrink-0 text-danger" aria-label="Doesn’t fit your diet or allergies" />}
                           {e.approx && <Badge className="border-pr/30 bg-pr/10 text-pr">approx.</Badge>}
+                          {waiting.has(e.id) && <Badge className="border-accent/30 bg-accent/10 text-accent">waiting to sync</Badge>}
                         </div>
                         <div className="truncate text-xs text-muted">
                           {e.amountText || "1 serving"} · P {Math.round(e.protein)} · C {Math.round(e.carbs)} · F {Math.round(e.fat)}
