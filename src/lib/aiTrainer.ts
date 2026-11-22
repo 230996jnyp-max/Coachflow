@@ -100,22 +100,25 @@ export interface FilterContext {
   rules: CoachRule[];
 }
 
-const IMPACT = /jump|plyo|burpee|sprint|bounce|\bhop\b|skip|box jump|ballistic|kipping|high knees|mountain climber|\brun\b|running/i;
-const OLYMPIC = /clean|snatch|jerk|muscle up/i;
+const IMPACT = /jump|plyo|burpee|sprint|bounce|\bhop\b|skip|box jump|ballistic|kipping|high knees|mountain climber|\brun\b|running|thruster|man ?maker|swing|slam|wall ball|turkish|battle rope/i;
+const OLYMPIC = /clean|snatch|jerk|muscle up|complex/i;
+/** Single-leg and split-stance work that needs good balance: left out of gentle plans. */
+const BALANCE = /single leg (?:romanian|squat|deadlift|hip thrust|calf)|single-leg|bulgarian|split squat|pistol|skater|curtsy|cossack/i;
 const INVERTED = /handstand|headstand|inverted|\bpike\b|decline/i;
 const HEAVY_EQUIPMENT = ["Barbell", "Trap Bar", "Smith Machine", "EZ-Bar"];
-const ADVANCED = /weighted|archer|muscle up|pistol|handstand|dragon|nordic|one arm|deficit|snatch|clean|jerk|toes to bar|windshield|sissy|ring |explosive|plyo/i;
+const ADVANCED = /weighted|archer|muscle up|pistol|handstand|dragon|nordic|one arm|deficit|snatch|clean|jerk|toes to bar|windshield|sissy|ring |explosive|plyo|kroc|chest dip|decline push|pike push|single leg hip thrust|man ?maker|dragon flag|l-sit|planche|complex/i;
 
 const TAG_AVOID: Record<string, RegExp> = {
   heart: /\bhang\b|dead hang|isometric|wall sit|plank/i,
+  meds: /dead hang|isometric|wall sit|hollow hold|plank/i,
   chest: /\bhang\b|dead hang|isometric|wall sit/i,
   dizzy: /handstand|headstand|inverted|\bpike\b|decline|\bspin|jump|balance|pistol|single leg/i,
   joints: /pistol|sissy|nordic|deep|overhead|behind the neck|upright row/i,
   recent: /pistol|sissy|nordic|overhead|behind the neck|upright row/i,
-  pregnant: /lying|supine|crunch|sit up|sit-up|v-up|hollow|leg raise|dead bug|bench press|pullover|plank|mountain|hanging|flat|decline|skull|russian twist|oblique|bicycle|windshield|superman|prone|back extension/i,
-  knee: /jump|lunge|pistol|sissy|squat|leg extension|leg press|step up|step-up|wall sit|nordic|hack|bounce|box|sled|stair/i,
-  shoulder: /overhead|shoulder press|military|handstand|pike|upright|behind the neck|dip|push press|snatch|jerk|arnold|pullover|dumbbell fly|chest fly|\bfly\b|hang|pull up|chin up|muscle up/i,
-  back: /deadlift|good morning|bent over|barbell row|hyperextension|back extension|superman|sit up|sit-up|crunch|v-up|twist|rack pull|clean|snatch|barbell squat|jefferson|toes to bar|hanging leg|windshield|dragon|\bwood chop/i,
+  pregnant: /lying|supine|crunch|sit up|sit-up|v-up|hollow|leg raise|dead bug|bench press|pullover|plank|mountain|hanging|flat|decline|skull|russian twist|oblique|bicycle|windshield|superman|prone|back extension|hip thrust|glute bridge|frog pump|chest fly|dumbbell fly|\bfly\b|dumbbell press|bench|glute ham|ghr|thruster/i,
+  knee: /jump|lunge|pistol|sissy|squat|leg extension|leg press|step up|step-up|wall sit|nordic|hack|bounce|box|sled|stair|thruster|wall ball|burpee|sumo|crawl/i,
+  shoulder: /overhead|shoulder press|military|handstand|pike|upright|behind the neck|dip|push press|snatch|jerk|arnold|pullover|dumbbell fly|chest fly|\bfly\b|hang|pull up|chin up|muscle up|thruster|turkish|clean and press|kettlebell press|man ?maker|landmine|complex/i,
+  back: /deadlift|good morning|bent over|barbell row|hyperextension|back extension|superman|sit up|sit-up|crunch|v-up|twist|rack pull|clean|snatch|barbell squat|jefferson|toes to bar|hanging leg|windshield|dragon|\bwood chop|swing|thruster|burpee|dumbbell snatch|kroc|man ?maker|complex/i,
   hip: /sumo|lunge|pistol|split squat|hip abduction|hip adduction|bulgarian|cossack|deep/i,
   wrist: /push up|push-up|handstand|pike|plank|dip|bear crawl|mountain|front squat|clean|snatch|farmer|barbell curl|wrist/i,
   ankle: /jump|calf|skip|rope|lunge|pistol|bounce|box|sprint|hop|step up|stair|sled/i,
@@ -131,7 +134,10 @@ export function hazardFor(ex: Pick<Exercise, "id" | "name" | "primary" | "equipm
     if (INVERTED.test(name)) return "upside-down or head-down position";
     if (HEAVY_EQUIPMENT.includes(ex.equipment)) return "heavy barbell or bar lifts need supervision";
     if (ADVANCED.test(name)) return "advanced move";
+    if (BALANCE.test(name)) return "balance-heavy single-leg work";
   }
+  // A beginner is not given advanced moves, whether or not the plan is gentle.
+  if (!ctx.gentle && ctx.tags.includes("beginner") && ADVANCED.test(name)) return "too advanced for a beginner";
   for (const tag of ctx.tags) {
     const re = TAG_AVOID[tag];
     if (re && re.test(name)) return `not usually suitable with ${tag === "joints" ? "a joint problem" : tag}`;
@@ -377,8 +383,11 @@ export function sanitizePlan(raw: unknown, allowed: Exercise[], opts: { gentle: 
         exercises.push({ exerciseId: lib.id, sets: 1, repMin: 0, repMax: 0, durationSec: num(x.durationSec, 60, opts.gentle ? 1200 : 2400, 600) });
         continue;
       }
-      const repMin = num(x.repMin, 3, 30, 10);
-      const repMax = Math.max(repMin, num(x.repMax, 3, 30, repMin + 2));
+      let repMin = num(x.repMin, 3, 30, 10);
+      let repMax = Math.max(repMin, num(x.repMax, 3, 30, repMin + 2));
+      // The AI sometimes gives core work or a range like 3-3: core moves get a normal 10-15 and a range always has some room.
+      if ((lib.primary === "Abdominals" || lib.primary === "Obliques") && repMax < 10) [repMin, repMax] = [10, 15];
+      else if (repMax === repMin && repMin < 8) repMax = repMin + 2;
       const note = typeof x.note === "string" ? x.note.replace(/\s+/g, " ").trim().slice(0, 140) : "";
       exercises.push({
         exerciseId: lib.id,

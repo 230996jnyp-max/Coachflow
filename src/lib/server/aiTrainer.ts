@@ -31,7 +31,7 @@ import { logAiUsage } from "./aiLog";
 import { refundAiQuota, takeAiQuota } from "./aiQuota";
 import { decryptJson, encryptJson } from "./crypto";
 import { db, isLocalTestMode } from "./db";
-import { badRequest, forbidden } from "./http";
+import { badRequest, forbidden, HttpError } from "./http";
 import { aiRules, aiTrainerPlans, aiTrainerProfiles, type UserRow } from "./schema";
 import { recentDoneWorkouts } from "./training";
 
@@ -217,13 +217,19 @@ const SYSTEM = `You are a careful, friendly personal trainer writing ONE WEEK of
 Return ONLY one JSON object, no commentary:
 {"summary":"<one friendly sentence, max 30 words, no medical claims>","days":[{"name":"<e.g. Day 1: Upper body>","focus":"<short>","exercises":[{"name":"<exact name from AVAILABLE>","sets":<1-5>,"repMin":<number>,"repMax":<number>,"durationSec":<only for timed drills>,"note":"<optional one short cue, max 12 words>"}]}]}
 
-Make exactly the requested number of workouts, 5 to 7 exercises each, in a sensible order (big movements first, then smaller ones, core or cardio last). Keep sets and reps appropriate for the goal and experience. If the person is "gentle", keep it modest (2-3 sets, 10-15 reps, easy effort). Never give medical advice, never diagnose, never mention health conditions in the text. Follow the COACH RULES exactly. If last week went badly (low completion or high pain), make this week easier; if it went well, add a little.`;
+Make exactly the requested number of workouts, 5 to 7 exercises each. Every exercise that is not timed needs repMin and repMax that differ (for example 8 and 12; core moves 10 and 15), in a sensible order (big movements first, then smaller ones, core or cardio last). Keep sets and reps appropriate for the goal and experience. If the person is "gentle", keep it modest (2-3 sets, 10-15 reps, easy effort). Never give medical advice, never diagnose, never mention health conditions in the text. Follow the COACH RULES exactly. If last week went badly (low completion or high pain), make this week easier; if it went well, add a little.`;
 
 async function aiPlan(input: { profile: TrainerProfile; gentle: boolean; tags: string[]; allowed: ReturnType<typeof allowedLibrary>; rules: CoachRule[]; facts: string; weekStart: string; volumeMod: number }): Promise<TrainerPlan | null> {
   const sessions = sessionsPerWeek(input.profile.goals);
   const g = input.profile.goals;
   // The model sees a short list (not the whole library) so the answer stays small and every name is one it may use.
-  const names = input.allowed.map((e) => `${e.name} [${e.primary}${e.type.startsWith("DURATION") ? ", timed" : ""}]`);
+  // Grouped by muscle (one line each) so the request stays small: the free AI allowance is counted in tokens per minute.
+  const groups = new Map<string, string[]>();
+  for (const e of input.allowed) {
+    const key = e.type.startsWith("DURATION") ? `${e.primary} (timed)` : e.primary;
+    groups.set(key, [...(groups.get(key) ?? []), e.name]);
+  }
+  const names = [...groups].map(([key, list]) => `${key}: ${list.join(" | ")}`);
   const content = await groq(
     {
       model: TEXT_MODEL,
@@ -259,9 +265,15 @@ async function aiPlan(input: { profile: TrainerProfile; gentle: boolean; tags: s
   try {
     parsed = jsonFrom(content);
   } catch {
+    console.warn("AI trainer: the AI answer could not be read as JSON");
     return null;
   }
-  return sanitizePlan(parsed, input.allowed, { gentle: input.gentle, weekStart: input.weekStart, days: g.days, sessions });
+  const plan = sanitizePlan(parsed, input.allowed, { gentle: input.gentle, weekStart: input.weekStart, days: g.days, sessions });
+  if (!plan) {
+    const named = ((parsed as { days?: { exercises?: { name?: unknown }[] }[] })?.days ?? []).flatMap((d) => (d?.exercises ?? []).map((e) => String(e?.name ?? ""))).slice(0, 14).join(" | ");
+    console.warn(`AI trainer: no usable workouts in the AI answer (allowed exercises: ${input.allowed.length}, asked for ${sessions}); it named: ${named}`);
+  }
+  return plan;
 }
 
 export function templatesFor(userId: string, plan: TrainerPlan): RoutineTemplate[] {
@@ -303,7 +315,16 @@ export async function buildPlan(me: UserRow, opts: { rebuild?: boolean } = {}): 
   if (aiOn()) {
     try {
       await takeAiQuota(me.id, "ai_trainer", AI_PLANS_PER_DAY, "AI plans");
-      plan = await aiPlan({ profile: s.profile, gentle: sc.gentle, tags, allowed, rules, facts: facts.text, weekStart, volumeMod });
+      const input = { profile: s.profile, gentle: sc.gentle, tags, allowed, rules, facts: facts.text, weekStart, volumeMod };
+      try {
+        plan = await aiPlan(input);
+      } catch (first) {
+        // A busy moment on the free AI service passes quickly: one more try after a short wait before using the rule-built plan.
+        // Not after a timeout (504): that already used most of the time this request is allowed.
+        if (!(first instanceof HttpError) || ![429, 502, 503].includes(first.status)) throw first;
+        await new Promise((r) => setTimeout(r, 4000));
+        plan = await aiPlan(input);
+      }
       if (plan) await logAiUsage({ userId: me.id, feature: "ai_trainer" });
       else await refundAiQuota(me.id, "ai_trainer");
     } catch (e) {
