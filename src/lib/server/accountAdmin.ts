@@ -15,6 +15,7 @@ import { purgeClientGroups } from "./groups";
 import { deleteGymEverything } from "./gymOrg";
 import { escapeHtml, layout, sendMail, type MailResult } from "./mail";
 import { purgeClientNutrition } from "./nutrition";
+import { assertCanDelete, purgeExtras, releaseStripe } from "./accountPurge";
 import { sendVerificationFor } from "./signup";
 import { purgeClientTraining } from "./training";
 import { purgeClientTalk } from "./workoutTalk";
@@ -216,6 +217,8 @@ async function purgeCoach(id: string): Promise<void> {
 
 export async function purgeAccount(row: UserRow): Promise<void> {
   const d = await db();
+  await assertCanDelete(row);
+  await releaseStripe(row);
   // A coach who runs a gym takes the gym with them (its other coaches become independent); a member just leaves it.
   for (const g of await d.select({ id: gymOrgs.id }).from(gymOrgs).where(eq(gymOrgs.ownerId, row.id))) await deleteGymEverything(g.id);
   await d.delete(gymMembers).where(eq(gymMembers.userId, row.id));
@@ -228,6 +231,7 @@ export async function purgeAccount(row: UserRow): Promise<void> {
   await d.delete(oauthIdentities).where(eq(oauthIdentities.userId, row.id));
   await d.delete(userMedia).where(eq(userMedia.userId, row.id));
   await d.delete(aiUsage).where(eq(aiUsage.userId, row.id));
+  await purgeExtras(row);
   await d.delete(users).where(eq(users.id, row.id));
 }
 
@@ -286,7 +290,7 @@ export async function applyAccountAction(actor: UserRow, targetId: string, actio
   return { ok: true, action, email: mail ? { status: mail.status, to: mail.to, error: mail.error } : { status: "skipped" } };
 }
 
-async function listOne(row: UserRow): Promise<{ name: string; email: string } | null> {
+export async function listOne(row: UserRow): Promise<{ name: string; email: string } | null> {
   try {
     if (row.role === "CLIENT") {
       const p = openProfile(row);

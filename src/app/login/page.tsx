@@ -29,6 +29,7 @@ export default function LoginPage() {
   const [idleNotice, setIdleNotice] = useState(false);
   // Coming back from "Continue with Google / Facebook / Microsoft" without being signed in: say why.
   const [socialNote, setSocialNote] = useState<ReturnType<typeof socialMessage>>(null);
+  const [deletedNote, setDeletedNote] = useState(false);
   const [unverified, setUnverified] = useState(false);
   const [resent, setResent] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -61,6 +62,7 @@ export default function LoginPage() {
       if (takeIdleNotice()) setIdleNotice(true);
       const q = new URLSearchParams(window.location.search);
       setSocialNote(socialMessage(q.get("social"), q.get("provider")));
+      if (q.get("deleted") === "1") setDeletedNote(true);
     });
   }, [ready, user]);
 
@@ -98,6 +100,11 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-muted">Train. Track. Book. Your coaching, in your pocket.</p>
         </div>
 
+        {deletedNote && (
+          <div className="mb-4">
+            <Notice tone="success">Your account has been deleted. We are sorry to see you go.</Notice>
+          </div>
+        )}
         {socialNote && (
           <div className="mb-4">
             <Notice tone={socialNote.tone}>{socialNote.text}</Notice>

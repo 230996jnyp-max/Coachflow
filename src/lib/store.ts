@@ -1034,6 +1034,15 @@ export async function logout(opts: { idle?: boolean } = {}) {
   setState({ ready: true, db: createEmptyDB(), sessionUserId: null });
 }
 
+/** After the server erased this account: sign out, and wipe everything kept on this device for that person (unsent changes, the offline copy). */
+export async function afterAccountDeleted(): Promise<void> {
+  const me = state.sessionUserId;
+  await logout();
+  if (!me) return;
+  await del(outboxKey(me)).catch(() => undefined);
+  await forgetOfflineCopy(me).catch(() => undefined);
+}
+
 /** Changes the signed-in person's own username (coaches may also keep signing in with their email). Returns an error message or null. */
 export async function changeUsername(username: string): Promise<string | null> {
   const r = await api<{ username?: string }>("/api/me", { method: "PATCH", body: { username } });

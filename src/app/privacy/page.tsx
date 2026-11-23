@@ -43,7 +43,7 @@ export default function PrivacyPage() {
       </section>
       <section>
         <h2>6. Keeping and deleting</h2>
-        <p>We keep your information while your account is open. A coach who deletes a client also deletes that client&apos;s training and food data. You can ask us to delete your account and data at any time.</p>
+        <p>We keep your information while your account is open. A coach who deletes a client also deletes that client&apos;s training and food data. You can delete your account and data yourself at any time, in Settings, Profile, Delete account (or on the <a href="/delete-account" className="underline">delete account page</a>), or ask us to.</p>
       </section>
       <section>
         <h2>7. Your rights</h2>

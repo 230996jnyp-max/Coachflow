@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CreditHistory } from "@/components/attendance/CreditHistory";
 import { ConnectedSignIn } from "./ConnectedSignIn";
+import { DeleteAccount } from "./DeleteAccount";
 import { GymAffiliation } from "@/components/gym/GymAffiliation";
 import { HaveACoachCard } from "@/components/coachlink/CoachLink";
 import { FormPreviewModal, FormsPreviewRows } from "@/components/intake/FormsPreview";
@@ -74,6 +75,11 @@ export function ProfileSection() {
         </Link>
         <ConnectedSignIn />
       </Block>
+      {!user.isOwner && (
+        <Block title="Delete account" hint="Erase your account and everything stored in it, for good.">
+          <DeleteAccount />
+        </Block>
+      )}
       {!isTrainer && !isPersonal && (
         <Block title="Home address">
           <HomeAddressField clientId={user.id} label="Home address (for sessions at home)" hint="Your coach travels here when a session is at home. Only you and your coach can see it." />
