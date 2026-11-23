@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isIosApp } from "@/lib/nativeApp";
 import { api } from "@/lib/store";
 
 export interface SocialProviderInfo {
@@ -13,6 +14,7 @@ export function useSocialProviders(): SocialProviderInfo[] {
   const [providers, setProviders] = useState<SocialProviderInfo[]>([]);
   useEffect(() => {
     let live = true;
+    if (isIosApp()) return; // Apple would then require Sign in with Apple, so the iPhone app signs in with a username and password only
     void api<{ providers: SocialProviderInfo[] }>("/api/auth/social/providers").then((r) => {
       if (live && r.ok && r.data) setProviders(r.data.providers);
     });

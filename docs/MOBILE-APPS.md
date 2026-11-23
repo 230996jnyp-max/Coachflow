@@ -85,3 +85,36 @@ $env:JAVA_HOME = "C:\Program Files\Android\openjdk\jdk-21.0.8"; $env:ANDROID_HOM
 .\gradlew.bat bundleRelease --no-daemon
 # then sign app\build\outputs\bundle\release\app-release.aab with jarsigner and the upload key (see this file's history)
 ```
+
+## iOS (App Store)
+
+**Bundle ID:** `pro.coachflow.app`. The project is in `mobile/ios-wrapper` (Capacitor 8). It opens `https://coachflow.pro` in a native shell, so website releases reach the iPhone app without an App Store update. A new build is only needed when the wrapper itself changes.
+
+**How the app differs from the website (Apple's rules).** The app adds `CoachFlowIOS` to its user agent and the site reads it (`src/lib/nativeApp.ts`):
+
+- No subscription screens, prices or Stripe buttons inside the app (the plan card, the paywall and the gym plan show one neutral line). Apple requires its own in-app purchase for digital subscriptions bought inside an iPhone app, and the rules vary by country, so the app simply doesn't sell. Coach-to-client payments (PayNow and cards for sessions) and video consults are real-world services and stay.
+- The signed-out start page (with prices) is skipped; the app opens on the sign-in screen.
+- No "Continue with Google / Facebook / Microsoft" buttons. Apple would then require "Sign in with Apple" as well, and Google refuses sign-in inside an app's web view. Username and password work as normal.
+- Deleting your account works inside the app (Settings, Profile, Delete account), which Apple requires.
+
+**Know the review risk.** Apple rejects apps that are "just a website" (guideline 4.2). CoachFlow has real app features (offline workout and food logging, camera for progress photos, video consults, bookings), which helps, and the review notes below explain them. If it is rejected for this, the usual fix is adding native push notifications (needs an Apple push key and a small server change). Say the word and it can be built.
+
+### Launching on the App Store (the part only you can do)
+
+1. **Join the Apple Developer Program** (developer.apple.com/programs, US$99 a year). An individual account is fine and takes about a day or two to verify. A company account needs a D-U-N-S number (free, 1 to 2 weeks).
+2. **Register the app:** developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → add an *App ID* with bundle ID `pro.coachflow.app`. Then App Store Connect → Apps → **New App**: iOS, name *CoachFlow*, bundle ID above, any SKU (for example `coachflow`).
+3. **Create an App Store Connect API key:** App Store Connect → Users and Access → Integrations → App Store Connect API → generate a key with *App Manager* access. You download a `.p8` file once. **Keep it private; never paste it in chat.**
+4. **Cloud build (you have no Mac):** create a free account at codemagic.io and connect the GitHub repo. In Codemagic go to Teams → Integrations → App Store Connect, add the key from step 3 and name the integration exactly `CoachFlow App Store Connect`. In `codemagic.yaml` set `APP_STORE_APPLE_ID` to the app's numeric Apple ID (App Store Connect → App Information). Start the `CoachFlow iPhone app` workflow. Codemagic makes the certificates and uploads the build to TestFlight (the free tier has 500 build minutes a month).
+5. **Test** it from TestFlight on a real iPhone (sign in, log a workout, delete a throwaway account).
+6. **Fill in the App Store listing** with the text and screenshots below, then **Submit for Review**.
+
+### Listing and review answers
+
+- **Screenshots:** `C:\Users\leome\coachflow-android\store-assets\ios-screenshots-6.9in` (seven, 1320x2868, the iPhone 6.9-inch size that Apple scales down for smaller phones).
+- **Name:** CoachFlow. **Subtitle (30):** Workouts, bookings, progress. **Category:** Health & Fitness. **Keywords (100):** personal trainer,workout log,gym,fitness,coach,booking,progress,nutrition,client
+- **Description:** use the Play Store full description above (drop the "PayNow or card payments" line if you want the lowest review risk).
+- **Support URL / Privacy policy URL:** https://coachflow.pro and https://coachflow.pro/privacy. **Account deletion:** in-app, plus https://coachflow.pro/delete-account.
+- **Age rating:** answer "Frequent/Intense" none; user-generated content/messaging yes; result about 12+. Set the minimum age to 13.
+- **App Privacy labels:** the same list as the Play "Data safety" section above: contact info, health and fitness, photos, user content (messages), identifiers, purchases (payment history). All "linked to the user", none "used for tracking".
+- **Export compliance:** the app only uses standard HTTPS, so it is exempt (already set in the app).
+- **Notes for the reviewer** (paste into "App Review Information"): *"CoachFlow is a coaching platform for personal trainers and their clients: workout logging (works offline), bookings, progress photos, nutrition diary, coach chat and optional video consults. The app opens our service at coachflow.pro. Sign in with the demo accounts below. Accounts for coaches are created on our website; subscriptions are managed outside the app and nothing is sold inside it."* Add a demo **coach** login and a demo **client** login (create two throwaway accounts with sample data).

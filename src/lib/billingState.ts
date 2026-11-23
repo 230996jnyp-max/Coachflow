@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { BillingInfo } from "./billing";
+import { IOS_PLAN_NOTE, isIosApp } from "./nativeApp";
 import { api } from "./store";
 
 /** The signed-in person's billing (trial badge, paywall, payment warning). Loaded once the app opens and refreshed now and then. */
@@ -23,6 +24,7 @@ export function clearBilling() {
 
 /** Starts Stripe Checkout (subscribe) or the customer portal (manage). Returns an error message, or null after sending the browser away. */
 export async function openStripe(kind: "checkout" | "portal"): Promise<string | null> {
+  if (isIosApp()) return IOS_PLAN_NOTE;
   const r = await api<{ url: string }>(`/api/stripe/${kind}`, { body: {} });
   if (!r.ok || !r.data?.url) return r.error ?? "Couldn't open Stripe. Please try again.";
   window.location.assign(r.data.url);
@@ -31,6 +33,7 @@ export async function openStripe(kind: "checkout" | "portal"): Promise<string | 
 
 /** A gym owner starts Stripe Checkout (subscribe) or the customer portal (manage the card) for the gym. Returns an error message, or null after sending the browser away. */
 export async function openGymStripe(kind: "checkout" | "portal"): Promise<string | null> {
+  if (isIosApp()) return IOS_PLAN_NOTE;
   const r = await api<{ url: string }>("/api/gym/billing", { body: { action: kind } });
   if (!r.ok || !r.data?.url) return r.error ?? "Couldn't open Stripe. Please try again.";
   window.location.assign(r.data.url);

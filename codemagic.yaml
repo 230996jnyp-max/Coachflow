@@ -1,0 +1,43 @@
+# Builds the CoachFlow iPhone app on a cloud Mac (Codemagic) and sends it to TestFlight / App Store Connect.
+# One-time setup is in docs/MOBILE-APPS.md (Apple Developer account, App Store Connect API key added in Codemagic under Teams > Integrations).
+workflows:
+  ios-app:
+    name: CoachFlow iPhone app
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    integrations:
+      app_store_connect: CoachFlow App Store Connect
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: pro.coachflow.app
+      vars:
+        BUNDLE_ID: pro.coachflow.app
+        APP_STORE_APPLE_ID: "" # fill in with the numeric Apple ID of the app shown in App Store Connect (App Information)
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Install the wrapper
+        script: |
+          cd mobile/ios-wrapper
+          npm ci
+          npx cap sync ios
+      - name: Number this build
+        script: |
+          cd mobile/ios-wrapper/ios/App
+          LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          NEXT=$(( ${LATEST:-0} + 1 ))
+          agvtool new-version -all $NEXT
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build the app
+        script: |
+          cd mobile/ios-wrapper/ios/App
+          xcode-project build-ipa --workspace App.xcodeproj/project.xcworkspace --scheme App
+    artifacts:
+      - mobile/ios-wrapper/ios/App/build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false

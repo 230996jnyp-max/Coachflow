@@ -7,6 +7,7 @@ import { Badge, Button, Card, Notice, Textarea } from "@/components/ui";
 import { sgd } from "@/lib/billing";
 import { planLabel } from "@/lib/gymBilling";
 import { openGymStripe } from "@/lib/billingState";
+import { IOS_PLAN_NOTE, useIosApp } from "@/lib/nativeApp";
 import { api } from "@/lib/store";
 
 interface PlanView {
@@ -40,7 +41,7 @@ const TONE: Record<PlanView["status"], string> = {
 };
 
 /** The gym owner's billing: the free month, the flat price, subscribing, the card, a failed payment, and asking for a custom price. */
-export function GymBilling() {
+function GymBillingInner() {
   const [v, setV] = useState<PlanView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -178,4 +179,10 @@ export function GymBilling() {
       )}
     </div>
   );
+}
+
+/** The gym's plan: price, trial, card. The iPhone app shows none of it (Apple's rules), only a plain note. */
+export function GymBilling() {
+  const ios = useIosApp();
+  return ios ? <Notice tone="info">{IOS_PLAN_NOTE}</Notice> : <GymBillingInner />;
 }

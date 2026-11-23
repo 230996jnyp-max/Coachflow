@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Notice } from "@/components/ui";
 import { sgd, TIERS, type BillingStatus } from "@/lib/billing";
 import { openStripe, useBilling } from "@/lib/billingState";
+import { IOS_PLAN_NOTE, useIosApp } from "@/lib/nativeApp";
 
 const LABEL: Record<BillingStatus, { text: string; cls: string }> = {
   LIFETIME_FREE: { text: "Lifetime free", cls: "border-success/30 bg-success/15 text-success" },
@@ -19,10 +20,12 @@ const LABEL: Record<BillingStatus, { text: string; cls: string }> = {
 /** Settings > Subscription & billing: plan, price for today's roster, renewal, and the Stripe buttons. Coach only. */
 export function BillingCard() {
   const b = useBilling();
+  const ios = useIosApp();
   const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showTiers, setShowTiers] = useState(false);
   if (!b || b.role !== "COACH") return null;
+  if (ios) return <Notice tone="info">{IOS_PLAN_NOTE}</Notice>;
   const label = LABEL[b.status];
   const gst = b.gst ? " + GST" : "";
 
