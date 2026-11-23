@@ -5,6 +5,8 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "CoachFlow — PT Tracker & Booking",
     short_name: "CoachFlow",
     description: "Workout tracker, client progress and session booking for personal training.",
+    id: "/",
+    lang: "en-SG",
     start_url: "/",
     scope: "/",
     display: "standalone",

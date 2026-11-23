@@ -1,0 +1,62 @@
+{
+    "packageId":  "pro.coachflow.app",
+    "host":  "coachflow.pro",
+    "name":  "CoachFlow",
+    "launcherName":  "CoachFlow",
+    "display":  "standalone",
+    "themeColor":  "#090B10",
+    "themeColorDark":  "#090B10",
+    "navigationColor":  "#090B10",
+    "navigationColorDark":  "#090B10",
+    "navigationDividerColor":  "#090B10",
+    "navigationDividerColorDark":  "#090B10",
+    "backgroundColor":  "#090B10",
+    "enableNotifications":  true,
+    "startUrl":  "/",
+    "iconUrl":  "https://coachflow.pro/pwa-icon/512",
+    "maskableIconUrl":  "https://coachflow.pro/pwa-icon/512?maskable=1",
+    "appVersion":  "1.0.0",
+    "appVersionCode":  1,
+    "signingKey":  {
+                       "path":  "./android.keystore",
+                       "alias":  "coachflow"
+                   },
+    "splashScreenFadeOutDuration":  300,
+    "fallbackType":  "customtabs",
+    "orientation":  "portrait",
+    "webManifestUrl":  "https://coachflow.pro/manifest.webmanifest",
+    "fullScopeUrl":  "https://coachflow.pro/",
+    "generatorApp":  "bubblewrap-cli",
+    "isChromeOSOnly":  false,
+    "isMetaQuest":  false,
+    "enableSiteSettingsShortcut":  true,
+    "shortcuts":  [
+                      {
+                          "name":  "Start workout",
+                          "shortName":  "Workout",
+                          "url":  "/workout",
+                          "chosenIconUrl":  "https://coachflow.pro/pwa-icon/192"
+                      },
+                      {
+                          "name":  "Book a session",
+                          "shortName":  "Book",
+                          "url":  "/book",
+                          "chosenIconUrl":  "https://coachflow.pro/pwa-icon/192"
+                      }
+                  ],
+    "minSdkVersion":  21,
+    "features":  {
+
+                 },
+    "alphaDependencies":  {
+                              "enabled":  false
+                          },
+    "retainedBundles":  [
+
+                        ],
+    "additionalTrustedOrigins":  [
+
+                                 ],
+    "appVersionName":  "1.0.0"
+}
+
